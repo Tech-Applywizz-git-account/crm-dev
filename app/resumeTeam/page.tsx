@@ -28,6 +28,8 @@ import {
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { useAuth } from "@/components/providers/auth-provider";
+import { PrefetchCacheEntryStatus } from "next/dist/client/components/router-reducer/router-reducer-types";
+import path from "path";
 
 /* =========================
    Types & Labels
@@ -1118,11 +1120,6 @@ if (!validateEmail(obPersonalEmail)) {
     if (file.size > 20 * 1024 * 1024) throw new Error("Max file size is 20MB.");
   };
 
-  const ensurePdfFilename = (name: string) => {
-  const cleaned = cleanName(name);
-  return /\.pdf$/i.test(cleaned) ? cleaned : `${cleaned}.pdf`;
-};
-
 
   const cleanName = (name: string) => name.replace(/[^\w.\-]+/g, "_");
 
@@ -1137,23 +1134,49 @@ if (!validateEmail(obPersonalEmail)) {
 const uploadOrReplaceResume = async (leadId: string, file: File, previousPath?: string | null) => {
   ensurePdf(file);
 
-  const fileName = ensurePdfFilename(file.name);
-  const path = `${leadId}/${fileName}`.replace(/^\/+/, "");
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("lead_id", leadId);
 
-  const up = await supabase.storage.from(BUCKET).upload(path, file, {
-    cacheControl: "3600",
-    upsert: true,
-    contentType: "application/pdf",
+  const path = await supabase
+  .from("resume_progress")
+  .select("pdf_path")
+  .eq("lead_id", leadId)
+  .maybeSingle();
+
+  if(path.data?.pdf_path){
+    if(path.data.pdf_path.startsWith("CRM")){
+      const del = await fetch("/api/resumes/delete", {
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+        body: JSON.stringify({ key: path.data.pdf_path}),
+      });
+      if (!del.ok) {
+        const errData = await del.json().catch(() => ({}));
+        throw new Error(
+          errData?.error || `Failed to delete past CRM resume: ${del.status}`
+        );
+      }
+    }
+    else{
+      const del = await supabase.storage.from(BUCKET).remove([path.data.pdf_path]);
+      if (del.error) console.warn("STORAGE REMOVE WARNING:", del.error);
+    }
+  }
+
+  const res = await fetch("/api/resumes/upload", {
+    method: "POST",
+    body: formData,
   });
-  if (up.error) {
-    console.error("STORAGE UPLOAD ERROR:", up.error);
-    throw new Error(up.error.message || "Upload to Storage failed");
+
+  const data = await res.json();
+
+  if (!res.ok) {
+    console.error("Upload failed:", data);
+    throw new Error(data.error || "Upload failed");
   }
 
-  if (previousPath && previousPath !== path) {
-    const del = await supabase.storage.from(BUCKET).remove([previousPath]);
-    if (del.error) console.warn("STORAGE REMOVE WARNING:", del.error);
-  }
+  console.log("✅ Uploaded to backend → S3:", data);
 
   const db = await supabase
     .from("resume_progress")
@@ -1161,7 +1184,7 @@ const uploadOrReplaceResume = async (leadId: string, file: File, previousPath?: 
       {
         lead_id: leadId,
         status: "completed",
-        pdf_path: path,
+        pdf_path: data.key,
         pdf_uploaded_at: new Date().toISOString(),
       },
       { onConflict: "lead_id" }
@@ -1171,36 +1194,59 @@ const uploadOrReplaceResume = async (leadId: string, file: File, previousPath?: 
     throw new Error(db.error.message || "DB upsert failed");
   }
 
-  const publicUrl = supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
-  return { path, publicUrl };
+  return { key: data.key, publicUrl: data.publicUrl };
 };
 
 
 
 const downloadResume = async (path: string) => {
   try {
-    const segments = (path || "").split("/");
-    const fileName = segments[segments.length - 1] || "resume.pdf";
+    if(path.startsWith("CRM")){
+    const base = "https://applywizz-dev.s3.us-east-2.amazonaws.com";
+     // Combine base + path to form full URL
+    const fileUrl = `${base}/${path}`;
 
-    const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, 60 * 60);
-    if (error) throw error;
-    if (!data?.signedUrl) throw new Error("No signed URL");
+    // Create a hidden link and trigger click (forces download)
+     // fetch the file data and create a Blob URL so browser downloads it
+    const response = await fetch(fileUrl);
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
 
-    const res = await fetch(data.signedUrl);
-    if (!res.ok) throw new Error(`Download failed (${res.status})`);
-    const blob = await res.blob();
-    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = path.split("/").pop() || "resume.pdf"; // force download
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 
-    const a = document.createElement("a");
-    a.href = objectUrl;
-    a.download = fileName; 
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(objectUrl);
+    // cleanup
+    window.URL.revokeObjectURL(url);
+    }
+    else{
+      const segments = (path || "").split("/");
+      const fileName = segments[segments.length - 1] || "resume.pdf";
+
+      const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, 60 * 60);
+      if (error) throw error;
+      if (!data?.signedUrl) throw new Error("No signed URL");
+
+      const res = await fetch(data.signedUrl);
+      if (!res.ok) throw new Error(`Download failed (${res.status})`);
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = fileName; 
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(objectUrl);
+    }
   } catch (e: any) {
     alert(e?.message || "Could not download PDF");
   }
+  
 };
 
 
@@ -1441,8 +1487,6 @@ badge_value: r.badge_value ?? null,
     fileRef.current?.click();
   };
 
-  
-
 
   const onFilePicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
   const file = e.target.files?.[0] || null;
@@ -1479,237 +1523,6 @@ badge_value: r.badge_value ?? null,
     }
   }
 };
-
-
-// const fetchFilteredClients = async (mode: "notOnboarded" | "resumeOnly") => {
-//   try {
-//     await fetchData({ mode }); // reuses your existing function
-//     // fetchData updates setRows internally, so we return latest rows
-//     // but to isolate, we refetch merged data directly
-//     let merged: SalesClosure[] = [];
-//     const { data: rows, error } = await supabase
-//       .from("sales_closure")
-//       .select("*")
-//       .order("closed_at", { ascending: false });
-
-//     if (error) throw error;
-//     if (!rows) return [];
-
-//     if (mode === "notOnboarded") {
-//       merged = rows.filter(r => !r.onboarded_date);
-//     } else if (mode === "resumeOnly") {
-//       merged = rows.filter(
-//         r =>
-//           Number(r.resume_sale_value ?? 0) > 0 &&
-//           (r.application_sale_value === null ||
-//             Number(r.application_sale_value) <= 0)
-//       );
-//     }
-//     return merged;
-//   } catch (e) {
-//     console.error("Error fetching filtered:", e);
-//     return [];
-//   }
-// };
-
-
-// const fetchFilteredClients = async (mode: "notOnboarded" | "resumeOnly") => {
-//   try {
-//     setFilterLoading(true);
-
-//     // Base query — don't touch main rows
-//     let query = supabase
-//       .from("sales_closure")
-//       .select(
-//         "id, lead_id, email, finance_status, closed_at, resume_sale_value, application_sale_value, portfolio_sale_value, commitments, company_application_email, onboarded_date, badge_value"
-//       )
-//       .not("resume_sale_value", "is", null)
-//       .neq("resume_sale_value", 0)
-//       .order("closed_at", { ascending: false });
-
-//     // Apply filters for each mode
-//     if (mode === "notOnboarded") {
-//       // Show clients with onboarded_date IS NULL and application_sale_value > 0
-//       query = query.is("onboarded_date", null).gt("application_sale_value", 0);
-//     } else if (mode === "resumeOnly") {
-//       // Show resume > 0 and application <= 0 or null
-//       query = query
-//         .gt("resume_sale_value", 0)
-//         .or("application_sale_value.is.null,application_sale_value.lte.0");
-//     }
-
-//     const { data: sales, error } = await query;
-//     if (error) throw error;
-//     if (!sales?.length) return [];
-
-//     // 🧩 Next: join leads, resume_progress, and portfolio_progress (same as fetchData)
-//     const leadIds = sales.map((r) => r.lead_id);
-//     const { data: leads } = await supabase
-//       .from("leads")
-//       .select("business_id, name, phone")
-//       .in("business_id", leadIds);
-
-//     const { data: resumeProg } = await supabase
-//       .from("resume_progress")
-//       .select("lead_id, status, pdf_path, assigned_to_email, assigned_to_name")
-//       .in("lead_id", leadIds);
-
-//     const { data: portfolioProg } = await supabase
-//       .from("portfolio_progress")
-//       .select("lead_id, status, assigned_to_email, assigned_to_name, link, portfolio_link")
-//       .in("lead_id", leadIds);
-
-//     const leadMap = new Map((leads ?? []).map((l) => [l.business_id, { name: l.name, phone: l.phone }]));
-//     const rpMap = new Map(
-//       (resumeProg ?? []).map((r) => [
-//         r.lead_id,
-//         {
-//           status: (r.status as ResumeStatus) ?? "not_started",
-//           pdf_path: r.pdf_path ?? null,
-//           assigned_to_email: r.assigned_to_email ?? null,
-//           assigned_to_name: r.assigned_to_name ?? null,
-//         },
-//       ])
-//     );
-//     const ppMap = new Map(
-//       (portfolioProg ?? []).map((p) => [
-//         p.lead_id,
-//         {
-//           status: (p.status as PortfolioStatus) ?? null,
-//           assigned_to_email: p.assigned_to_email ?? null,
-//           assigned_to_name: p.assigned_to_name ?? null,
-//           link: (p.link || p.portfolio_link || null) as string | null,
-//         },
-//       ])
-//     );
-
-//     // Merge results like in fetchData()
-//     const merged: SalesClosure[] = (sales ?? []).map((r) => {
-//       const lead = leadMap.get(r.lead_id) || { name: "-", phone: "-" };
-//       const rp = rpMap.get(r.lead_id) || {
-//         status: "not_started" as ResumeStatus,
-//         pdf_path: null,
-//         assigned_to_email: null,
-//         assigned_to_name: null,
-//       };
-//       const pp = ppMap.get(r.lead_id) || {
-//         status: null as PortfolioStatus | null,
-//         assigned_to_email: null,
-//         assigned_to_name: null,
-//         link: null as string | null,
-//       };
-//       return {
-//         id: r.id,
-//         lead_id: r.lead_id,
-//         email: r.email,
-//         company_application_email: r.company_application_email ?? null,
-//         finance_status: r.finance_status,
-//         closed_at: r.closed_at,
-//         onboarded_date_raw: r.onboarded_date ?? null,
-//         onboarded_date_label: formatOnboardLabel(r.onboarded_date ?? null),
-//         resume_sale_value: r.resume_sale_value ?? null,
-//         commitments: r.commitments ?? null,
-//         badge_value: r.badge_value ?? null,
-//         portfolio_sale_value: r.portfolio_sale_value ?? null,
-//         portfolio_paid: Number(r.portfolio_sale_value ?? 0) > 0,
-//         leads: lead,
-//         rp_status: rp.status,
-//         rp_pdf_path: rp.pdf_path,
-//         assigned_to_email: rp.assigned_to_email,
-//         assigned_to_name: rp.assigned_to_name,
-//         pp_status: pp.status,
-//         pp_assigned_email: pp.assigned_to_email,
-//         pp_assigned_name: pp.assigned_to_name,
-//         pp_link: pp.link,
-//       };
-//     });
-
-//     setFilterRows(merged);
-//     return merged;
-//   } catch (e) {
-//     console.error("Error fetching filtered clients:", e);
-//     setFilterRows([]);
-//     return [];
-//   } finally {
-//     setFilterLoading(false);
-//   }
-// };
-
-
-
-
-// const fetchFilteredClients = async (mode: "notOnboarded" | "resumeOnly") => {
-//   try {
-//     setFilterLoading(true);
-
-//     let query = supabase
-//       .from("sales_closure")
-//       .select(
-//         "id, lead_id, email, finance_status, closed_at, resume_sale_value, application_sale_value, portfolio_sale_value, commitments, company_application_email, onboarded_date, badge_value"
-//       )
-//       .not("resume_sale_value", "is", null)
-//       .neq("resume_sale_value", 0)
-//       .order("closed_at", { ascending: false });
-
-//     // Apply filters based on mode
-//     if (mode === "notOnboarded") {
-//       query = query.is("onboarded_date", null).gt("application_sale_value", 0);
-//     } else if (mode === "resumeOnly") {
-//       query = query
-//         .gt("resume_sale_value", 0)
-//         .or("application_sale_value.is.null,application_sale_value.lte.0");
-//     }
-
-//     const { data: sales, error } = await query;
-//     if (error) throw error;
-
-//     // If no records, return empty
-//     if (!sales?.length) return [];
-
-//     // Merge logic (produce full SalesClosure shape with defaults)
-//     const merged: SalesClosure[] = sales.map((r: any) => {
-//       const onboardRaw: string | null = r.onboarded_date ?? null;
-//       const portfolioPaid = Boolean(Number(r.portfolio_sale_value ?? 0) > 0);
-
-//       return {
-//         id: r.id,
-//         lead_id: r.lead_id,
-//         email: r.email,
-//         company_application_email: r.company_application_email ?? null,
-//         finance_status: (r.finance_status as FinanceStatus) ?? "Unpaid",
-//         closed_at: r.closed_at ?? null,
-//         onboarded_date_raw: onboardRaw,
-//         onboarded_date_label: formatOnboardLabel(onboardRaw),
-//         resume_sale_value: r.resume_sale_value ?? null,
-//         commitments: r.commitments ?? null,
-//         badge_value: r.badge_value ?? null,
-//         portfolio_sale_value: r.portfolio_sale_value ?? null,
-//         portfolio_paid: portfolioPaid,
-//         leads: { name: "-", phone: "-" },
-
-//         // resume_progress defaults (required by SalesClosure)
-//         rp_status: "not_started",
-//         rp_pdf_path: null,
-//         assigned_to_email: null,
-//         assigned_to_name: null,
-
-//         // portfolio_progress defaults
-//         pp_status: null,
-//         pp_assigned_email: null,
-//         pp_assigned_name: null,
-//         pp_link: null,
-//       };
-//     });
-
-//     setFilterRows(merged);
-//     return merged;
-//   } catch (e) {
-//     console.error("Error fetching filtered clients:", e);
-//     return [];
-//   } finally {
-//     setFilterLoading(false);
-//   }
-// };
 
 
 const fetchFilteredClients = async (mode: "notOnboarded" | "resumeOnly") => {
@@ -2193,7 +2006,6 @@ const fetchFilteredClients = async (mode: "notOnboarded" | "resumeOnly") => {
     <ProtectedRoute allowedRoles={["Super Admin", "Resume Head", "Resume Associate"]}>
       <DashboardLayout>
               <input ref={fileRef} type="file" accept="application/pdf" className="hidden" onChange={onFilePicked} />
-
         <div className="space-y-6">
           {/* <div className="flex items-center justify-between">
             <h1 className="text-3xl font-bold text-gray-900">Resume Page</h1>

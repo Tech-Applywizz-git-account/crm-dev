@@ -1,33 +1,58 @@
-// import { NextRequest, NextResponse } from "next/server";
-// import { createClient } from "@supabase/supabase-js";
+import { NextRequest, NextResponse } from "next/server";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 
-// // force Node runtime so envs are available
-// export const runtime = "nodejs";
-// const BUCKET = "resumes";
+const s3 = new S3Client({
+  region: process.env.AWS_REGION!,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+  },
+});
 
-// const supabase = createClient(
-//   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-//   process.env.SUPABASE_SERVICE_ROLE_KEY! // bypasses RLS
-// );
+export async function POST(req: NextRequest) {
+  console.log("[UPLOAD] Incoming request...");
 
-// export async function POST(req: NextRequest) {
-//   const form = await req.formData();
-//   const file = form.get("file") as File | null;
-//   const leadId = String(form.get("leadId") ?? "");
-//   if (!file || !leadId) return new NextResponse("Missing file/leadId", { status: 400 });
+  const formData = await req.formData();
+  const file = formData.get("file") as File | null;
 
-//   if (file.type !== "application/pdf") return new NextResponse("PDF only", { status: 400 });
+  if (!file) {
+    console.warn("[UPLOAD] No file received");
+    return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
+  }
 
-//   const clean = file.name.replace(/[^\w.\-]+/g, "_");
-//   const path = `${leadId}/${Date.now()}_${clean}`;
+  const arrayBuffer =
+  typeof (file as any).arrayBuffer === "function"
+    ? await (file as any).arrayBuffer()
+    : Buffer.isBuffer(file)
+    ? file
+    : Buffer.from(await (file as any).text(), "binary");
 
-//   // Upload bytes to Storage
-//   const arrayBuf = await file.arrayBuffer();
-//   const { error } = await supabase.storage.from(BUCKET).upload(path, arrayBuf, {
-//     contentType: "application/pdf",
-//     cacheControl: "3600",
-//   });
-//   if (error) return new NextResponse(error.message, { status: 400 });
+  const buffer = Buffer.from(arrayBuffer);
 
-//   return NextResponse.json({ path });
-// }
+  const key = `CRM/${Date.now()}-${file.name}`;
+  const uploadParams = {
+    Bucket: process.env.AWS_S3_BUCKET!,
+    Key: key,
+    Body: buffer,
+    ContentType: file.type,
+  };
+
+  console.log(`[UPLOAD] Uploading to S3: ${key} (${file.size} bytes)`);
+
+  try {
+    await s3.send(new PutObjectCommand(uploadParams));
+
+    const publicUrl = `https://${process.env.AWS_S3_BUCKET!}.s3.${process.env.AWS_REGION!}.amazonaws.com/${key}`;
+
+    console.log(`[UPLOAD] Success: ${key}`);
+    return NextResponse.json({
+      message: "Uploaded successfully!",
+      key,
+      publicUrl
+    });
+    
+  } catch (err: any) {
+    console.error("[UPLOAD] Failed:", err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
