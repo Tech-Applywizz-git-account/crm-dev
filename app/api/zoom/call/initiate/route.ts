@@ -12,14 +12,26 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
  */
 export async function POST(req: Request) {
   try {
-    const { fromNumber, toNumber, agentZoomId } = await req.json();
+    const body = await req.json();
+    const { fromNumber, toNumber, agentZoomId } = body;
     const from = fromNumber || agentZoomId || ZOOM_CONFIG.phoneNumber;
 
-    if (!toNumber || !from) {
-      return NextResponse.json(
-        { error: 'Missing source (from/agent) or destination (toNumber)' },
-        { status: 400 }
-      );
+    console.log('Call Initiation Request:', { 
+      hasToNumber: !!toNumber, 
+      hasFromNumber: !!fromNumber, 
+      hasAgentId: !!agentZoomId,
+      configPhone: ZOOM_CONFIG.phoneNumber ? 'Set' : 'Missing'
+    });
+
+    if (!toNumber) {
+      return NextResponse.json({ error: 'Missing destination (toNumber)' }, { status: 400 });
+    }
+
+    if (!from) {
+      return NextResponse.json({ 
+        error: 'Missing source phone number. Please ensure ZOOM_PHONE_NUMBER is set in environment variables.',
+        details: 'No fromNumber, agentZoomId, or default ZOOM_PHONE_NUMBER found.'
+      }, { status: 400 });
     }
 
     const token = await getZoomAccessToken();
