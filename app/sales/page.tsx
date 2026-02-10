@@ -3845,7 +3845,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { EditIcon, Eye, Search } from "lucide-react";
+import { EditIcon, Eye, Search, PhoneCall } from "lucide-react";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
@@ -3853,6 +3853,7 @@ dayjs.extend(relativeTime);
 import isBetween from "dayjs/plugin/isBetween";
 import * as XLSX from "xlsx";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 
 
 dayjs.extend(isBetween);
@@ -3999,6 +4000,28 @@ export default function SalesPage() {
   const [endDate, setEndDate] = useState<string | null>(null);
   const [isDateDropdownOpen, setIsDateDropdownOpen] = useState(false);
   const [onboardDialogOpen, setOnboardDialogOpen] = useState(false);
+  const [isCalling, setIsCalling] = useState<string | null>(null);
+
+  const handleInitiateCall = async (phoneNumber: string, leadId: string) => {
+    try {
+      setIsCalling(leadId);
+      const res = await fetch('/api/zoom/call/initiate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ toNumber: phoneNumber }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to initiate call');
+
+      toast.success('Call initiated! Please check your Zoom app.');
+    } catch (error: any) {
+      console.error('Call Error:', error);
+      toast.error(error.message || 'Failed to initiate call');
+    } finally {
+      setIsCalling(null);
+    }
+  };
 
   // Client Info
   const [clientName, setClientName] = useState("");
@@ -4983,7 +5006,19 @@ export default function SalesPage() {
                               </TableCell>
 
                               <TableCell>{item.email}</TableCell>
-                              <TableCell>{item.phone}</TableCell>
+                              <TableCell className="flex items-center gap-2">
+                                {item.phone}
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-8 w-8 text-blue-600 hover:text-blue-800"
+                                  onClick={() => handleInitiateCall(item.phone, item.id)}
+                                  disabled={isCalling !== null}
+                                  title="Initiate Zoom Call"
+                                >
+                                  <PhoneCall className={`h-4 w-4 ${isCalling === item.id ? 'animate-pulse' : ''}`} />
+                                </Button>
+                              </TableCell>
                               <TableCell>{item.assigned_to}</TableCell>
                               <TableCell>
                                 <Select value={item.current_stage}
@@ -5370,7 +5405,19 @@ export default function SalesPage() {
                           {lead.client_name}
                         </TableCell>
                         <TableCell className="w-32 truncate">{lead.email}</TableCell>
-                        <TableCell>{lead.phone}</TableCell>
+                        <TableCell className="flex items-center gap-2">
+                          {lead.phone}
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-blue-600 hover:text-blue-800"
+                            onClick={() => handleInitiateCall(lead.phone, lead.id)}
+                            disabled={isCalling !== null}
+                            title="Initiate Zoom Call"
+                          >
+                            <PhoneCall className={`h-4 w-4 ${isCalling === lead.id ? 'animate-pulse' : ''}`} />
+                          </Button>
+                        </TableCell>
 
                         <TableCell className="w-40">
                           {lead.created_at ? dayjs(lead.created_at).format("DD MMM YYYY") : "N/A"}
