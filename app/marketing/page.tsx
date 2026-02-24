@@ -6136,7 +6136,13 @@ export default function MarketingPage() {
                 <p className="text-gray-600 mt-2">Manage leads and marketing campaigns</p>
               </div>
               <div className="flex gap-3">
-
+ <Button
+                   variant="outline"
+                   onClick={() => window.open('/marketingAnalytics', '_blank')}
+                   className="flex items-center gap-2"
+                 >
+                   <RefreshCw className="w-4 h-4" /> Analytics
+                 </Button>
                 <Dialog open={historyDialogOpen} onOpenChange={setHistoryDialogOpen}>
 
                   <DialogTrigger asChild>
