@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useContext, useMemo } from "react";
+import { useEffect, useState, useContext, useMemo, useRef } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { MarketingCharts } from "./MarketingCharts";
 import { Button } from "@/components/ui/button";
@@ -69,6 +69,7 @@ export default function MarketingAnalyticsPage() {
     const [stageFilter, setStageFilter] = useState<string>("all");
     const [scoreFilter, setScoreFilter] = useState<string>("all");
     const [searchQuery, setSearchQuery] = useState<string>("");
+    const searchInputRef = useRef<HTMLInputElement>(null);
 
     const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
     const [salesTeamMembers, setSalesTeamMembers] = useState<{ id: string; full_name: string }[]>([]);
@@ -567,6 +568,7 @@ export default function MarketingAnalyticsPage() {
                                     setSelectedSources([]);
                                     setSelectedLeads([]);
                                     setSearchQuery("");
+                                    if (searchInputRef.current) searchInputRef.current.value = "";
                                     setCurrentPage(1);
                                 }}
                             >
@@ -576,14 +578,31 @@ export default function MarketingAnalyticsPage() {
                     </Card>
 
                     <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
-                        <div className="relative w-full md:w-96">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                            <Input
-                                placeholder="Search Name, Email, Phone, or ID..."
-                                className="pl-10"
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                            />
+                        <div className="flex gap-2 w-full md:w-[500px]">
+                            <div className="relative flex-1">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                <Input
+                                    ref={searchInputRef}
+                                    placeholder="Search Name, Email, Phone, or ID..."
+                                    className="pl-10"
+                                    defaultValue={searchQuery}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter") {
+                                            setSearchQuery(e.currentTarget.value);
+                                        }
+                                    }}
+                                />
+                            </div>
+                            <Button
+                                onClick={() => {
+                                    if (searchInputRef.current) {
+                                        setSearchQuery(searchInputRef.current.value);
+                                    }
+                                }}
+                                className="gap-2"
+                            >
+                                <Search className="w-4 h-4" /> Search
+                            </Button>
                         </div>
                     </div>
 
@@ -820,3 +839,4 @@ export default function MarketingAnalyticsPage() {
         </DashboardLayout>
     );
 }
+
