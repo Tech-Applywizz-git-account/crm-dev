@@ -2721,6 +2721,13 @@ export default function MarketingAssociatesPage() {
                 >
                   Marketing
                 </Button>
+                 <Button
+                   variant="outline"
+                  onClick={() => window.open('/marketingAnalytics', '_blank')}
+                  className="flex items-center gap-2"
+                >
+                  <RefreshCw className="w-4 h-4" /> Analytics
+                </Button>
                 <Button
                   variant={view === "sales" ? "default" : "outline"}
                   onClick={() => {
