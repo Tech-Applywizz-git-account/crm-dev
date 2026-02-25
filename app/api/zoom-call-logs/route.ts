@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-// ─── Zoom Server-to-Server OAuth Token ─────────────────────────
+function cleanDigits(num: string = ""): string {
+    return num.replace(/[^\d]/g, "");
+}
+
 async function getZoomAccessToken(): Promise<string> {
     const accountId = (process.env.ZOOM_ACCOUNT_ID || "").trim();
     const clientId = (process.env.ZOOM_CLIENT_ID || "").trim();
@@ -12,134 +15,154 @@ async function getZoomAccessToken(): Promise<string> {
     }
 
     const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
-    const tokenUrl = `https://zoom.us/oauth/token?grant_type=account_credentials&account_id=${accountId}`;
 
-    const response = await fetch(tokenUrl, {
-        method: "POST",
-        headers: {
-            "Authorization": `Basic ${credentials}`,
-        },
-    });
+    const res = await fetch(
+        `https://zoom.us/oauth/token?grant_type=account_credentials&account_id=${accountId}`,
+        {
+            method: "POST",
+            headers: { Authorization: `Basic ${credentials}` },
+            cache: "no-store",
+        }
+    );
 
-    if (!response.ok) {
-        const errorText = await response.text();
-        console.error("Zoom OAuth Full Error:", response.status, errorText);
-        throw new Error(`Zoom OAuth failed (${response.status}): ${errorText}. Double-check your Client ID & Secret in .env.`);
+    if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Zoom OAuth failed: ${errText}`);
     }
 
-    const data = await response.json();
+    const data = await res.json();
     return data.access_token;
 }
 
-// ─── GET /api/zoom-call-logs ───────────────────────────────────
-// Fetches call logs from Zoom Phone API and syncs call_duration_seconds
-// back to the call_history table in Supabase.
-//
-// Query params:
-//   ?phone=+13147981482  (optional — filter by phone number)
-//   ?date=2026-02-19     (optional — fetch logs for specific date, default: today)
 export async function GET(request: NextRequest) {
     try {
         const { searchParams } = new URL(request.url);
-        const phoneFilter = searchParams.get("phone") || "";
-        const dateFilter = searchParams.get("date") || new Date().toISOString().split("T")[0];
+        const phone = searchParams.get("phone") || "";
+
+        if (!phone) {
+            return NextResponse.json({
+                success: false,
+                error: "Phone required",
+            }, { status: 400 });
+        }
+
+        const digits = cleanDigits(phone);
+        const last10 = digits.slice(-10);
 
         const accessToken = await getZoomAccessToken();
 
-        // Fetch call logs from Zoom Phone API
-        // Uses the account-level call logs endpoint
-        const from = `${dateFilter}T00:00:00Z`;
-        const to = `${dateFilter}T23:59:59Z`;
+        // 30-day range
+        const now = new Date();
+        const past = new Date();
+        past.setDate(past.getDate() - 30);
 
-        const zoomUrl = `https://api.zoom.us/v2/phone/call_history?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&page_size=100&type=all`;
+        const from = `${past.toISOString().split("T")[0]}T00:00:00Z`;
+        const to = `${now.toISOString().split("T")[0]}T23:59:59Z`;
 
-        const callLogsResponse = await fetch(zoomUrl, {
-            headers: {
-                Authorization: `Bearer ${accessToken}`,
-                "Content-Type": "application/json",
-            },
-        });
+        const fetchWithPagination = async (url: string, key: string) => {
+            let all: any[] = [];
+            let nextToken = "";
 
-        if (!callLogsResponse.ok) {
-            const errorText = await callLogsResponse.text();
-            console.error("Zoom Call Logs Error:", errorText);
-            return NextResponse.json(
-                { error: "Failed to fetch Zoom call logs. Ensure phone:read:admin scope is enabled.", details: errorText },
-                { status: callLogsResponse.status }
-            );
-        }
-
-        const callLogsData = await callLogsResponse.json();
-        const callLogs = callLogsData.call_logs || [];
-
-        // Filter by phone number if provided
-        const filteredLogs = phoneFilter
-            ? callLogs.filter((log: any) =>
-                log.callee_number?.includes(phoneFilter) || log.caller_number?.includes(phoneFilter)
-            )
-            : callLogs;
-
-        // Now sync durations to Supabase call_history
-        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-        const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-        const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-        let synced = 0;
-
-        for (const log of filteredLogs) {
-            const phoneNumber = log.callee_number || log.caller_number || "";
-            const duration = log.duration || 0; // Zoom returns duration in seconds
-            const callDate = log.date_time ? new Date(log.date_time).toISOString().split("T")[0] : dateFilter;
-
-            if (duration > 0 && phoneNumber) {
-                // Match the phone number by checking if it ends with the Zoom phone number digits
-                // e.g., if Zoom has '+13147981482', we match records ending in '3147981482'
-                const matchPattern = phoneNumber.length >= 10 ? `%${phoneNumber.slice(-10)}` : `%${phoneNumber}`;
-
-                console.log(`Syncing call: ${phoneNumber}, Duration: ${duration}s, Pattern: ${matchPattern}, Date: ${callDate}`);
-
-                const { data: matchingRecords } = await supabase
-                    .from("call_history")
-                    .select("id, phone, call_started_at, call_duration_seconds")
-                    .filter("phone", "ilike", matchPattern)
-                    .gte("followup_date", callDate) // Match the date the call was made
-                    .lte("followup_date", callDate)
-                    .is("call_duration_seconds", null);
-
-                if (matchingRecords && matchingRecords.length > 0) {
-                    // Update the first matching record
-                    const record = matchingRecords[0];
-                    console.log(`Found matching record: ${record.id} for phone ${record.phone}`);
-                    await supabase
-                        .from("call_history")
-                        .update({ call_duration_seconds: duration })
-                        .eq("id", record.id);
-                    synced++;
-                } else {
-                    console.log(`No matching call_history record found for pattern ${matchPattern} on ${callDate}`);
+            do {
+                const fetchUrl = new URL(url);
+                if (nextToken) {
+                    fetchUrl.searchParams.set("next_page_token", nextToken);
                 }
-            }
-        }
+
+                const res = await fetch(fetchUrl.toString(), {
+                    headers: { Authorization: `Bearer ${accessToken}` },
+                    cache: "no-store",
+                });
+
+                if (!res.ok) {
+                    const errText = await res.text();
+                    console.error(`Zoom fetch failed for ${key}:`, errText);
+                    break;
+                }
+
+                const data = await res.json();
+                all = [...all, ...(data[key] || [])];
+                nextToken = data.next_page_token;
+            } while (nextToken);
+
+            return all;
+        };
+
+        // Fetch all call logs
+        const callLogs = await fetchWithPagination(
+            `https://api.zoom.us/v2/phone/call_history?from=${from}&to=${to}&page_size=300&type=all`,
+            "call_logs"
+        );
+
+        // Fetch all recordings
+        const recordings = await fetchWithPagination(
+            `https://api.zoom.us/v2/phone/recordings?from=${from}&to=${to}&page_size=300`,
+            "recordings"
+        );
+
+        const matchedCalls = callLogs
+            .filter((log: any) => {
+                const raw =
+                    log.direction === "outbound"
+                        ? log.callee_number ||
+                        log.to?.number ||
+                        log.callee_number_display ||
+                        ""
+                        : log.caller_number ||
+                        log.from?.number ||
+                        log.caller_number_display ||
+                        "";
+
+                const clean = cleanDigits(raw);
+                if (!clean) return false;
+
+                const cleanLast10 = clean.slice(-10);
+
+                // Robust multi-length match
+                return (
+                    clean.endsWith(last10) ||
+                    last10.endsWith(cleanLast10) ||
+                    (cleanLast10.length >= 7 && last10.endsWith(cleanLast10)) ||
+                    (last10.length >= 7 && cleanLast10.endsWith(last10))
+                );
+            })
+            .map((log: any) => {
+                const recording = recordings.find(
+                    (r: any) =>
+                        r.call_log_id === log.id || r.call_id === log.call_id
+                );
+
+                return {
+                    call_id: log.call_id,
+                    start_time: log.start_time,
+                    duration: log.duration || 0,
+                    direction: log.direction,
+                    recording_url:
+                        recording?.share_url ||
+                        recording?.play_url ||
+                        (recording
+                            ? `https://zoom.us/recording/detail/${recording.id}`
+                            : null),
+                };
+            });
 
         return NextResponse.json({
             success: true,
-            total_zoom_logs: callLogs.length,
-            filtered_logs: filteredLogs.length,
-            synced_to_db: synced,
-            call_logs: filteredLogs.map((log: any) => ({
-                caller: log.caller_number,
-                callee: log.callee_number,
-                duration_seconds: log.duration,
-                direction: log.direction,
-                result: log.result,
-                date_time: log.date_time,
-            })),
+            total: matchedCalls.length,
+            calls: matchedCalls,
+            debug: {
+                total_zoom_logs: callLogs.length,
+                total_recordings: recordings.length
+            }
         });
 
-    } catch (error: any) {
-        console.error("Zoom Call Logs Error:", error);
+    } catch (err: any) {
+        console.error("Zoom Route Error:", err);
         return NextResponse.json(
-            { error: error.message || "Internal server error" },
+            {
+                success: false,
+                error: err.message,
+            },
             { status: 500 }
         );
     }
