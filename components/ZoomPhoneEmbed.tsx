@@ -150,11 +150,11 @@ export const ZoomPhoneEmbed = React.forwardRef<ZoomPhoneEmbedHandle, ZoomPhoneEm
     };
 
     return (
-        <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-2">
+        <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-2 pointer-events-none">
             {/* Zoom Phone Widget */}
             <div
                 className={cn(
-                    "transition-all duration-300 ease-in-out overflow-hidden bg-white shadow-2xl rounded-xl border border-gray-200",
+                    "transition-all duration-300 ease-in-out overflow-hidden bg-white shadow-2xl rounded-xl border border-gray-200 pointer-events-auto",
                     isOpen ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10 pointer-events-none",
                     isMinimized ? "w-64 h-16" : "w-[375px] h-[600px]"
                 )}
@@ -208,7 +208,7 @@ export const ZoomPhoneEmbed = React.forwardRef<ZoomPhoneEmbedHandle, ZoomPhoneEm
             <Button
                 onClick={toggleOpen}
                 className={cn(
-                    "h-14 w-14 rounded-full shadow-lg transition-all duration-300 hover:scale-110",
+                    "h-14 w-14 rounded-full shadow-lg transition-all duration-300 hover:scale-110 pointer-events-auto",
                     isOpen ? "bg-red-500 hover:bg-red-600 rotate-90" : "bg-blue-600 hover:bg-blue-700"
                 )}
                 style={!isOpen ? { animation: "pulse-ring 2s infinite" } : {}}

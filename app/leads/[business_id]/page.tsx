@@ -1,8 +1,8 @@
 // app/leads/[business_id]/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useEffect, useState, useMemo } from "react";
+import { useParams, useRouter } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -10,10 +10,13 @@ import { Button } from "@/components/ui/button";
 import { supabase } from "@/utils/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, RefreshCw } from "lucide-react";
+import { Loader2, RefreshCw, ExternalLink, ArrowLeft, Star, Share2, Mail, Phone, MapPin, Plus, ChevronDown, MoreHorizontal, Send, FileText, CheckCircle2, Bell } from "lucide-react";
 import { useAuth } from "@/components/providers/auth-provider";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface Lead {
   id: string;
@@ -21,12 +24,13 @@ interface Lead {
   name: string;
   phone: string;
   email: string;
-  city: string;
-  source: string;
   status: string;
+  current_stage: string;
   created_at: string;
   assigned_to?: string;
   paid_amount?: number;
+  city?: string;
+  source?: string;
 }
 
 interface ResumeProgress {
@@ -109,10 +113,13 @@ function getLatestAddons(rows: any[]) {
 
 export default function LeadProfilePage() {
   const { business_id } = useParams();
+  const router = useRouter();
   const [lead, setLead] = useState<Lead | null>(null);
   const [loading, setLoading] = useState(true);
   const [saleHistory, setSaleHistory] = useState<any[]>([]);
-  const [callHistory, setCallHistory] = useState<any[]>([]);
+  const [zoomCalls, setZoomCalls] = useState<any[]>([]);
+  const [crmCalls, setCrmCalls] = useState<any[]>([]);
+  const [zoomLoading, setZoomLoading] = useState(false);
   const [feedbackList, setFeedbackList] = useState<any[]>([]);
   const [renewal, setRenewal] = useState<Lead | null>(null);
   const [onboarding, setOnboarding] = useState<ClientOnboardingDetails | null>(null);
@@ -139,6 +146,67 @@ export default function LeadProfilePage() {
   const toDateInput = (iso?: string | null) =>
     iso ? new Date(iso).toISOString().slice(0, 10) : ""; // yyyy-mm-dd
 
+  // Dynamic Scores Calculation
+  const { leadScore, engagementScore, qualityScore } = useMemo(() => {
+    let ls = 0;
+    let es = 0;
+    let qs = 0;
+
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    // 1. Zoom Calls Scoring
+    zoomCalls.forEach(call => {
+      let points = 2; // base
+      if ((call.duration || 0) > 300) points += 3; // > 5 mins
+      if (call.recording_url) points += 1;
+
+      ls += points;
+      if (call.start_time && new Date(call.start_time) > sevenDaysAgo) {
+        es += points;
+      }
+    });
+
+    // 2. Sales History Scoring
+    saleHistory.forEach(sale => {
+      let points = 10;
+      ls += points;
+      if (sale.closed_at && new Date(sale.closed_at) > sevenDaysAgo) {
+        es += points;
+      }
+    });
+
+    // 3. Feedback Scoring
+    feedbackList.forEach(fb => {
+      let points = (fb.rating || 0);
+      if (fb.client_emotion === "happy") points += 5;
+      if (fb.client_emotion === "unhappy") points -= 5;
+
+      ls += points;
+      if (fb.created_at && new Date(fb.created_at) > sevenDaysAgo) {
+        es += points;
+      }
+    });
+
+    // 4. Quality Score (Profile Completeness)
+    if (onboarding) {
+      ls += 5;
+      const fields = [
+        onboarding.full_name, onboarding.company_email, onboarding.callable_phone,
+        onboarding.date_of_birth, onboarding.visatypes, onboarding.full_address,
+        onboarding.resume_path, onboarding.linkedin_url
+      ];
+      const filledCount = fields.filter(f => !!f).length;
+      qs = Math.round((filledCount / fields.length) * 10);
+    }
+
+    return {
+      leadScore: ls,
+      engagementScore: es,
+      qualityScore: qs
+    };
+  }, [zoomCalls, saleHistory, feedbackList, onboarding]);
+
   useEffect(() => {
     if (isEditOnboarding && onboarding) {
       setOnboardingForm({ ...onboarding });
@@ -148,6 +216,32 @@ export default function LeadProfilePage() {
   }, [isEditOnboarding, onboarding]);
 
   const latestSale = saleHistory.length ? saleHistory[saleHistory.length - 1] : null;
+  const syncZoomCalls = async (phone: string, isManual = false) => {
+    if (!phone) {
+      if (isManual) alert("Lead phone not available");
+      return;
+    }
+    const cleanPh = phone.replace(/[^\d]/g, "");
+    if (cleanPh.length < 7) {
+      if (isManual) alert("Valid phone number required for Zoom sync (min 7 digits)");
+      return;
+    }
+    setZoomLoading(true);
+    try {
+      const res = await fetch(`/api/zoom-call-logs?phone=${encodeURIComponent(phone)}`);
+      const data = await res.json();
+      if (data.success) {
+        setZoomCalls(data.calls || []);
+      } else {
+        if (isManual) alert(data.error || "Failed to fetch Zoom calls");
+      }
+    } catch (err) {
+      console.error("Zoom sync failed:", err);
+      if (isManual) alert("Zoom fetch failed");
+    } finally {
+      setZoomLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (isEditAddons && latestSale) setSaleForm({ ...latestSale });
@@ -167,6 +261,7 @@ export default function LeadProfilePage() {
     "Resume Head",
     "Technical Head",
     "Sales Associate",
+    "Admin"
   ];
 
   const norm = (s?: string | null) => (s ?? "").trim().toLowerCase();
@@ -177,6 +272,44 @@ export default function LeadProfilePage() {
   // =========================
   // ROLE GATING FOR ADD-ONS
   // =========================
+  const updateLeadStatus = async (newStage: string) => {
+    if (!lead) return;
+    const { error } = await supabase
+      .from("leads")
+      .update({ current_stage: newStage })
+      .eq("business_id", lead.business_id);
+
+    if (error) {
+      console.error("Error updating lead stage:", error.message);
+      alert("Failed to update stage");
+    } else {
+      setLead({ ...lead, current_stage: newStage });
+    }
+  };
+
+  const STAGES = [
+    "Prospect",
+    "DNP",
+    "Out of TG",
+    "Not Interested",
+    "Conversation Done",
+    "Target",
+    "sale done"
+  ];
+
+  const getStatusColor = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case 'prospect': return 'bg-blue-100 text-blue-700 border-blue-200';
+      case 'dnp': return 'bg-yellow-100 text-yellow-700 border-yellow-100';
+      case 'out of tg': return 'bg-red-50 text-red-700 border-red-100';
+      case 'not interested': return 'bg-red-100 text-red-700 border-red-200';
+      case 'conversation done': return 'bg-purple-100 text-purple-700 border-purple-200';
+      case 'target': return 'bg-orange-100 text-orange-700 border-orange-200';
+      case 'sale done': return 'bg-green-100 text-green-700 border-green-200';
+      default: return 'bg-gray-100 text-gray-700 border-gray-200';
+    }
+  };
+
   const rawRole = (user?.role || "").toString().toLowerCase().trim();
   const roleKey = (() => {
     const r = rawRole.replace(/\s+/g, " ");
@@ -219,24 +352,34 @@ export default function LeadProfilePage() {
     if (!business_id) return;
 
     const fetchAll = async () => {
-      // Lead
+      // 1. Fetch Lead record first to get consistent business_id
+      const decodedId = decodeURIComponent(business_id as string).trim();
       const { data: leadRow, error: leadErr } = await supabase
         .from("leads")
         .select("*")
-        .eq("business_id", business_id)
+        .eq("business_id", decodedId)
         .single();
+
       if (leadErr) {
         console.error("Error fetching lead:", leadErr.message);
         setLead(null);
-      } else {
-        setLead(leadRow as Lead);
+        setLoading(false);
+        return;
       }
 
-      // 🧾 Sales history (ordered by closed_at for add-ons logic)
+      setLead(leadRow as Lead);
+      const targetBusinessId = leadRow.business_id;
+
+      // 📞 Auto-sync Zoom calls based on lead phone
+      if (leadRow.phone) {
+        syncZoomCalls(leadRow.phone);
+      }
+
+      // 🧾 Sales history
       const { data: allSales, error: salesErr } = await supabase
         .from("sales_closure")
         .select("*")
-        .eq("lead_id", business_id)
+        .eq("lead_id", targetBusinessId)
         .order("closed_at", { ascending: false });
 
       if (salesErr) {
@@ -246,48 +389,47 @@ export default function LeadProfilePage() {
         setSaleHistory(allSales ?? []);
       }
 
-      // 🧮 Compute merged Add-ons summary (based on closed_at)
+      // 🧮 Compute merged Add-ons summary
       const mergedAddons = getLatestAddons(allSales ?? []);
       setLatestAddons(mergedAddons);
-
-
-      // Call history
-      const { data: callRows, error: callErr } = await supabase
-        .from("call_history")
-        .select("*")
-        .eq("lead_id", business_id)
-        .order("call_started_at", { ascending: false });
-      if (callErr) console.error("Error fetching call history:", callErr.message);
-      setCallHistory(callRows ?? []);
 
       // Client feedback
       const { data: fbRows, error: fbErr } = await supabase
         .from("client_feedback")
         .select("*")
-        .eq("lead_id", business_id)
+        .eq("lead_id", targetBusinessId)
         .order("id", { ascending: false });
       if (fbErr) console.error("Error fetching client feedback:", fbErr.message);
       setFeedbackList(fbRows ?? []);
 
-      // Resume Progress (unique per lead, per your schema)
+      // Resume Progress
       const { data: rpRow, error: rpErr } = await supabase
         .from("resume_progress")
         .select("lead_id,status,pdf_path,pdf_uploaded_at,updated_at,assigned_to_email,assigned_to_name")
-        .eq("lead_id", business_id)
+        .eq("lead_id", targetBusinessId)
         .maybeSingle();
       if (rpErr) console.error("Error fetching resume_progress:", rpErr.message);
       setResumeProg(rpRow ?? null);
 
-      // Portfolio Progress (PK = lead_id)
+      // Portfolio Progress
       const { data: ppRow, error: ppErr } = await supabase
         .from("portfolio_progress")
         .select("lead_id,status,link,assigned_email,assigned_name,updated_at")
-        .eq("lead_id", business_id)
+        .eq("lead_id", targetBusinessId)
         .maybeSingle();
       if (ppErr) console.error("Error fetching portfolio_progress:", ppErr.message);
       setPortfolioProg(ppRow ?? null);
 
-      // 🔁 Fetch the latest onboarding row (include new columns)
+      // 📝 Fetch CRM Call History (manual notes and matched zoom calls)
+      const { data: crmHistory, error: crmErr } = await supabase
+        .from("call_history")
+        .select("*")
+        .eq("lead_id", targetBusinessId)
+        .order("followup_date", { ascending: false });
+      if (crmErr) console.error("Error fetching crm history:", crmErr.message);
+      setCrmCalls(crmHistory ?? []);
+
+      // 🔁 Fetch the latest onboarding row
       const { data: coRow, error: coErr } = await supabase
         .from("client_onborading_details")
         .select(`
@@ -314,7 +456,7 @@ export default function LeadProfilePage() {
           lead_id,
           visatypes
         `)
-        .eq("lead_id", business_id as string)
+        .eq("lead_id", targetBusinessId)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -349,7 +491,7 @@ export default function LeadProfilePage() {
     );
   }
 
-  const money = (v: any) => {
+  const formatMoney = (v: any) => {
     const n = Number(v);
     return Number.isFinite(n) && n > 0 ? `$${n.toLocaleString()}` : "—";
   };
@@ -465,795 +607,485 @@ export default function LeadProfilePage() {
     await downloadFromStorage(onboarding.cover_letter_path, `cover-${lead.business_id}-${lead.name}.pdf`);
   };
 
-  // Download resume PDF with fixed filename: "resume-<lead_id>.pdf"
-  const downloadResume = async (leadId: string, path?: string | null) => {
-    try {
-      if (!path) {
-        alert("No resume PDF found.");
-        return;
-      }
-      const { data, error } = await supabase.storage.from("resumes").createSignedUrl(path, 60 * 10);
-      if (error || !data?.signedUrl) throw error || new Error("No signed URL");
-
-      const res = await fetch(data.signedUrl);
-      if (!res.ok) throw new Error(`Download failed (${res.status})`);
-
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `resume-${leadId}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch (e: any) {
-      console.error(e);
-      alert(e?.message || "Could not download PDF");
-    }
-  };
+  const leadAgeDays = lead.created_at
+    ? Math.floor((new Date().getTime() - new Date(lead.created_at).getTime()) / (1000 * 60 * 60 * 24))
+    : 0;
 
   return (
-    // <ProtectedRoute allowedRoles={["Sales","Sales Associate","Super Admin"]}>
     <DashboardLayout>
-      <div className="min-h-screen h-screen w-full bg-gray-50">
-        <div className="grid grid-cols-1 md:grid-cols-4 grid-rows-2 gap-3 h-full">
-          {/* 1️⃣ Lead Profile (Left, Top) */}
-          <Card className="h-full col-span-1 row-span-1 overflow-auto">
-            <CardHeader>
-              <CardTitle className="text-2xl font-bold">Lead Profile</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4 text-sm text-gray-800">
-              <div>
-                <strong>Business ID:</strong> {lead.business_id}
-              </div>
-              <div>
-                <strong>Name:</strong> {lead.name}
-              </div>
-              <div>
-                <strong>Phone:</strong> {lead.phone}
-              </div>
-              <div>
-                <strong>Email:</strong> {lead.email}
-              </div>
-              <div>
-                <strong>City:</strong> {lead.city}
-              </div>
-              <div>
-                <strong>Source:</strong> <Badge>{lead.source}</Badge>
-              </div>
-              <div>
-                <strong>Status:</strong> <Badge>{lead.status}</Badge>
-              </div>
-              <div>
-                <strong>Created At:</strong> {new Date(lead.created_at).toLocaleString()}
-              </div>
-              <div>
-                <strong>Salesperson:</strong> {lead.assigned_to || "Not Assigned"}
-              </div>
-            </CardContent>
-          </Card>
+      <div className="flex flex-col h-screen -m-6 bg-[#f4f7f9]">
+        {/* Top Header - Leadsquared Style */}
+        <div className="bg-white border-b border-gray-200 px-6 py-2 flex items-center justify-between shadow-sm">
+          <div className="flex items-center gap-6">
+            <h1 className="text-xl font-medium text-gray-700">Lead Details</h1>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => router.back()}
+                className="bg-[#444] text-white hover:bg-black border-none h-7 px-3 text-xs"
+              >
+                <ArrowLeft className="w-3 h-3 mr-1" /> Back
+              </Button>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" size="icon" className="text-gray-400">
+              <RefreshCw className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="icon" className="text-gray-400">
+              <Star className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="icon" className="text-gray-400">
+              <Bell className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
 
-          {/* Client onboarding details */}
-          <Card className="h-full col-span-2 row-span-1 overflow-scroll">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-2xl font-bold">Client onboarding details</CardTitle>
-
-              {canEdit && (
-                <div className="flex items-center gap-2">
-                  {isEditOnboarding ? (
-                    <>
-                      <Button className="bg-blue-600" onClick={saveOnboarding} disabled={savingOnboarding || !onboardingForm}>
-                        {savingOnboarding ? <Loader2 className="animate-spin mr-2" /> : null}
-                        Save
-                      </Button>
-                      <Button variant="outline" onClick={() => setIsEditOnboarding(false)}>Cancel</Button>
-                    </>
-                  ) : (
-                    <Button variant="outline" onClick={() => setIsEditOnboarding(true)}>Edit</Button>
-                  )}
+        <div className="flex flex-1 overflow-hidden p-4 gap-4">
+          {/* Left Panel - Profile & Properties */}
+          <div className="w-[340px] flex flex-col gap-4 overflow-y-auto pr-1">
+            {/* Profile Card */}
+            <div className="bg-[#002d4b] rounded-sm overflow-hidden flex flex-col shadow-md">
+              <div className="p-5 flex flex-col">
+                <div className="flex justify-between items-start">
+                  <div className="flex gap-2 items-center">
+                    <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />
+                    <h2 className="text-2xl font-semibold text-white truncate max-w-[200px]">{lead.name}</h2>
+                  </div>
+                  <Share2 className="w-4 h-4 text-white cursor-pointer opacity-70" />
                 </div>
-              )}
-            </CardHeader>
-
-            <CardContent>
-              {!onboarding ? (
-                <div className="text-gray-500 italic">No onboarding details submitted yet.</div>
-              ) : (
-                <div className="space-y-6">
-                  {/* Identity */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                      <Label>Full Name</Label>
-                      <Input
-                        value={(isEditOnboarding ? onboardingForm?.full_name : onboarding.full_name) ?? ""}
-                        readOnly={!isEditOnboarding}
-                        onChange={(e) => isEditOnboarding && handleOB("full_name", e.target.value)}
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <Label>Company Email</Label>
-                      <Input
-                        value={(isEditOnboarding ? onboardingForm?.company_email : onboarding.company_email) ?? ""}
-                        readOnly={!isEditOnboarding}
-                        onChange={(e) => isEditOnboarding && handleOB("company_email", e.target.value)}
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <Label>Callable Phone</Label>
-                      <Input
-                        value={(isEditOnboarding ? onboardingForm?.callable_phone : onboarding.callable_phone) ?? ""}
-                        readOnly={!isEditOnboarding}
-                        onChange={(e) => isEditOnboarding && handleOB("callable_phone", e.target.value)}
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <Label>Last Submitted</Label>
-                      <Input value={fmt(onboarding.created_at)} readOnly />
-                    </div>
-                  </div>
-
-                  {/* Sponsorship & DOB */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-1.5">
-                        <Label>Sponsorship?</Label>
-                        {isEditOnboarding ? (
-                          <Input
-                            placeholder="Yes / No"
-                            value={toYesNo(onboardingForm?.needs_sponsorship)}
-                            onChange={(e) => handleOB("needs_sponsorship", fromYesNo(e.target.value))}
-                          />
-                        ) : (
-                          <Input value={yn(onboarding.needs_sponsorship)} readOnly />
-                        )}
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <Label>Visa type</Label>
-                        <Input
-                          value={(isEditOnboarding ? onboardingForm?.visatypes : onboarding.visatypes) ?? ""}
-                          readOnly={!isEditOnboarding}
-                          onChange={(e) => isEditOnboarding && handleOB("visatypes", e.target.value)}
-                        />
-                      </div>
-                    </div>
-
-
-                    <div className="space-y-1.5">
-                      <Label>Date of Birth</Label>
-                      {isEditOnboarding ? (
-                        <Input
-                          type="date"
-                          value={toDateInput(onboardingForm?.date_of_birth)}
-                          onChange={(e) => handleOB("date_of_birth", e.target.value)}
-                        />
-                      ) : (
-                        <Input value={fmtDateOnly(onboarding.date_of_birth)} readOnly />
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Address */}
-                  <div className="grid grid-cols-1 md:grid-cols-1 gap-4">
-                    <div className="space-y-1.5">
-                      <Label>Full Address with Zip Code</Label>
-                      <Textarea
-                        rows={3}
-                        value={(isEditOnboarding ? onboardingForm?.full_address : onboarding.full_address) ?? ""}
-                        readOnly={!isEditOnboarding}
-                        onChange={(e) => isEditOnboarding && handleOB("full_address", e.target.value)}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                      <Label>primary Phone</Label>
-                      <Input
-                        value={(isEditOnboarding ? onboardingForm?.primary_phone : onboarding.primary_phone) ?? ""}
-                        readOnly={!isEditOnboarding}
-                        onChange={(e) => isEditOnboarding && handleOB("primary_phone", e.target.value)}
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <Label>LinkedIn URL</Label>
-                      <div className="flex items-center gap-2">
-                        <Input
-                          value={(isEditOnboarding ? onboardingForm?.linkedin_url : onboarding.linkedin_url) ?? ""}
-                          readOnly={!isEditOnboarding}
-                          onChange={(e) => isEditOnboarding && handleOB("linkedin_url", e.target.value)}
-                        />
-                        <a
-                          href={(isEditOnboarding ? onboardingForm?.linkedin_url : onboarding.linkedin_url) ?? "#"}
-                          target="_blank"
-                          rel="noreferrer"
-                          className={`text-blue-600 underline text-sm ${!(isEditOnboarding ? onboardingForm?.linkedin_url : onboarding.linkedin_url)
-                            ? "pointer-events-none opacity-50"
-                            : ""
-                            }`}
-                        >
-                          Open
-                        </a>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                      <Label>Github link</Label>
-                      <div className="flex items-center gap-2">
-                        <Input
-                          value={(isEditOnboarding ? onboardingForm?.github_url : onboarding.github_url) ?? ""}
-                          readOnly={!isEditOnboarding}
-                          onChange={(e) => isEditOnboarding && handleOB("github_url", e.target.value)}
-                        />
-                        <a
-                          href={(isEditOnboarding ? onboardingForm?.github_url : onboarding.github_url) ?? "#"}
-                          target="_blank"
-                          rel="noreferrer"
-                          className={`text-blue-600 underline text-sm ${!(isEditOnboarding ? onboardingForm?.github_url : onboarding.github_url)
-                            ? "pointer-events-none opacity-50"
-                            : ""
-                            }`}
-                        >
-                          Open
-                        </a>
-                      </div>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <Label>Portfolio link</Label>
-                      <div className="flex items-center gap-2">
-                        <Input
-                          value={(isEditOnboarding ? onboardingForm?.portfolio_url : onboarding.portfolio_url) ?? ""}
-                          readOnly={!isEditOnboarding}
-                          onChange={(e) => isEditOnboarding && handleOB("portfolio_url", e.target.value)}
-                        />
-                        <a
-                          href={(isEditOnboarding ? onboardingForm?.portfolio_url : onboarding.portfolio_url) ?? "#"}
-                          target="_blank"
-                          rel="noreferrer"
-                          className={`text-blue-600 underline text-sm ${!(isEditOnboarding ? onboardingForm?.portfolio_url : onboarding.portfolio_url)
-                            ? "pointer-events-none opacity-50"
-                            : ""
-                            }`}
-                        >
-                          Open
-                        </a>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Preferences */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                      <Label>Job Role Preferences</Label>
-                      {isEditOnboarding ? (
-                        <Textarea rows={3} value={jobRoleCSV} onChange={(e) => setJobRoleCSV(e.target.value)} />
-                      ) : (
-                        <Textarea value={listFmt(onboarding.job_role_preferences)} rows={3} readOnly />
-                      )}
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label>Location Preferences</Label>
-                      {isEditOnboarding ? (
-                        <Textarea rows={3} value={locCSV} onChange={(e) => setLocCSV(e.target.value)} />
-                      ) : (
-                        <Textarea value={listFmt(onboarding.location_preferences)} rows={3} readOnly />
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Misc + Files */}
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <div className="space-y-1.5">
-                      <Label>Salary Range</Label>
-                      <Input
-                        value={(isEditOnboarding ? onboardingForm?.salary_range : onboarding.salary_range) ?? ""}
-                        readOnly={!isEditOnboarding}
-                        onChange={(e) => isEditOnboarding && handleOB("salary_range", e.target.value)}
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label>Work Auth Details</Label>
-                      <Input
-                        value={(isEditOnboarding ? onboardingForm?.work_auth_details : onboarding.work_auth_details) ?? ""}
-                        readOnly={!isEditOnboarding}
-                        onChange={(e) => isEditOnboarding && handleOB("work_auth_details", e.target.value)}
-                      />
-                    </div>
-
-                    <div className="flex flex-wrap items-center pt-7">
-                      <Button type="button" onClick={downloadLatestResume} disabled={!onboarding.resume_path} className="min-w-[160px] bg-blue-500">
-                        Download Resume
-                      </Button>
-                    </div>
-                    <div className="flex flex-wrap items-center pt-7">
-                      <Button type="button" onClick={downloadLatestCover} disabled={!onboarding.cover_letter_path} className="min-w-[160px] bg-green-500">
-                        Download Cover Ltr
-                      </Button>
-                    </div>
+                <div className="mt-1">
+                  <span className="text-[10px] text-white/50 uppercase block">Stage</span>
+                  <div className="mt-1">
+                    <Badge className={`${getStatusColor(lead.current_stage)} border rounded-full px-2 py-0 text-[10px] font-medium h-5`}>
+                      {lead.current_stage || "Prospect"}
+                    </Badge>
                   </div>
                 </div>
-              )}
-            </CardContent>
-          </Card>
 
-
-
-
-          <Card className="h-full col-span-1 row-span-1 overflow-auto">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-2xl font-bold">Add-ons & Requirements</CardTitle>
-
-              {canEditAddons && saleHistory.length > 0 && (
-                <div className="flex items-center gap-2">
-                  {isEditAddons ? (
-                    <>
-                      <Button className="bg-blue-600" onClick={saveAddons} disabled={savingSale || !saleForm}>
-                        {savingSale ? <Loader2 className="animate-spin mr-2" /> : null}
-                        Save
-                      </Button>
-                      <Button variant="outline" onClick={() => setIsEditAddons(false)}>
-                        Cancel
-                      </Button>
-                    </>
-                  ) : (
-                    // <Button variant="outline" onClick={() => setIsEditAddons(true)}>
-                    //   Edit
-                    // </Button>
-
-                    <Button
-                      variant="outline"
-                      onClick={() => window.open(`/client_sale_history_update/${business_id}`, "_blank")}
-                    >
-                      Edit
-                    </Button>
-
-                  )}
+                <div className="mt-6 space-y-3 text-white/90">
+                  <div className="flex items-center gap-3">
+                    <CheckCircle2 className="w-4 h-4 text-white/60" />
+                    <span className="text-sm">College B</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Mail className="w-4 h-4 text-white/60" />
+                    <span className="text-sm truncate">{lead.email}</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Phone className="w-4 h-4 text-white/60" />
+                    <span className="text-sm">{lead.phone}</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <MapPin className="w-4 h-4 text-white/60" />
+                    <span className="text-sm">{lead.city || "Not Specified"}</span>
+                  </div>
                 </div>
-              )}
-            </CardHeader>
+              </div>
 
-
-            <CardContent className="space-y-3 text-sm">
-              {saleHistory.length === 0 ? (
-                <div className="text-gray-500 italic">
-                  No add-ons or commitments recorded yet.
+              {/* Stats Bar */}
+              <div className="bg-[#001a2d] grid grid-cols-4 border-t border-white/10">
+                <div className="p-3 flex flex-col items-center justify-center border-r border-white/10 text-center">
+                  <span className="text-lg font-bold text-white">{leadScore}</span>
+                  <span className="text-[10px] text-white/60 uppercase">Lead Score</span>
                 </div>
-              ) : (() => {
-                // const latest = saleHistory[saleHistory.length - 1];
+                <div className="p-3 flex flex-col items-center justify-center border-r border-white/10 text-center">
+                  <span className="text-lg font-bold text-orange-500">{engagementScore}</span>
+                  <span className="text-[10px] text-white/60 uppercase">Engaged</span>
+                </div>
+                <div className="p-3 flex flex-col items-center justify-center border-r border-white/10 text-center">
+                  <span className="text-lg font-bold text-white">{qualityScore}/10</span>
+                  <span className="text-[10px] text-white/60 uppercase">Quality</span>
+                </div>
+                <div className="p-3 flex flex-col items-center justify-center text-center">
+                  <span className="text-lg font-bold text-white">{leadAgeDays}d</span>
+                  <span className="text-[10px] text-white/60 uppercase">Age</span>
+                </div>
+              </div>
+            </div>
 
-                const latest = latestAddons;
+            {/* Lead Properties Card */}
+            <div className="bg-white border border-gray-200 rounded-sm shadow-sm overflow-hidden flex flex-col">
+              <div className="bg-gray-50 border-b border-gray-200 p-2 px-3">
+                <h3 className="text-sm font-semibold text-gray-700">Lead Properties</h3>
+              </div>
+              <div className="p-4 space-y-3 text-sm">
+                <div className="flex justify-between border-b pb-2">
+                  <span className="text-gray-500">Owner</span>
+                  <span className="font-medium text-gray-800">{lead.assigned_to || "Not Assigned"}</span>
+                </div>
+                <div className="flex justify-between border-b pb-2">
+                  <span className="text-gray-500">Lead Source</span>
+                  <span className="font-medium text-gray-800">{lead.source}</span>
+                </div>
+                <div className="flex justify-between border-b pb-2">
+                  <span className="text-gray-500">Lead Age</span>
+                  <span className="font-medium text-gray-800">{leadAgeDays} Days</span>
+                </div>
+                <div className="flex justify-between border-b pb-2">
+                  <span className="text-gray-500">Created At</span>
+                  <span className="font-medium text-gray-800">{new Date(lead.created_at).toLocaleDateString()}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Business ID</span>
+                  <span className="font-medium text-gray-800">{lead.business_id}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          {/* Right Panel - Content Tabs */}
+          <div className="flex-1 flex flex-col bg-white border border-gray-200 rounded-sm shadow-sm overflow-hidden">
+            <Tabs defaultValue="activity" className="flex flex-col h-full">
+              <div className="bg-gray-50 border-b border-gray-200 px-4 flex items-center justify-between">
+                <TabsList className="bg-transparent h-12 gap-6 p-0">
+                  <TabsTrigger value="activity" className="h-full rounded-none border-b-2 border-transparent data-[state=active]:border-orange-500 data-[state=active]:bg-transparent text-gray-600 data-[state=active]:text-orange-500 font-medium px-1">Activity History</TabsTrigger>
+                  <TabsTrigger value="details" className="h-full rounded-none border-b-2 border-transparent data-[state=active]:border-orange-500 data-[state=active]:bg-transparent text-gray-600 data-[state=active]:text-orange-500 font-medium px-1">Lead Details</TabsTrigger>
+                  <TabsTrigger value="sales" className="h-full rounded-none border-b-2 border-transparent data-[state=active]:border-orange-500 data-[state=active]:bg-transparent text-gray-600 data-[state=active]:text-orange-500 font-medium px-1">Sales History</TabsTrigger>
+                  <TabsTrigger value="feedback" className="h-full rounded-none border-b-2 border-transparent data-[state=active]:border-orange-500 data-[state=active]:bg-transparent text-gray-600 data-[state=active]:text-orange-500 font-medium px-1">Feedback</TabsTrigger>
+                </TabsList>
 
+                <div className="flex gap-2">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="sm" className="h-8 border-gray-300 text-gray-600 font-normal">
+                        Lead Actions <ChevronDown className="ml-2 h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => setIsEditOnboarding(true)}>Edit Onboarding</DropdownMenuItem>
+                      <DropdownMenuItem onClick={downloadLatestResume} disabled={!onboarding?.resume_path}>Download Resume</DropdownMenuItem>
+                      <DropdownMenuItem onClick={downloadLatestCover} disabled={!onboarding?.cover_letter_path}>Download Cover Letter</DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
 
-                return (
-                  <div className="space-y-3">
-                    <div className="grid grid-cols-2 gap-2">
+                  <Button size="sm" className="h-8 bg-blue-600 hover:bg-blue-700 text-white font-normal px-4">
+                    Send Email
+                  </Button>
+                </div>
+              </div>
 
-                      {/*applications*/}
-                      {/* Application Sale Value */}
-                      <div className="flex items-center justify-between border rounded-md px-3 py-2">
-                        <span className="font-medium">Applications </span>
-                        {isEditAddons ? (
-                          <Input
-                            className="w-24 h-8"
-                            value={saleForm?.application_sale_value ?? ""}
-                            onChange={(e) =>
-                              setSaleForm((p: any) => ({
-                                ...p,
-                                application_sale_value: e.target.value,
-                              }))
-                            }
-                            placeholder="0.00"
-                          />
-                        ) : (
-                          <span className="text-gray-700">
-                            {money(latest?.application_sale_value)}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Resume */}
-                      <div className="flex items-center justify-between border rounded-md px-3 py-2">
-                        <span className="font-medium">Resume</span>
-                        {allowedRoles.includes(user?.role || "") ? (
-                          isEditAddons ? (
-                            <Input
-                              className="w-24 h-8"
-                              value={saleForm?.resume_sale_value ?? ""}
-                              onChange={(e) =>
-                                setSaleForm((p: any) => ({
-                                  ...p,
-                                  resume_sale_value: e.target.value,
-                                }))
-                              }
-                            />
-                          ) : (
-                            <span className="text-gray-700">
-                              {money(latest?.resume_sale_value)}
-                            </span>
-                          )
-                        ) : latest?.resume_sale_value ? (
-                          <Badge className="bg-green-100 text-green-700 border-green-200">
-                            Paid
-                          </Badge>
-                        ) : (
-                          <span className="text-gray-400">—</span>
-                        )}
-                      </div>
-
-                      {/* LinkedIn */}
-                      <div className="flex items-center justify-between border rounded-md px-3 py-2">
-                        <span className="font-medium">LinkedIn</span>
-                        {allowedRoles.includes(user?.role || "") ? (
-                          isEditAddons ? (
-                            <Input
-                              className="w-24 h-8"
-                              value={saleForm?.linkedin_sale_value ?? ""}
-                              onChange={(e) =>
-                                setSaleForm((p: any) => ({
-                                  ...p,
-                                  linkedin_sale_value: e.target.value,
-                                }))
-                              }
-                            />
-                          ) : (
-                            <span className="text-gray-700">
-                              {money(latest?.linkedin_sale_value)}
-                            </span>
-                          )
-                        ) : latest?.linkedin_sale_value ? (
-                          <Badge className="bg-green-100 text-green-700 border-green-200">
-                            Paid
-                          </Badge>
-                        ) : (
-                          <span className="text-gray-400">—</span>
-                        )}
-                      </div>
-
-                      {/* Portfolio */}
-                      <div className="flex items-center justify-between border rounded-md px-3 py-2">
-                        <span className="font-medium">Portfolio</span>
-                        {allowedRoles.includes(user?.role || "") ? (
-                          isEditAddons ? (
-                            <Input
-                              className="w-24 h-8"
-                              value={saleForm?.portfolio_sale_value ?? ""}
-                              onChange={(e) =>
-                                setSaleForm((p: any) => ({
-                                  ...p,
-                                  portfolio_sale_value: e.target.value,
-                                }))
-                              }
-                            />
-                          ) : (
-                            <span className="text-gray-700">
-                              {money(latest?.portfolio_sale_value)}
-                            </span>
-                          )
-                        ) : latest?.portfolio_sale_value ? (
-                          <Badge className="bg-green-100 text-green-700 border-green-200">
-                            Paid
-                          </Badge>
-                        ) : (
-                          <span className="text-gray-400">—</span>
-                        )}
-                      </div>
-
-                      {/* GitHub */}
-                      <div className="flex items-center justify-between border rounded-md px-3 py-2">
-                        <span className="font-medium">GitHub</span>
-                        {allowedRoles.includes(user?.role || "") ? (
-                          isEditAddons ? (
-                            <Input
-                              className="w-24 h-8"
-                              value={saleForm?.github_sale_value ?? ""}
-                              onChange={(e) =>
-                                setSaleForm((p: any) => ({
-                                  ...p,
-                                  github_sale_value: e.target.value,
-                                }))
-                              }
-                            />
-                          ) : (
-                            <span className="text-gray-700">
-                              {money(latest?.github_sale_value)}
-                            </span>
-                          )
-                        ) : latest?.github_sale_value ? (
-                          <Badge className="bg-green-100 text-green-700 border-green-200">
-                            Paid
-                          </Badge>
-                        ) : (
-                          <span className="text-gray-400">—</span>
-                        )}
-                      </div>
-
-                      {/* Custom */}
-                      <div className="flex items-center justify-between border rounded-md px-3 py-2">
-                        <span className="text-gray-700">
-                          {latest?.custom_label || "Custom add on sales"}
-                        </span>
-                        {allowedRoles.includes(user?.role || "") ? (
-                          isEditAddons ? (
-                            <Input
-                              className="mr-2"
-                              value={saleForm?.custom_label ?? ""}
-                              onChange={(e) =>
-                                setSaleForm((p: any) => ({
-                                  ...p,
-                                  custom_label: e.target.value,
-                                }))
-                              }
-                              placeholder="Custom add on sales"
-                            />
-                          ) : (
-                            <span className="text-gray-700">
-                              {money(latest?.custom_sale_value)}
-                            </span>
-                          )
-                        ) : latest?.custom_sale_value ? (
-                          <Badge className="bg-green-100 text-green-700 border-green-200">
-                            Paid
-                          </Badge>
-                        ) : (
-                          <span className="text-gray-400">—</span>
-                        )}
-                      </div>
+              <div className="flex-1 overflow-y-auto p-0">
+                <TabsContent value="activity" className="m-0 h-full">
+                  <div className="p-0 flex flex-col h-full">
+                    <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+                      <h4 className="text-sm font-semibold text-gray-700">Zoom Call Logs</h4>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs border-gray-300 text-gray-600"
+                        disabled={zoomLoading}
+                        onClick={() => syncZoomCalls(lead?.phone || "", true)}
+                      >
+                        {zoomLoading ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <RefreshCw className="h-3 w-3 mr-1" />}
+                        Sync from Zoom
+                      </Button>
                     </div>
 
-                    {/* Commitments */}
-                    <div className="border rounded-md p-3">
-                      <div className="font-medium mb-1">Commitments</div>
-                      {isEditAddons ? (
-                        <Textarea
-                          rows={3}
-                          value={saleForm?.commitments ?? ""}
-                          onChange={(e) =>
-                            setSaleForm((p: any) => ({
-                              ...p,
-                              commitments: e.target.value,
-                            }))
-                          }
-                        />
-                      ) : (
-                        <div className="text-gray-700 whitespace-pre-wrap">
-                          {latest?.commitments?.trim() ? latest.commitments : "—"}
+                    <div className="flex-1 overflow-auto">
+                      {(() => {
+                        // Merge and deduplicate
+                        // zoomCalls: { call_id, start_time, duration, direction, recording_url }
+                        // crmCalls: { id, lead_id, followup_date, notes, call_duration_seconds, recording_url, call_started_at }
+
+                        const merged: any[] = [];
+                        const seenZoomIds = new Set<string>();
+
+                        // 1. Process CRM calls first (they have notes)
+                        crmCalls.forEach(c => {
+                          const zoomIdMatch = c.notes?.match(/\[Zoom ID: ([A-Za-z0-9_-]+)\]/);
+                          const zoomId = zoomIdMatch ? zoomIdMatch[1] : null;
+                          if (zoomId) seenZoomIds.add(zoomId);
+
+                          merged.push({
+                            id: `crm-${c.id}`,
+                            timestamp: c.call_started_at || c.followup_date,
+                            direction: c.notes?.toLowerCase().includes("inbound") ? "inbound" : "outbound",
+                            duration: c.call_duration_seconds,
+                            recording: c.recording_url,
+                            stageOrNote: c.notes || "Call logged",
+                            isCrm: true
+                          });
+                        });
+
+                        // 2. Add Zoom calls that aren't in CRM yet
+                        zoomCalls.forEach(z => {
+                          if (seenZoomIds.has(z.call_id)) return;
+                          merged.push({
+                            id: `zoom-${z.call_id}`,
+                            timestamp: z.start_time,
+                            direction: z.direction,
+                            duration: z.duration,
+                            recording: z.recording_url,
+                            stageOrNote: "Zoom Sync",
+                            isCrm: false
+                          });
+                        });
+
+                        // 3. Sort by timestamp desc
+                        merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+                        if (merged.length === 0) {
+                          return (
+                            <div className="p-8 text-center text-gray-400 text-sm italic">
+                              No activity found.
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <table className="w-full text-sm">
+                            <thead className="bg-[#f8f9fa] border-b border-gray-200">
+                              <tr>
+                                <th className="p-3 text-left font-semibold text-gray-600">Date</th>
+                                <th className="p-3 text-left font-semibold text-gray-600">Type</th>
+                                <th className="p-3 text-left font-semibold text-gray-600">Duration</th>
+                                <th className="p-3 text-left font-semibold text-gray-600 text-center">Recording</th>
+                                <th className="p-3 text-left font-semibold text-gray-600">Activity / Notes</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {merged.map((item) => {
+                                const durationSec = item.duration || 0;
+                                const durationStr = durationSec > 0 ? `${Math.floor(durationSec / 60)}m ${durationSec % 60}s` : "-";
+                                return (
+                                  <tr key={item.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50/50">
+                                    <td className="p-3 text-gray-700 whitespace-nowrap">
+                                      {item.timestamp ? new Date(item.timestamp).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-"}
+                                    </td>
+                                    <td className="p-3 text-gray-700 capitalize">{item.direction || "-"}</td>
+                                    <td className="p-3 text-gray-700 font-mono">{durationStr}</td>
+                                    <td className="p-3 text-center">
+                                      {item.recording ? (
+                                        <a href={item.recording} target="_blank" rel="noreferrer" className="text-blue-500 hover:text-blue-700 text-xs inline-flex items-center gap-1">
+                                          <ExternalLink className="h-3 w-3" /> Recording
+                                        </a>
+                                      ) : "-"}
+                                    </td>
+                                    <td className="p-3">
+                                      {item.isCrm ? (
+                                        <div className="text-xs text-gray-600 max-w-[300px] truncate" title={item.stageOrNote}>
+                                          {item.stageOrNote}
+                                        </div>
+                                      ) : (
+                                        <Badge className="bg-gray-100 text-gray-600 border-gray-200 border rounded-full px-2 py-0 text-[10px] font-medium h-5">
+                                          Zoom Sync
+                                        </Badge>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="details" className="m-0 h-full">
+                  <div className="p-6">
+                    <div className="flex items-center justify-between mb-6">
+                      <h3 className="text-lg font-bold text-gray-800">Onboarding Details</h3>
+                      {canEdit && (
+                        <div className="flex gap-2">
+                          {isEditOnboarding ? (
+                            <>
+                              <Button className="bg-blue-600 h-8" size="sm" onClick={saveOnboarding} disabled={savingOnboarding || !onboardingForm}>
+                                {savingOnboarding && <Loader2 className="animate-spin mr-2 h-4 w-4" />} Save
+                              </Button>
+                              <Button variant="outline" size="sm" className="h-8" onClick={() => setIsEditOnboarding(false)}>Cancel</Button>
+                            </>
+                          ) : (
+                            <Button variant="outline" size="sm" className="h-8" onClick={() => setIsEditOnboarding(true)}>Edit</Button>
+                          )}
                         </div>
                       )}
                     </div>
 
-                    {/* Badge Value */}
-                    <div className="flex items-center justify-between border rounded-md px-3 py-2">
-                      <span className="font-medium">Badge</span>
-                      {isEditAddons ? (
-                        <Input
-                          className="w-24 h-8"
-                          value={saleForm?.badge_value ?? ""}
-                          onChange={(e) =>
-                            setSaleForm((p: any) => ({
-                              ...p,
-                              badge_value: e.target.value,
-                            }))
-                          }
-                          placeholder="0.00"
-                        />
+                    {!onboarding ? (
+                      <div className="text-gray-400 italic text-sm">No onboarding details submitted yet.</div>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-x-12 gap-y-6">
+                        <div className="space-y-4">
+                          <div className="grid grid-cols-3 items-center">
+                            <Label className="text-gray-500 font-normal">Full Name</Label>
+                            <div className="col-span-2">
+                              <Input className="h-8 px-0 border-none focus-visible:ring-0 shadow-none font-medium bg-transparent" value={(isEditOnboarding ? onboardingForm?.full_name : onboarding.full_name) ?? ""} readOnly={!isEditOnboarding} onChange={(e) => isEditOnboarding && handleOB("full_name", e.target.value)} />
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-3 items-center">
+                            <Label className="text-gray-500 font-normal">Personal Email</Label>
+                            <div className="col-span-2">
+                              <Input className="h-8 px-0 border-none focus-visible:ring-0 shadow-none font-medium bg-transparent" value={(isEditOnboarding ? onboardingForm?.personal_email : onboarding.personal_email) ?? ""} readOnly={!isEditOnboarding} onChange={(e) => isEditOnboarding && handleOB("personal_email", e.target.value)} />
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-3 items-center">
+                            <Label className="text-gray-500 font-normal">Company Email</Label>
+                            <div className="col-span-2">
+                              <Input className="h-8 px-0 border-none focus-visible:ring-0 shadow-none font-medium bg-transparent" value={(isEditOnboarding ? onboardingForm?.company_email : onboarding.company_email) ?? ""} readOnly={!isEditOnboarding} onChange={(e) => isEditOnboarding && handleOB("company_email", e.target.value)} />
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-3 items-center">
+                            <Label className="text-gray-500 font-normal">Callable Phone</Label>
+                            <div className="col-span-2">
+                              <Input className="h-8 px-0 border-none focus-visible:ring-0 shadow-none font-medium bg-transparent" value={(isEditOnboarding ? onboardingForm?.callable_phone : onboarding.callable_phone) ?? ""} readOnly={!isEditOnboarding} onChange={(e) => isEditOnboarding && handleOB("callable_phone", e.target.value)} />
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-3 items-center">
+                            <Label className="text-gray-500 font-normal">Date of Birth</Label>
+                            <div className="col-span-2">
+                              {isEditOnboarding ? (
+                                <Input type="date" className="h-8" value={toDateInput(onboardingForm?.date_of_birth)} onChange={(e) => handleOB("date_of_birth", e.target.value)} />
+                              ) : (
+                                <span className="text-sm font-medium h-8 flex items-center">{fmtDateOnly(onboarding.date_of_birth)}</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="space-y-4">
+                          <div className="grid grid-cols-3 items-center">
+                            <Label className="text-gray-500 font-normal">Visa Type</Label>
+                            <div className="col-span-2">
+                              <Input className="h-8 px-0 border-none focus-visible:ring-0 shadow-none font-medium bg-transparent" value={(isEditOnboarding ? onboardingForm?.visatypes : onboarding.visatypes) ?? ""} readOnly={!isEditOnboarding} onChange={(e) => isEditOnboarding && handleOB("visatypes", e.target.value)} />
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-3 items-center">
+                            <Label className="text-gray-500 font-normal">Sponsorship?</Label>
+                            <div className="col-span-2">
+                              {isEditOnboarding ? (
+                                <Input className="h-8" placeholder="Yes / No" value={toYesNo(onboardingForm?.needs_sponsorship)} onChange={(e) => handleOB("needs_sponsorship", fromYesNo(e.target.value))} />
+                              ) : (
+                                <span className="text-sm font-medium h-8 flex items-center">{yn(onboarding.needs_sponsorship)}</span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-3 items-start">
+                            <Label className="text-gray-500 font-normal pt-2">Address</Label>
+                            <div className="col-span-2">
+                              <Textarea rows={3} className="px-0 border-none focus-visible:ring-0 shadow-none font-medium resize-none min-h-0 bg-transparent" value={(isEditOnboarding ? onboardingForm?.full_address : onboarding.full_address) ?? ""} readOnly={!isEditOnboarding} onChange={(e) => isEditOnboarding && handleOB("full_address", e.target.value)} />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="mt-12 border-t pt-8">
+                      <h3 className="text-lg font-bold text-gray-800 mb-6 font-semibold">Add-ons & Requirements Summary</h3>
+                      {saleHistory.length === 0 ? (
+                        <div className="text-gray-400 italic text-sm">No add-ons recorded yet.</div>
                       ) : (
-                        <span className="text-gray-700">{money(latest?.badge_value)}</span>
+                        <div className="grid grid-cols-3 gap-6">
+                          <div className="flex flex-col border rounded-sm p-4 text-center">
+                            <span className="text-xs text-gray-500 uppercase mb-1">Applications</span>
+                            <span className="text-lg font-semibold text-gray-800">{formatMoney(latestAddons?.application_sale_value)}</span>
+                          </div>
+                          <div className="flex flex-col border rounded-sm p-4 text-center">
+                            <span className="text-xs text-gray-500 uppercase mb-1">Resume</span>
+                            <span className="text-lg font-semibold text-gray-800">{formatMoney(latestAddons?.resume_sale_value)}</span>
+                          </div>
+                          <div className="flex flex-col border rounded-sm p-4 text-center">
+                            <span className="text-xs text-gray-500 uppercase mb-1">LinkedIn</span>
+                            <span className="text-lg font-semibold text-gray-800">{formatMoney(latestAddons?.linkedin_sale_value)}</span>
+                          </div>
+                        </div>
                       )}
                     </div>
+                  </div>
+                </TabsContent>
 
-                    <div className="text-xs text-gray-500">
-                      Showing latest sale/renewal add-ons.
+                <TabsContent value="sales" className="m-0 h-full">
+                  <div className="p-0 flex flex-col h-full">
+                    <div className="p-4 border-b border-gray-100">
+                      <h4 className="text-sm font-semibold text-gray-700">Sale Done History</h4>
+                    </div>
+                    <div className="flex-1 overflow-auto">
+                      {saleHistory.length === 0 ? (
+                        <div className="p-8 text-center text-gray-400 text-sm italic">No sales done for this client.</div>
+                      ) : (
+                        <table className="w-full text-sm">
+                          <thead className="bg-[#f8f9fa] border-b border-gray-200">
+                            <tr>
+                              <th className="p-3 text-left font-semibold text-gray-600">Plan Value</th>
+                              <th className="p-3 text-left font-semibold text-gray-600">Mode</th>
+                              <th className="p-3 text-left font-semibold text-gray-600">Cycle</th>
+                              <th className="p-3 text-left font-semibold text-gray-600">Assigned To</th>
+                              <th className="p-3 text-left font-semibold text-gray-600">Status</th>
+                              <th className="p-3 text-left font-semibold text-gray-600">Renewal Date</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {saleHistory.map((sale, index) => {
+                              const onboardedDate = sale.onboarded_date ? new Date(sale.onboarded_date) : null;
+                              const subscriptionDays = Number(sale.subscription_cycle) || 0;
+                              let nextRenewalDate = "-";
+                              if (onboardedDate && !isNaN(subscriptionDays)) {
+                                const renewalDate = new Date(onboardedDate);
+                                renewalDate.setDate(renewalDate.getDate() + subscriptionDays);
+                                nextRenewalDate = renewalDate.toLocaleDateString();
+                              }
+                              return (
+                                <tr key={index} className="border-b border-gray-100 hover:bg-gray-50/50">
+                                  <td className="p-3 font-medium text-gray-800">${sale.sale_value}</td>
+                                  <td className="p-3 text-gray-700">{sale.payment_mode}</td>
+                                  <td className="p-3 text-gray-700">{sale.subscription_cycle} days</td>
+                                  <td className="p-3 text-gray-700">{sale.assigned_to || "-"}</td>
+                                  <td className="p-3"><Badge variant="outline" className="font-normal border-gray-200">{sale.finance_status}</Badge></td>
+                                  <td className="p-3 text-gray-700">{nextRenewalDate}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      )}
                     </div>
                   </div>
-                );
-              })()}
-            </CardContent>
-          </Card>
+                </TabsContent>
 
-
-          {/*  Client Feedback (Left, Bottom) */}
-          <Card className="h-full col-span-1 row-span-1">
-            <CardHeader>
-              <CardTitle className="text-2xl font-bold">Client Feedback</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {feedbackList.length === 0 ? (
-                <div className="text-gray-500 italic">No feedback from this client yet.</div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-sm border border-gray-300">
-                    <thead>
-                      <tr className="bg-blue-100 text-left">
-                        <th className="p-2 border">Email</th>
-                        <th className="p-2 border">Emotion</th>
-                        <th className="p-2 border">Rating</th>
-                        <th className="p-2 border">Renew?</th>
-                        <th className="p-2 border">Notes</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {feedbackList.map((fb, index) => (
-                        <tr key={index} className="border-t hover:bg-gray-50">
-                          <td className="p-2 border">{fb.email || "-"}</td>
-                          <td className="p-2 border capitalize">{fb.client_emotion || "-"}</td>
-                          <td className="p-2 border">{fb.rating || "-"}</td>
-                          <td className="p-2 border capitalize">{fb.renew_status || "-"}</td>
-                          <td className="p-2 border">{fb.notes || "-"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/*  Call History (Right, Top) */}
-          <Card className="h-full col-span-1 row-span-1 overflow-auto">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-2xl font-bold">Call History, {user?.name}</CardTitle>
-              <Button
-                variant="outline"
-                size="sm"
-                className="flex items-center gap-1 text-xs"
-                onClick={async () => {
-                  try {
-                    const res = await fetch(`/api/zoom-call-logs?phone=${lead?.phone || ""}`);
-                    const data = await res.json();
-                    if (data.success && data.synced_to_db > 0) {
-                      // Refresh call history
-                      const { data: updatedHistory } = await supabase
-                        .from("call_history")
-                        .select("*")
-                        .eq("lead_id", business_id)
-                        .order("call_started_at", { ascending: false });
-                      if (updatedHistory) setCallHistory(updatedHistory);
-                      alert(`Synced ${data.synced_to_db} call duration(s) from Zoom!`);
-                    } else {
-                      alert(data.error || "No new durations to sync.");
-                    }
-                  } catch (err) {
-                    console.error(err);
-                    alert("Failed to sync. Check console.");
-                  }
-                }}
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-                Sync Duration from Zoom
-              </Button>
-            </CardHeader>
-            <CardContent>
-              {callHistory.length === 0 ? (
-                <div className="text-gray-500 italic">No call records for this client.</div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-sm border border-gray-300">
-                    <thead>
-                      <tr className="bg-green-100 text-left">
-                        <th className="p-2 border">Date</th>
-                        <th className="p-2 border">Called By</th>
-                        <th className="p-2 border">Phone</th>
-                        <th className="p-2 border">Status</th>
-                        <th className="p-2 border">Duration</th>
-                        <th className="p-2 border">Notes</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {callHistory.map((call, index) => {
-                        const stage = (call.current_stage || "").toLowerCase();
-                        const statusColor =
-                          stage === "conversation done" ? "bg-blue-100 text-blue-800" :
-                            stage === "dnp" ? "bg-red-100 text-red-800" :
-                              stage === "target" ? "bg-yellow-100 text-yellow-800" :
-                                stage === "sale done" ? "bg-green-100 text-green-800" :
-                                  stage === "out of tg" ? "bg-gray-100 text-gray-600" :
-                                    stage === "not interested" ? "bg-orange-100 text-orange-800" :
-                                      stage === "prospect" ? "bg-purple-100 text-purple-800" :
-                                        "bg-gray-100 text-gray-800";
-
-                        const durationSec = call.call_duration_seconds || 0;
-                        const durationStr = durationSec > 0
-                          ? `${Math.floor(durationSec / 60).toString().padStart(2, "0")}:${(durationSec % 60).toString().padStart(2, "0")}`
-                          : "-";
-
-                        return (
-                          <tr key={index} className="border-t hover:bg-gray-50">
-                            <td className="p-2 border whitespace-nowrap">
-                              {call.call_started_at
-                                ? new Date(call.call_started_at).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
-                                : call.followup_date ? new Date(call.followup_date).toLocaleDateString() : "-"}
-                            </td>
-                            <td className="p-2 border">
-                              <span className="font-medium text-blue-700">{call.assigned_to || "-"}</span>
-                            </td>
-                            <td className="p-2 border whitespace-nowrap">{call.phone || "-"}</td>
-                            <td className="p-2 border">
-                              <span className={`text-xs font-medium px-2 py-1 rounded-full ${statusColor}`}>
-                                {call.current_stage || "-"}
-                              </span>
-                            </td>
-                            <td className="p-2 border font-mono text-center">{durationStr}</td>
-                            <td className="p-2 border text-gray-600 max-w-[200px] break-words">{call.notes || "-"}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/*  Sale Done History (Right, Bottom) */}
-          <Card className="h-full col-span-2 row-span-1">
-            <CardHeader>
-              <CardTitle className="text-2xl font-bold">Sale Done History</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {saleHistory.length === 0 ? (
-                <div className="text-gray-500 italic">No sales done for this client.</div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-sm border border-gray-300">
-                    <thead>
-                      <tr className="bg-yellow-100 text-left">
-                        <th className="p-2 border">Name</th>
-                        <th className="p-2 border">Sale Value</th>
-                        <th className="p-2 border">Payment mode</th>
-                        <th className="p-2 border">Subscription Cycle</th>
-                        <th className="p-2 border">Assigned To</th>
-                        <th className="p-2 border">Stage</th>
-                        <th className="p-2 border">Sale Done At</th>
-                        <th className="p-2 border">Onboarded At (dd/mm/yy)</th>
-                        <th className="p-2 border">Next Renewal date (dd/mm/yy)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {saleHistory.map((sale, index) => {
-                        const onboardedDate = sale.onboarded_date ? new Date(sale.onboarded_date) : null;
-                        const subscriptionDays = Number(sale.subscription_cycle) || 0;
-
-                        // Compute next renewal date
-                        let nextRenewalDate = "-";
-                        if (onboardedDate && !isNaN(subscriptionDays)) {
-                          const renewalDate = new Date(onboardedDate);
-                          renewalDate.setDate(renewalDate.getDate() + subscriptionDays);
-                          nextRenewalDate = renewalDate.toLocaleDateString();
-                        }
-
-                        return (
-                          <tr key={index} className="border-t hover:bg-gray-50">
-                            <td className="p-2 border">{sale.lead_name || "-"}</td>
-                            <td className="p-2 border">${sale.sale_value}</td>
-                            <td className="p-2 border">{sale.payment_mode}</td>
-                            <td className="p-2 border">{sale.subscription_cycle} days</td>
-                            <td className="p-2 border">{sale.assigned_to || "Not Assigned"}</td>
-                            <td className="p-2 border">{sale.finance_status}</td>
-                            <td className="p-2 border">
-                              {sale.closed_at ? new Date(sale.closed_at).toLocaleString() : "-"}
-                            </td>
-                            <td className="p-2 border">{onboardedDate ? onboardedDate.toLocaleDateString() : "-"}</td>
-                            <td className="p-2 border">{nextRenewalDate}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                <TabsContent value="feedback" className="m-0 h-full">
+                  <div className="p-0 flex flex-col h-full">
+                    <div className="p-4 border-b border-gray-100">
+                      <h4 className="text-sm font-semibold text-gray-700">Client Feedback Repository</h4>
+                    </div>
+                    <div className="flex-1 overflow-auto">
+                      {feedbackList.length === 0 ? (
+                        <div className="p-8 text-center text-gray-400 text-sm italic">No feedback from this client yet.</div>
+                      ) : (
+                        <table className="w-full text-sm">
+                          <thead className="bg-[#f8f9fa] border-b border-gray-200">
+                            <tr>
+                              <th className="p-3 text-left font-semibold text-gray-600">Email</th>
+                              <th className="p-3 text-left font-semibold text-gray-600">Emotion</th>
+                              <th className="p-3 text-left font-semibold text-gray-600 text-center">Rating</th>
+                              <th className="p-3 text-left font-semibold text-gray-600">Renew?</th>
+                              <th className="p-3 text-left font-semibold text-gray-600">Notes</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {feedbackList.map((fb, index) => (
+                              <tr key={index} className="border-b border-gray-100 hover:bg-gray-50/50">
+                                <td className="p-3 text-gray-700">{fb.email || "-"}</td>
+                                <td className="p-3 capitalize">
+                                  {fb.client_emotion === "happy" ? <span className="text-green-600">😊 Happy</span> : fb.client_emotion === "unhappy" ? <span className="text-red-600">😠 Unhappy</span> : fb.client_emotion || "-"}
+                                </td>
+                                <td className="p-3 text-center font-bold text-gray-700">{fb.rating || "-"}</td>
+                                <td className="p-3 capitalize">{fb.renew_status || "-"}</td>
+                                <td className="p-3 text-gray-600 max-w-[300px] truncate">{fb.notes || "-"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  </div>
+                </TabsContent>
+              </div>
+            </Tabs>
+          </div>
         </div>
       </div>
     </DashboardLayout>
-    // </ProtectedRoute>
   );
 }
