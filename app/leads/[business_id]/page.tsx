@@ -1,7 +1,7 @@
 // app/leads/[business_id]/page.tsx
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,13 +10,14 @@ import { Button } from "@/components/ui/button";
 import { supabase } from "@/utils/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, RefreshCw, ExternalLink, ArrowLeft, Star, Share2, Mail, Phone, MapPin, Plus, ChevronDown, MoreHorizontal, Send, FileText, CheckCircle2, Bell } from "lucide-react";
+import { Loader2, RefreshCw, ExternalLink, ArrowLeft, Star, Share2, Mail, Phone, MapPin, Plus, ChevronDown, MoreHorizontal, Send, FileText, CheckCircle2, Bell, Clock } from "lucide-react";
 import { useAuth } from "@/components/providers/auth-provider";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 
 interface Lead {
   id: string;
@@ -31,6 +32,7 @@ interface Lead {
   paid_amount?: number;
   city?: string;
   source?: string;
+  assigned_at?: string;
 }
 
 interface ResumeProgress {
@@ -114,6 +116,10 @@ function getLatestAddons(rows: any[]) {
 export default function LeadProfilePage() {
   const { business_id } = useParams();
   const router = useRouter();
+  const { user } = useAuth();
+
+  const STAGES = useMemo(() => ["Prospect", "Target", "Conversation Done", "DNP", "Out of TG", "Not Interested", "sale done"], []);
+
   const [lead, setLead] = useState<Lead | null>(null);
   const [loading, setLoading] = useState(true);
   const [saleHistory, setSaleHistory] = useState<any[]>([]);
@@ -139,6 +145,245 @@ export default function LeadProfilePage() {
   const [isEditAddons, setIsEditAddons] = useState(false);
   const [saleForm, setSaleForm] = useState<any | null>(null);
   const [savingSale, setSavingSale] = useState(false);
+  const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<string>("");
+  const [emailSubject, setEmailSubject] = useState("");
+  const [emailBody, setEmailBody] = useState("");
+  const [sendingEmail, setSendingEmail] = useState(false);
+  const [emails, setEmails] = useState<any[]>([]);
+
+  // Follow-up Dialog State
+  const [followUpDialogOpen, setFollowUpDialogOpen] = useState(false);
+  const [followUpData, setFollowUpData] = useState({ date: "", notes: "" });
+  const [pendingStageUpdate, setPendingStageUpdate] = useState<{ stage: string; callId?: number } | null>(null);
+  const [savingFollowUp, setSavingFollowUp] = useState(false);
+
+  const formatAssociateName = (email?: string, metaName?: string) => {
+    if (metaName) return metaName;
+    if (!email) return "Associate Name";
+    return email
+      .split("@")[0]
+      .split(/[\._]/) // Split by dot or underscore
+      .map(s => s.charAt(0).toUpperCase() + s.slice(1))
+      .join(" ");
+  };
+
+  const EMAIL_TEMPLATES = useMemo(() => [
+    {
+      id: "first_call",
+      name: "First Call Template",
+      subject: "Welcome to ApplyWizz - Great speaking with you!",
+      body: `Hi ${lead?.name || 'there'},\n\nIt was a pleasure speaking with you today about your career goals. I'm ${formatAssociateName(user?.email, user?.name)}, your dedicated sales associate at ApplyWizz.\n\nWe are excited to help you scale your job applications and land your dream role. I've attached some details discussed during our call for your reference.\n\nLooking forward to our next steps.\n\nBest regards,\n${formatAssociateName(user?.email, user?.name)}\nApplyWizz Team`
+    },
+    {
+      id: "followup",
+      name: "Reminder / Follow-up",
+      subject: "Checking in - ApplyWizz Next Steps",
+      body: `Hi ${lead?.name || 'there'},\n\nI'm following up on our previous conversation regarding your enrollment. I wanted to see if you had any further questions or if you're ready to proceed with scaling your career journey.\n\nPlease let me know a convenient time to reconnect.\n\nBest regards,\n${formatAssociateName(user?.email, user?.name)}\nApplyWizz Team`
+    },
+    {
+      id: "payment_success",
+      name: "Payment Success",
+      subject: "Welcome Aboard! Payment Received - ApplyWizz",
+      body: `Hi ${lead?.name || 'there'},\n\nGreat news! We have successfully received your payment. Welcome to the ApplyWizz family!\n\nOur technical team has been notified and will reach out to you within the next 24 business hours to begin your profile optimization and official onboarding.\n\nWe're thrilled to have you with us.\n\nBest regards,\n${formatAssociateName(user?.email, user?.name)}\nApplyWizz Team`
+    },
+    {
+      id: "custom",
+      name: "Custom Template",
+      subject: "",
+      body: `Hi ${lead?.name || 'there'},\n\n`
+    }
+  ], [lead, user]);
+
+  const handleTemplateSelect = (id: string) => {
+    const t = EMAIL_TEMPLATES.find(x => x.id === id);
+    if (t) {
+      setSelectedTemplate(id);
+      setEmailSubject(t.subject);
+      setEmailBody(t.body);
+    }
+  };
+
+  const handleSendMail = async () => {
+    if (!lead || !user) return;
+    setSendingEmail(true);
+
+    try {
+      // 1. Physically send the email via Graph API proxy
+      const mailRes = await fetch("/api/email/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          recipientEmail: lead.email,
+          subject: emailSubject,
+          body: emailBody,
+          senderEmail: user.email,
+        })
+      });
+
+      const mailData = await mailRes.json();
+      if (!mailData.success) {
+        throw new Error(mailData.error || "Graph API error.");
+      }
+
+      // 2. Log it to activity/call_history for unified view
+      await supabase.from("call_history").insert([{
+        lead_id: lead.business_id,
+        email: lead.email,
+        phone: lead.phone,
+        assigned_to: user?.user_metadata?.full_name || user?.email,
+        current_stage: lead.current_stage || "Prospect",
+        followup_date: new Date().toISOString().split("T")[0],
+        call_started_at: new Date().toISOString(),
+        notes: `Email Sent (Graph): ${emailSubject}`
+      }]);
+
+      // Refresh local state (Fetch latest from the new table)
+      const res = await fetch(`/api/email/sent?email=${user.email}`);
+      const data = await res.json();
+      if (data.emails) setEmails(data.emails);
+
+      setSendingEmail(false);
+      setIsEmailModalOpen(false);
+      alert(`Email sent successfully via Microsoft Graph API.`);
+    } catch (err: any) {
+      console.error(err);
+      alert("Failed to send/record email: " + err.message);
+      setSendingEmail(false);
+    }
+  };
+
+
+
+  const updateLeadStage = async (newStage: string) => {
+    if (!lead || !user) return;
+
+    if (newStage === "sale done") {
+      window.open(`/SaleUpdate/${lead.business_id}?mode=new`, "_blank");
+      return;
+    }
+
+    if (newStage === "DNP" || newStage === "Conversation Done" || newStage === "Target") {
+      setPendingStageUpdate({ stage: newStage });
+      setFollowUpDialogOpen(true);
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from("leads")
+        .update({ current_stage: newStage })
+        .eq("business_id", lead.business_id);
+
+      if (error) throw error;
+
+      await supabase.from("call_history").insert([{
+        lead_id: lead.business_id,
+        email: lead.email,
+        phone: lead.phone,
+        assigned_to: user?.name || user?.email,
+        current_stage: newStage,
+        followup_date: new Date().toISOString().split("T")[0],
+        call_started_at: new Date().toISOString(),
+        notes: `Stage changed via Profile to: ${newStage}`
+      }]);
+
+      setLead(prev => prev ? ({ ...prev, current_stage: newStage }) : null);
+      fetchAll(); // Refresh everything
+    } catch (err: any) {
+      console.error(err);
+      alert("Error updating stage: " + err.message);
+    }
+  };
+
+  const handleFollowUpSave = async () => {
+    if (!lead || !user || !pendingStageUpdate) return;
+    if (!followUpData.date) {
+      alert("Please select a follow-up date.");
+      return;
+    }
+
+    setSavingFollowUp(true);
+    try {
+      // 1. Update lead stage
+      const { error: leadErr } = await supabase
+        .from("leads")
+        .update({ current_stage: pendingStageUpdate.stage })
+        .eq("business_id", lead.business_id);
+      if (leadErr) throw leadErr;
+
+      // 2. If it was a call stage update, update that specific log too
+      if (pendingStageUpdate.callId) {
+        await supabase
+          .from("call_history")
+          .update({ current_stage: pendingStageUpdate.stage, followup_date: followUpData.date, notes: followUpData.notes })
+          .eq("id", pendingStageUpdate.callId);
+      } else {
+        // Create a new log
+        await supabase.from("call_history").insert([{
+          lead_id: lead.business_id,
+          email: lead.email,
+          phone: lead.phone,
+          assigned_to: user?.name || user?.email,
+          current_stage: pendingStageUpdate.stage,
+          followup_date: followUpData.date,
+          call_started_at: new Date().toISOString(),
+          notes: followUpData.notes || `Follow-up scheduled for ${pendingStageUpdate.stage}`
+        }]);
+      }
+
+      setLead(prev => prev ? ({ ...prev, current_stage: pendingStageUpdate.stage }) : null);
+      setFollowUpDialogOpen(false);
+      setFollowUpData({ date: "", notes: "" });
+      setPendingStageUpdate(null);
+      fetchAll();
+    } catch (err: any) {
+      console.error(err);
+      alert("Error saving follow-up: " + err.message);
+    } finally {
+      setSavingFollowUp(false);
+    }
+  };
+
+  const updateCallStage = async (callId: number, newStage: string) => {
+    if (!lead || !user) return;
+
+    if (newStage === "sale done") {
+      window.open(`/SaleUpdate/${lead.business_id}?mode=new`, "_blank");
+      return;
+    }
+
+    if (newStage === "DNP" || newStage === "Conversation Done" || newStage === "Target") {
+      setPendingStageUpdate({ stage: newStage, callId });
+      setFollowUpDialogOpen(true);
+      return;
+    }
+
+    try {
+      // 1. Update specific call history entry
+      const { error: callErr } = await supabase
+        .from("call_history")
+        .update({ current_stage: newStage })
+        .eq("id", callId);
+
+      if (callErr) throw callErr;
+
+      // 2. Update global lead stage
+      const { error: leadErr } = await supabase
+        .from("leads")
+        .update({ current_stage: newStage })
+        .eq("business_id", lead.business_id);
+
+      if (leadErr) throw leadErr;
+
+      // 3. Update local state
+      setLead(prev => prev ? ({ ...prev, current_stage: newStage }) : null);
+      fetchAll();
+    } catch (err: any) {
+      console.error(err);
+      alert("Error updating call stage: " + err.message);
+    }
+  };
 
   // small helpers
   const toYesNo = (b?: boolean | null) => (b === true ? "Yes" : b === false ? "No" : "");
@@ -228,16 +473,55 @@ export default function LeadProfilePage() {
     }
     setZoomLoading(true);
     try {
-      const res = await fetch(`/api/zoom-call-logs?phone=${encodeURIComponent(phone)}`);
-      const data = await res.json();
+      const url = `/api/zoom-call-logs?phone=${encodeURIComponent(phone)}`;
+      console.log("[Zoom Sync] Fetching:", url);
+
+      const res = await fetch(url);
+
+      // Handle non-JSON responses gracefully
+      const text = await res.text();
+      let data: any;
+      try {
+        data = JSON.parse(text);
+      } catch (_e) {
+        console.error("[Zoom Sync] Non-JSON response:", res.status, text.substring(0, 200));
+        if (isManual) alert("Zoom API returned error (" + res.status + "): " + text.substring(0, 200));
+        return;
+      }
+
       if (data.success) {
-        setZoomCalls(data.calls || []);
+        const calls = data.calls || [];
+        console.log(`[Zoom Sync] ✅ Got ${calls.length} matched calls`);
+
+        if (data.debug) {
+          console.log(`[Zoom Sync] Debug info:`, data.debug);
+          console.log(`  → Total Zoom logs scanned: ${data.debug.total_zoom_logs}`);
+          console.log(`  → Total recordings found: ${data.debug.total_recordings}`);
+          console.log(`  → Phone searched: ${data.debug.phone_searched}`);
+          console.log(`  → Last 10 digits: ${data.debug.last10_digits}`);
+        }
+
+        // Log each call's duration and recording for debugging
+        calls.forEach((c: any, i: number) => {
+          console.log(`[Zoom Sync] Call ${i}: duration=${c.duration}s, recording=${c.recording_url || 'NONE'}, time=${c.start_time}`);
+        });
+
+        setZoomCalls(calls);
+
+        if (isManual) {
+          if (calls.length > 0) {
+            alert(`✅ Synced ${calls.length} Zoom call(s).\n\nTotal Zoom logs: ${data.debug?.total_zoom_logs || '?'}\nRecordings: ${data.debug?.total_recordings || '?'}`);
+          } else {
+            alert(`⚠️ No matching Zoom calls found for this number.\n\nTotal Zoom logs scanned: ${data.debug?.total_zoom_logs || '?'}\nLast 10 digits searched: ${data.debug?.last10_digits || '?'}\n\nCheck the browser console (F12) for details.`);
+          }
+        }
       } else {
-        if (isManual) alert(data.error || "Failed to fetch Zoom calls");
+        console.error("[Zoom Sync] ❌ API error:", data.error);
+        if (isManual) alert(`Zoom sync failed: ${data.error}`);
       }
     } catch (err) {
-      console.error("Zoom sync failed:", err);
-      if (isManual) alert("Zoom fetch failed");
+      console.error("[Zoom Sync] ❌ Fetch failed:", err);
+      if (isManual) alert("Zoom fetch failed — check console for details");
     } finally {
       setZoomLoading(false);
     }
@@ -249,8 +533,6 @@ export default function LeadProfilePage() {
 
   const handleOB = <K extends keyof ClientOnboardingDetails>(key: K, val: ClientOnboardingDetails[K]) =>
     setOnboardingForm((p) => (p ? { ...p, [key]: val } : p));
-
-  const { user } = useAuth();
 
   const allowedRoles = [
     "Marketing",
@@ -269,33 +551,6 @@ export default function LeadProfilePage() {
   const canEdit = ALLOWED_EDIT.has(norm(user?.role));
 
 
-  // =========================
-  // ROLE GATING FOR ADD-ONS
-  // =========================
-  const updateLeadStatus = async (newStage: string) => {
-    if (!lead) return;
-    const { error } = await supabase
-      .from("leads")
-      .update({ current_stage: newStage })
-      .eq("business_id", lead.business_id);
-
-    if (error) {
-      console.error("Error updating lead stage:", error.message);
-      alert("Failed to update stage");
-    } else {
-      setLead({ ...lead, current_stage: newStage });
-    }
-  };
-
-  const STAGES = [
-    "Prospect",
-    "DNP",
-    "Out of TG",
-    "Not Interested",
-    "Conversation Done",
-    "Target",
-    "sale done"
-  ];
 
   const getStatusColor = (status: string) => {
     switch (status?.toLowerCase()) {
@@ -348,132 +603,137 @@ export default function LeadProfilePage() {
 
   const paidLabel = latestSaleHasPayment ? "Paid" : "Unpaid";
 
-  useEffect(() => {
+  const fetchAll = useCallback(async () => {
     if (!business_id) return;
-
-    const fetchAll = async () => {
-      // 1. Fetch Lead record first to get consistent business_id
-      const decodedId = decodeURIComponent(business_id as string).trim();
-      const { data: leadRow, error: leadErr } = await supabase
-        .from("leads")
-        .select("*")
-        .eq("business_id", decodedId)
-        .single();
-
-      if (leadErr) {
-        console.error("Error fetching lead:", leadErr.message);
-        setLead(null);
-        setLoading(false);
-        return;
-      }
-
-      setLead(leadRow as Lead);
-      const targetBusinessId = leadRow.business_id;
-
-      // 📞 Auto-sync Zoom calls based on lead phone
-      if (leadRow.phone) {
-        syncZoomCalls(leadRow.phone);
-      }
-
-      // 🧾 Sales history
-      const { data: allSales, error: salesErr } = await supabase
-        .from("sales_closure")
-        .select("*")
-        .eq("lead_id", targetBusinessId)
-        .order("closed_at", { ascending: false });
-
-      if (salesErr) {
-        console.error("Error fetching sales_closure:", salesErr.message);
-        setSaleHistory([]);
-      } else {
-        setSaleHistory(allSales ?? []);
-      }
-
-      // 🧮 Compute merged Add-ons summary
-      const mergedAddons = getLatestAddons(allSales ?? []);
-      setLatestAddons(mergedAddons);
-
-      // Client feedback
-      const { data: fbRows, error: fbErr } = await supabase
-        .from("client_feedback")
-        .select("*")
-        .eq("lead_id", targetBusinessId)
-        .order("id", { ascending: false });
-      if (fbErr) console.error("Error fetching client feedback:", fbErr.message);
-      setFeedbackList(fbRows ?? []);
-
-      // Resume Progress
-      const { data: rpRow, error: rpErr } = await supabase
-        .from("resume_progress")
-        .select("lead_id,status,pdf_path,pdf_uploaded_at,updated_at,assigned_to_email,assigned_to_name")
-        .eq("lead_id", targetBusinessId)
-        .maybeSingle();
-      if (rpErr) console.error("Error fetching resume_progress:", rpErr.message);
-      setResumeProg(rpRow ?? null);
-
-      // Portfolio Progress
-      const { data: ppRow, error: ppErr } = await supabase
-        .from("portfolio_progress")
-        .select("lead_id,status,link,assigned_email,assigned_name,updated_at")
-        .eq("lead_id", targetBusinessId)
-        .maybeSingle();
-      if (ppErr) console.error("Error fetching portfolio_progress:", ppErr.message);
-      setPortfolioProg(ppRow ?? null);
-
-      // 📝 Fetch CRM Call History (manual notes and matched zoom calls)
-      const { data: crmHistory, error: crmErr } = await supabase
-        .from("call_history")
-        .select("*")
-        .eq("lead_id", targetBusinessId)
-        .order("followup_date", { ascending: false });
-      if (crmErr) console.error("Error fetching crm history:", crmErr.message);
-      setCrmCalls(crmHistory ?? []);
-
-      // 🔁 Fetch the latest onboarding row
-      const { data: coRow, error: coErr } = await supabase
-        .from("client_onborading_details")
-        .select(`
-          id,  
-          full_name,
-          personal_email,
-          callable_phone,
-          company_email,
-          job_role_preferences,
-          salary_range,
-          location_preferences,
-          work_auth_details,
-          resume_path,
-          cover_letter_path,
-          created_at,
-          needs_sponsorship,
-          full_address,
-          linkedin_url,
-          github_url,
-          portfolio_url,
-          primary_phone,
-          addons,
-          date_of_birth,
-          lead_id,
-          visatypes
-        `)
-        .eq("lead_id", targetBusinessId)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (coErr) {
-        console.error("Error fetching client_onborading_details:", coErr.message);
-        setOnboarding(null);
-      } else {
-        setOnboarding(coRow as ClientOnboardingDetails);
-      }
-
-      setLoading(false);
-    };
-
     setLoading(true);
+    // 1. Fetch Lead record first to get consistent business_id
+    const decodedId = decodeURIComponent(business_id as string).trim();
+    const { data: leadRow, error: leadErr } = await supabase
+      .from("leads")
+      .select("*")
+      .eq("business_id", decodedId)
+      .single();
+
+    if (leadErr) {
+      console.error("Error fetching lead:", leadErr.message);
+      setLead(null);
+      setLoading(false);
+      return;
+    }
+
+    setLead(leadRow as Lead);
+    const targetBusinessId = leadRow.business_id;
+
+    // 📞 Auto-sync Zoom calls based on lead phone
+    if (leadRow.phone) {
+      syncZoomCalls(leadRow.phone);
+    }
+
+    // 🧾 Sales history
+    const { data: allSales, error: salesErr } = await supabase
+      .from("sales_closure")
+      .select("*")
+      .eq("lead_id", targetBusinessId)
+      .order("closed_at", { ascending: false });
+
+    if (salesErr) {
+      console.error("Error fetching sales_closure:", salesErr.message);
+      setSaleHistory([]);
+    } else {
+      setSaleHistory(allSales ?? []);
+    }
+
+    // 🧮 Compute merged Add-ons summary
+    const mergedAddons = getLatestAddons(allSales ?? []);
+    setLatestAddons(mergedAddons);
+
+    // Client feedback
+    const { data: fbRows, error: fbErr } = await supabase
+      .from("client_feedback")
+      .select("*")
+      .eq("lead_id", targetBusinessId)
+      .order("id", { ascending: false });
+    if (fbErr) console.error("Error fetching client feedback:", fbErr.message);
+    setFeedbackList(fbRows ?? []);
+
+    // Resume Progress
+    const { data: rpRow, error: rpErr } = await supabase
+      .from("resume_progress")
+      .select("lead_id,status,pdf_path,pdf_uploaded_at,updated_at,assigned_to_email,assigned_to_name")
+      .eq("lead_id", targetBusinessId)
+      .maybeSingle();
+    if (rpErr) console.error("Error fetching resume_progress:", rpErr.message);
+    setResumeProg(rpRow ?? null);
+
+    // Portfolio Progress
+    const { data: ppRow, error: ppErr } = await supabase
+      .from("portfolio_progress")
+      .select("lead_id,status,link,assigned_email,assigned_name,updated_at")
+      .eq("lead_id", targetBusinessId)
+      .maybeSingle();
+    if (ppErr) console.error("Error fetching portfolio_progress:", ppErr.message);
+    setPortfolioProg(ppRow ?? null);
+
+    // 📝 Fetch CRM Call History (manual notes and matched zoom calls)
+    const { data: crmHistory, error: crmErr } = await supabase
+      .from("call_history")
+      .select("*")
+      .eq("lead_id", targetBusinessId)
+      .order("followup_date", { ascending: false });
+    if (crmErr) console.error("Error fetching crm history:", crmErr.message);
+    setCrmCalls(crmHistory ?? []);
+
+    // 🔁 Fetch the latest onboarding row
+    const { data: coRow, error: coErr } = await supabase
+      .from("client_onborading_details")
+      .select(`
+        id,  
+        full_name,
+        personal_email,
+        callable_phone,
+        company_email,
+        job_role_preferences,
+        salary_range,
+        location_preferences,
+        work_auth_details,
+        resume_path,
+        cover_letter_path,
+        created_at,
+        needs_sponsorship,
+        full_address,
+        linkedin_url,
+        github_url,
+        portfolio_url,
+        primary_phone,
+        addons,
+        date_of_birth,
+        lead_id,
+        visatypes
+      `)
+      .eq("lead_id", targetBusinessId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (coErr) {
+      console.error("Error fetching client_onborading_details:", coErr.message);
+      setOnboarding(null);
+    } else {
+      setOnboarding(coRow as ClientOnboardingDetails);
+    }
+
+    // 📧 Fetch Email History from Graph Sent Table
+    const sentRes = await fetch(`/api/email/sent?email=${user?.email}`);
+    const sentData = await sentRes.json();
+    setEmails(sentData.emails || []);
+
+    setLoading(false);
+  }, [business_id, user?.email]);
+
+  useEffect(() => {
     fetchAll();
-  }, [business_id]);
+  }, [fetchAll]);
+
 
   if (loading) {
     return (
@@ -614,29 +874,27 @@ export default function LeadProfilePage() {
   return (
     <DashboardLayout>
       <div className="flex flex-col h-screen -m-6 bg-[#f4f7f9]">
-        {/* Top Header - Leadsquared Style */}
-        <div className="bg-white border-b border-gray-200 px-6 py-2 flex items-center justify-between shadow-sm">
+        {/* Top Header */}
+        <div className="bg-white border-b border-gray-200 px-6 py-2 flex items-center justify-between shadow-sm flex-shrink-0">
           <div className="flex items-center gap-6">
             <h1 className="text-xl font-medium text-gray-700">Lead Details</h1>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => router.back()}
-                className="bg-[#444] text-white hover:bg-black border-none h-7 px-3 text-xs"
-              >
-                <ArrowLeft className="w-3 h-3 mr-1" /> Back
-              </Button>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" className="text-gray-400">
-              <RefreshCw className="h-4 w-4" />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => router.back()}
+              className="bg-[#444] text-white hover:bg-black border-none h-7 px-4 rounded-sm text-xs flex items-center gap-1"
+            >
+              <ArrowLeft className="w-3 h-3" /> Back
             </Button>
-            <Button variant="ghost" size="icon" className="text-gray-400">
+          </div>
+          <div className="flex items-center gap-5">
+            <Button variant="ghost" size="icon" className="text-gray-400 hover:text-gray-600 h-8 w-8" onClick={() => syncZoomCalls(lead.phone || "", true)}>
+              <RefreshCw className={`h-4 w-4 ${zoomLoading ? 'animate-spin' : ''}`} />
+            </Button>
+            <Button variant="ghost" size="icon" className="text-gray-400 hover:text-gray-600 h-8 w-8">
               <Star className="h-4 w-4" />
             </Button>
-            <Button variant="ghost" size="icon" className="text-gray-400">
+            <Button variant="ghost" size="icon" className="text-gray-400 hover:text-gray-600 h-8 w-8">
               <Bell className="h-4 w-4" />
             </Button>
           </div>
@@ -644,351 +902,536 @@ export default function LeadProfilePage() {
 
         <div className="flex flex-1 overflow-hidden p-4 gap-4">
           {/* Left Panel - Profile & Properties */}
-          <div className="w-[340px] flex flex-col gap-4 overflow-y-auto pr-1">
-            {/* Profile Card */}
-            <div className="bg-[#002d4b] rounded-sm overflow-hidden flex flex-col shadow-md">
-              <div className="p-5 flex flex-col">
+          <div className="w-[340px] flex flex-col gap-4 overflow-y-auto pr-1 flex-shrink-0">
+            {/* Identity Card */}
+            <div className="bg-[#0b283d] rounded-sm overflow-hidden flex flex-col shadow-lg border border-[#0b283d]">
+              <div className="p-6 flex flex-col">
                 <div className="flex justify-between items-start">
-                  <div className="flex gap-2 items-center">
-                    <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />
-                    <h2 className="text-2xl font-semibold text-white truncate max-w-[200px]">{lead.name}</h2>
+                  <div className="flex gap-2 items-center min-w-0">
+                    <Star className="w-4 h-4 text-yellow-500 fill-yellow-500 flex-shrink-0" />
+                    <h2 className="text-xl font-semibold text-white truncate" title={lead.name}>{lead.name}</h2>
                   </div>
-                  <Share2 className="w-4 h-4 text-white cursor-pointer opacity-70" />
-                </div>
-                <div className="mt-1">
-                  <span className="text-[10px] text-white/50 uppercase block">Stage</span>
-                  <div className="mt-1">
-                    <Badge className={`${getStatusColor(lead.current_stage)} border rounded-full px-2 py-0 text-[10px] font-medium h-5`}>
-                      {lead.current_stage || "Prospect"}
-                    </Badge>
-                  </div>
+                  <Share2 className="w-4 h-4 text-white/70 cursor-pointer hover:text-white flex-shrink-0" />
                 </div>
 
-                <div className="mt-6 space-y-3 text-white/90">
+                <div className="mt-6 space-y-3.5 text-white/80">
                   <div className="flex items-center gap-3">
-                    <CheckCircle2 className="w-4 h-4 text-white/60" />
-                    <span className="text-sm">College B</span>
+                    <Mail className="w-4 h-4 text-white/40 flex-shrink-0" />
+                    <span className="text-sm truncate" title={lead.email}>{lead.email}</span>
                   </div>
                   <div className="flex items-center gap-3">
-                    <Mail className="w-4 h-4 text-white/60" />
-                    <span className="text-sm truncate">{lead.email}</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <Phone className="w-4 h-4 text-white/60" />
+                    <Phone className="w-4 h-4 text-white/40 flex-shrink-0" />
                     <span className="text-sm">{lead.phone}</span>
                   </div>
                   <div className="flex items-center gap-3">
-                    <MapPin className="w-4 h-4 text-white/60" />
-                    <span className="text-sm">{lead.city || "Not Specified"}</span>
+                    <MapPin className="w-4 h-4 text-white/40 flex-shrink-0" />
+                    <span className="text-sm truncate">{lead.city || "Not Specified"}</span>
                   </div>
                 </div>
               </div>
 
               {/* Stats Bar */}
-              <div className="bg-[#001a2d] grid grid-cols-4 border-t border-white/10">
-                <div className="p-3 flex flex-col items-center justify-center border-r border-white/10 text-center">
-                  <span className="text-lg font-bold text-white">{leadScore}</span>
-                  <span className="text-[10px] text-white/60 uppercase">Lead Score</span>
+              <div className="bg-[#071926] grid grid-cols-4 border-t border-white/5 uppercase">
+                <div className="py-3 flex flex-col items-center justify-center border-r border-white/5">
+                  <span className="text-lg font-bold text-white tracking-tight">{leadScore}</span>
+                  <span className="text-[9px] text-white/40 font-bold leading-tight text-center">Lead<br />Score</span>
                 </div>
-                <div className="p-3 flex flex-col items-center justify-center border-r border-white/10 text-center">
-                  <span className="text-lg font-bold text-orange-500">{engagementScore}</span>
-                  <span className="text-[10px] text-white/60 uppercase">Engaged</span>
+                <div className="py-3 flex flex-col items-center justify-center border-r border-white/5">
+                  <span className="text-lg font-bold text-[#e16d2e] tracking-tight">{engagementScore}</span>
+                  <span className="text-[9px] text-white/40 font-bold leading-tight text-center">Engaged</span>
                 </div>
-                <div className="p-3 flex flex-col items-center justify-center border-r border-white/10 text-center">
-                  <span className="text-lg font-bold text-white">{qualityScore}/10</span>
-                  <span className="text-[10px] text-white/60 uppercase">Quality</span>
+                <div className="py-3 flex flex-col items-center justify-center border-r border-white/5">
+                  <span className="text-lg font-bold text-white tracking-tight">{qualityScore}/10</span>
+                  <span className="text-[9px] text-white/40 font-bold leading-tight text-center">Quality</span>
                 </div>
-                <div className="p-3 flex flex-col items-center justify-center text-center">
-                  <span className="text-lg font-bold text-white">{leadAgeDays}d</span>
-                  <span className="text-[10px] text-white/60 uppercase">Age</span>
+                <div className="py-3 flex flex-col items-center justify-center">
+                  <span className="text-lg font-bold text-white tracking-tight">{leadAgeDays}d</span>
+                  <span className="text-[9px] text-white/40 font-bold leading-tight text-center">Age</span>
                 </div>
               </div>
             </div>
 
-            {/* Lead Properties Card */}
+            {/* Properties Card */}
             <div className="bg-white border border-gray-200 rounded-sm shadow-sm overflow-hidden flex flex-col">
-              <div className="bg-gray-50 border-b border-gray-200 p-2 px-3">
+              <div className="bg-white border-b border-gray-100 p-3 px-4 flex justify-between items-center">
                 <h3 className="text-sm font-semibold text-gray-700">Lead Properties</h3>
+                <Select
+                  value={lead.current_stage || "Prospect"}
+                  onValueChange={(val) => updateLeadStage(val)}
+                >
+                  <SelectTrigger className={`w-36 h-7 text-[10px] font-bold uppercase border shadow-sm rounded-full ${getStatusColor(lead.current_stage)}`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="z-50">
+                    {STAGES.filter(s => {
+                      if (lead.current_stage !== "Prospect" && s === "Prospect") return false;
+                      return true;
+                    }).map(s => (
+                      <SelectItem key={s} value={s} className="p-1">
+                        <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase border ${getStatusColor(s)}`}>
+                          {s}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-              <div className="p-4 space-y-3 text-sm">
-                <div className="flex justify-between border-b pb-2">
-                  <span className="text-gray-500">Owner</span>
-                  <span className="font-medium text-gray-800">{lead.assigned_to || "Not Assigned"}</span>
+              <div className="p-4 py-2 space-y-0 text-sm">
+                <div className="flex justify-between py-2 border-b border-gray-50 last:border-0">
+                  <span className="text-gray-400">Owner</span>
+                  <span className="text-gray-700 font-medium">{lead.assigned_to || "Rahul"}</span>
                 </div>
-                <div className="flex justify-between border-b pb-2">
-                  <span className="text-gray-500">Lead Source</span>
-                  <span className="font-medium text-gray-800">{lead.source}</span>
+                <div className="flex justify-between py-2 border-b border-gray-50 last:border-0">
+                  <span className="text-gray-400">Lead Source</span>
+                  <span className="text-gray-700 font-medium">{lead.source || "—"}</span>
                 </div>
-                <div className="flex justify-between border-b pb-2">
-                  <span className="text-gray-500">Lead Age</span>
-                  <span className="font-medium text-gray-800">{leadAgeDays} Days</span>
+                <div className="flex justify-between py-2 border-b border-gray-50 last:border-0">
+                  <span className="text-gray-400">Lead Age</span>
+                  <span className="text-gray-700 font-medium">{leadAgeDays} Days</span>
                 </div>
-                <div className="flex justify-between border-b pb-2">
-                  <span className="text-gray-500">Created At</span>
-                  <span className="font-medium text-gray-800">{new Date(lead.created_at).toLocaleDateString()}</span>
+                <div className="flex justify-between py-2 border-b border-gray-50 last:border-0">
+                  <span className="text-gray-400">Created At</span>
+                  <span className="text-gray-700 font-medium">{new Date(lead.created_at).toLocaleDateString()}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Business ID</span>
-                  <span className="font-medium text-gray-800">{lead.business_id}</span>
+                <div className="flex justify-between py-2 last:border-0">
+                  <span className="text-gray-400">Business ID</span>
+                  <span className="text-gray-700 font-medium">{lead.business_id}</span>
                 </div>
               </div>
             </div>
           </div>
           {/* Right Panel - Content Tabs */}
           <div className="flex-1 flex flex-col bg-white border border-gray-200 rounded-sm shadow-sm overflow-hidden">
-            <Tabs defaultValue="activity" className="flex flex-col h-full">
-              <div className="bg-gray-50 border-b border-gray-200 px-4 flex items-center justify-between">
-                <TabsList className="bg-transparent h-12 gap-6 p-0">
-                  <TabsTrigger value="activity" className="h-full rounded-none border-b-2 border-transparent data-[state=active]:border-orange-500 data-[state=active]:bg-transparent text-gray-600 data-[state=active]:text-orange-500 font-medium px-1">Activity History</TabsTrigger>
-                  <TabsTrigger value="details" className="h-full rounded-none border-b-2 border-transparent data-[state=active]:border-orange-500 data-[state=active]:bg-transparent text-gray-600 data-[state=active]:text-orange-500 font-medium px-1">Lead Details</TabsTrigger>
-                  <TabsTrigger value="sales" className="h-full rounded-none border-b-2 border-transparent data-[state=active]:border-orange-500 data-[state=active]:bg-transparent text-gray-600 data-[state=active]:text-orange-500 font-medium px-1">Sales History</TabsTrigger>
-                  <TabsTrigger value="feedback" className="h-full rounded-none border-b-2 border-transparent data-[state=active]:border-orange-500 data-[state=active]:bg-transparent text-gray-600 data-[state=active]:text-orange-500 font-medium px-1">Feedback</TabsTrigger>
+            <Tabs defaultValue="details" className="flex flex-col h-full">
+              <div className="bg-white border-b border-gray-200 px-6 flex items-center justify-between flex-shrink-0">
+                <TabsList className="bg-transparent h-12 gap-8 p-0">
+                  <TabsTrigger value="activity" className="h-full rounded-none border-b-2 border-transparent data-[state=active]:border-[#e16d2e] data-[state=active]:bg-transparent text-gray-500 data-[state=active]:text-[#e16d2e] font-medium px-0 text-sm">Activity History</TabsTrigger>
+                  <TabsTrigger value="emails" className="h-full rounded-none border-b-2 border-transparent data-[state=active]:border-[#e16d2e] data-[state=active]:bg-transparent text-gray-500 data-[state=active]:text-[#e16d2e] font-medium px-0 text-sm">Emails</TabsTrigger>
+                  <TabsTrigger value="details" className="h-full rounded-none border-b-2 border-transparent data-[state=active]:border-[#e16d2e] data-[state=active]:bg-transparent text-gray-500 data-[state=active]:text-[#e16d2e] font-medium px-0 text-sm">Lead Details</TabsTrigger>
+                  <TabsTrigger value="sales" className="h-full rounded-none border-b-2 border-transparent data-[state=active]:border-[#e16d2e] data-[state=active]:bg-transparent text-gray-500 data-[state=active]:text-[#e16d2e] font-medium px-0 text-sm">Sales History</TabsTrigger>
+                  <TabsTrigger value="feedback" className="h-full rounded-none border-b-2 border-transparent data-[state=active]:border-[#e16d2e] data-[state=active]:bg-transparent text-gray-500 data-[state=active]:text-[#e16d2e] font-medium px-0 text-sm">Feedback</TabsTrigger>
                 </TabsList>
 
                 <div className="flex gap-2">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="sm" className="h-8 border-gray-300 text-gray-600 font-normal">
-                        Lead Actions <ChevronDown className="ml-2 h-4 w-4" />
+                      <Button variant="outline" size="sm" className="h-9 border-gray-300 text-gray-700 font-medium px-4 rounded-sm">
+                        Lead Actions <ChevronDown className="ml-2 h-4 w-4 text-gray-400" />
                       </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => setIsEditOnboarding(true)}>Edit Onboarding</DropdownMenuItem>
-                      <DropdownMenuItem onClick={downloadLatestResume} disabled={!onboarding?.resume_path}>Download Resume</DropdownMenuItem>
-                      <DropdownMenuItem onClick={downloadLatestCover} disabled={!onboarding?.cover_letter_path}>Download Cover Letter</DropdownMenuItem>
+                    <DropdownMenuContent align="end" className="w-48">
+                      <DropdownMenuItem className="cursor-pointer" onClick={downloadLatestResume} disabled={!onboarding?.resume_path}>Download Resume</DropdownMenuItem>
+                      <DropdownMenuItem className="cursor-pointer" onClick={downloadLatestCover} disabled={!onboarding?.cover_letter_path}>Download Cover Letter</DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
 
-                  <Button size="sm" className="h-8 bg-blue-600 hover:bg-blue-700 text-white font-normal px-4">
-                    Send Email
-                  </Button>
+                  {["sales", "sales associate", "admin"].includes(norm(user?.role)) && (
+                    <Button
+                      size="sm"
+                      className="h-9 bg-[#4a7df4] hover:bg-blue-600 text-white font-medium px-6 rounded-sm"
+                      onClick={() => setIsEmailModalOpen(true)}
+                    >
+                      Send Email
+                    </Button>
+                  )}
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-0">
-                <TabsContent value="activity" className="m-0 h-full">
-                  <div className="p-0 flex flex-col h-full">
-                    <div className="p-4 border-b border-gray-100 flex items-center justify-between">
-                      <h4 className="text-sm font-semibold text-gray-700">Zoom Call Logs</h4>
+              <div className="flex-1 overflow-y-auto">
+                <TabsContent value="activity" className="m-0 h-full p-0">
+                  <div className="flex flex-col h-full">
+                    <div className="p-4 border-b border-gray-50 flex items-center justify-between bg-gray-50/30">
+                      <h4 className="text-sm font-semibold text-gray-700">Call Logs & Activity History</h4>
                       <Button
-                        variant="outline"
+                        variant="ghost"
                         size="sm"
-                        className="h-7 text-xs border-gray-300 text-gray-600"
+                        className="h-8 text-[10px] font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                        onClick={() => lead?.phone && syncZoomCalls(lead.phone, true)}
                         disabled={zoomLoading}
-                        onClick={() => syncZoomCalls(lead?.phone || "", true)}
                       >
-                        {zoomLoading ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <RefreshCw className="h-3 w-3 mr-1" />}
-                        Sync from Zoom
+                        {zoomLoading ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <RefreshCw className="w-3 h-3 mr-1" />}
+                        SYNC ZOOM LOGS
                       </Button>
                     </div>
+                    {(() => {
+                      const merged: any[] = [];
+                      const addedKeys = new Set<string>();
+                      const seenZoomIds = new Set<string>();
 
-                    <div className="flex-1 overflow-auto">
-                      {(() => {
-                        // Merge and deduplicate
-                        // zoomCalls: { call_id, start_time, duration, direction, recording_url }
-                        // crmCalls: { id, lead_id, followup_date, notes, call_duration_seconds, recording_url, call_started_at }
+                      // Pass 1: Add CRM calls and track matched Zoom IDs
+                      crmCalls.forEach(c => {
+                        const zoomIdMatch = c.notes?.match(/\[Zoom ID: ([A-Za-z0-9_-]+)\]/);
+                        const zoomId = zoomIdMatch ? zoomIdMatch[1] : null;
 
-                        const merged: any[] = [];
-                        const seenZoomIds = new Set<string>();
+                        let zMatch = zoomCalls.find(z => z.call_id === zoomId);
+                        if (!zMatch && !zoomId) {
+                          const callTimeStr = c.call_started_at || c.followup_date;
+                          if (callTimeStr) {
+                            const cTime = new Date(callTimeStr).getTime();
+                            zMatch = zoomCalls.find(z => {
+                              const zTime = new Date(z.start_time).getTime();
+                              return Math.abs(cTime - zTime) < 10 * 60 * 1000;
+                            });
+                          }
+                        }
 
-                        // 1. Process CRM calls first (they have notes)
-                        crmCalls.forEach(c => {
-                          const zoomIdMatch = c.notes?.match(/\[Zoom ID: ([A-Za-z0-9_-]+)\]/);
-                          const zoomId = zoomIdMatch ? zoomIdMatch[1] : null;
-                          if (zoomId) seenZoomIds.add(zoomId);
+                        if (zMatch) seenZoomIds.add(zMatch.call_id);
 
+                        const key = `crm-${c.id}`;
+                        if (!addedKeys.has(key)) {
+                          addedKeys.add(key);
                           merged.push({
-                            id: `crm-${c.id}`,
+                            id: key,
+                            dbId: c.id,
                             timestamp: c.call_started_at || c.followup_date,
                             direction: c.notes?.toLowerCase().includes("inbound") ? "inbound" : "outbound",
-                            duration: c.call_duration_seconds,
-                            recording: c.recording_url,
+                            duration: c.call_duration_seconds || zMatch?.duration || 0,
+                            recording: c.recording_url || zMatch?.recording_url,
                             stageOrNote: c.notes || "Call logged",
+                            currentStage: c.current_stage,
                             isCrm: true
                           });
-                        });
+                        }
+                      });
 
-                        // 2. Add Zoom calls that aren't in CRM yet
-                        zoomCalls.forEach(z => {
-                          if (seenZoomIds.has(z.call_id)) return;
+                      // Pass 2: Add unmatched Zoom calls
+                      zoomCalls.forEach(z => {
+                        if (seenZoomIds.has(z.call_id)) return;
+
+                        const key = `zoom-${z.call_id}`;
+                        if (!addedKeys.has(key)) {
+                          addedKeys.add(key);
+
+                          const resultLabel = z.call_result === "answered" || z.call_result === "connected"
+                            ? "Connected" : z.call_result === "no_answer" ? "No Answer"
+                              : z.call_result === "hang_up" ? "Hung Up" : z.call_result || "";
+                          const typeLabel = z.connect_type === "internal" ? "Internal" : "External";
+                          const noteText = [
+                            z.direction === "inbound" ? "📞 Inbound" : "📤 Outbound",
+                            typeLabel,
+                            z.other_party ? "with " + z.other_party : "",
+                            resultLabel ? "• " + resultLabel : "",
+                          ].filter(Boolean).join(" ");
+
                           merged.push({
-                            id: `zoom-${z.call_id}`,
+                            id: key,
                             timestamp: z.start_time,
                             direction: z.direction,
                             duration: z.duration,
                             recording: z.recording_url,
-                            stageOrNote: "Zoom Sync",
+                            stageOrNote: noteText,
+                            connectType: z.connect_type,
+                            callResult: z.call_result,
+                            otherParty: z.other_party,
                             isCrm: false
                           });
-                        });
-
-                        // 3. Sort by timestamp desc
-                        merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-
-                        if (merged.length === 0) {
-                          return (
-                            <div className="p-8 text-center text-gray-400 text-sm italic">
-                              No activity found.
-                            </div>
-                          );
                         }
+                      });
 
-                        return (
-                          <table className="w-full text-sm">
-                            <thead className="bg-[#f8f9fa] border-b border-gray-200">
-                              <tr>
-                                <th className="p-3 text-left font-semibold text-gray-600">Date</th>
-                                <th className="p-3 text-left font-semibold text-gray-600">Type</th>
-                                <th className="p-3 text-left font-semibold text-gray-600">Duration</th>
-                                <th className="p-3 text-left font-semibold text-gray-600 text-center">Recording</th>
-                                <th className="p-3 text-left font-semibold text-gray-600">Activity / Notes</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {merged.map((item) => {
-                                const durationSec = item.duration || 0;
-                                const durationStr = durationSec > 0 ? `${Math.floor(durationSec / 60)}m ${durationSec % 60}s` : "-";
-                                return (
-                                  <tr key={item.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50/50">
-                                    <td className="p-3 text-gray-700 whitespace-nowrap">
-                                      {item.timestamp ? new Date(item.timestamp).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-"}
-                                    </td>
-                                    <td className="p-3 text-gray-700 capitalize">{item.direction || "-"}</td>
-                                    <td className="p-3 text-gray-700 font-mono">{durationStr}</td>
-                                    <td className="p-3 text-center">
-                                      {item.recording ? (
-                                        <a href={item.recording} target="_blank" rel="noreferrer" className="text-blue-500 hover:text-blue-700 text-xs inline-flex items-center gap-1">
-                                          <ExternalLink className="h-3 w-3" /> Recording
-                                        </a>
-                                      ) : "-"}
-                                    </td>
-                                    <td className="p-3">
-                                      {item.isCrm ? (
-                                        <div className="text-xs text-gray-600 max-w-[300px] truncate" title={item.stageOrNote}>
-                                          {item.stageOrNote}
+                      merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+                      if (merged.length === 0) return <div className="p-12 text-center text-gray-400 italic text-sm">No activity recorded for this lead.</div>;
+
+                      return (
+                        <div className="divide-y divide-gray-100">
+                          {merged.map((item) => {
+                            const dur = item.duration || 0;
+                            return (
+                              <div key={item.id} className="p-4 hover:bg-gray-50/50 transition-colors flex gap-4">
+                                <div className="w-40 flex-shrink-0">
+                                  <div className="text-xs font-medium text-gray-700">{item.timestamp ? new Date(item.timestamp).toLocaleString("en-IN", { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : "-"}</div>
+                                  <div className="text-[10px] text-gray-400 uppercase mt-0.5 tracking-wider">{item.direction} {dur > 0 ? `• ${Math.floor(dur / 60)}m ${dur % 60}s` : ""}</div>
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-start justify-between gap-6">
+                                    <div className="flex-1">
+                                      <div className="flex items-center gap-3 mb-1.5">
+                                        <div className="text-sm font-bold text-gray-900">
+                                          {item.isCrm ? (
+                                            <span className="text-blue-600">Sales Record</span>
+                                          ) : (
+                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                              <span className="text-orange-600">Zoom Call</span>
+                                              {item.connectType && (
+                                                <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${item.connectType === "internal" ? "bg-violet-50 text-violet-600 border border-violet-200" : "bg-emerald-50 text-emerald-600 border border-emerald-200"}`}>
+                                                  {item.connectType}
+                                                </span>
+                                              )}
+                                              {item.callResult && (
+                                                <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${item.callResult === "answered" || item.callResult === "connected"
+                                                  ? "bg-green-50 text-green-600 border border-green-200"
+                                                  : item.callResult === "no_answer"
+                                                    ? "bg-yellow-50 text-yellow-600 border border-yellow-200"
+                                                    : "bg-red-50 text-red-500 border border-red-200"
+                                                  }`}>
+                                                  {item.callResult === "answered" || item.callResult === "connected" ? "Connected" : item.callResult === "no_answer" ? "No Answer" : item.callResult === "hang_up" ? "Hung Up" : item.callResult}
+                                                </span>
+                                              )}
+                                            </div>
+                                          )}
                                         </div>
-                                      ) : (
-                                        <Badge className="bg-gray-100 text-gray-600 border-gray-200 border rounded-full px-2 py-0 text-[10px] font-medium h-5">
-                                          Zoom Sync
-                                        </Badge>
+                                        {dur > 0 && (
+                                          <div className="flex items-center gap-1 px-2 py-0.5 bg-gray-100 rounded-full text-[10px] font-bold text-gray-600 border border-gray-200 uppercase">
+                                            <Clock className="w-3 h-3" />
+                                            {Math.floor(dur / 60)}m {dur % 60}s
+                                          </div>
+                                        )}
+                                      </div>
+                                      {item.recording && (
+                                        <div className="mt-2 flex items-center gap-2 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg px-3 py-2 border border-blue-100">
+                                          <Phone className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
+                                          <span className="text-[10px] font-bold text-blue-600 uppercase flex-shrink-0">Recording</span>
+                                          <audio
+                                            controls
+                                            preload="none"
+                                            className="h-8 flex-1 min-w-0"
+                                            style={{ maxWidth: "100%" }}
+                                          >
+                                            <source src={item.recording} type="audio/mpeg" />
+                                            Your browser does not support audio playback.
+                                          </audio>
+                                        </div>
                                       )}
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        );
-                      })()}
+                                      <div className="text-sm text-gray-700 leading-relaxed italic pr-4 mt-1">
+                                        &quot;{item.stageOrNote}&quot;
+                                      </div>
+                                    </div>
+
+                                    {item.isCrm && (
+                                      <div className="flex flex-col items-end gap-2 shrink-0">
+                                        <div className="text-[9px] uppercase font-black text-gray-400 tracking-tighter">Update status</div>
+                                        <Select
+                                          value={item.currentStage || "Prospect"}
+                                          onValueChange={(val) => updateCallStage(item.dbId, val)}
+                                        >
+                                          <SelectTrigger className={`w-36 h-8 text-[10px] font-bold uppercase border shadow-sm rounded-full ${getStatusColor(item.currentStage)}`}>
+                                            <SelectValue />
+                                          </SelectTrigger>
+                                          <SelectContent className="z-50">
+                                            {STAGES.filter(s => {
+                                              if (item.currentStage !== "Prospect" && s === "Prospect") return false;
+                                              return true;
+                                            }).map(s => (
+                                              <SelectItem key={s} value={s} className="p-1">
+                                                <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase border ${getStatusColor(s)}`}>
+                                                  {s}
+                                                </span>
+                                              </SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="emails" className="m-0 h-full p-0">
+                  <div className="flex flex-col h-full bg-gray-50/20">
+                    <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-white">
+                      <h4 className="text-sm font-bold text-gray-800">Email History</h4>
+                      <Badge variant="outline" className="text-[10px] font-bold uppercase">{emails.length} Emails</Badge>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                      {emails.length === 0 ? (
+                        <div className="h-40 flex flex-col items-center justify-center text-gray-400 space-y-2">
+                          <Mail className="w-8 h-8 opacity-20" />
+                          <p className="text-xs">No emails sent to this client yet.</p>
+                        </div>
+                      ) : (
+                        <Accordion type="multiple" className="space-y-4">
+                          {emails.map((mail: any, idx) => (
+                            <AccordionItem key={mail.id || idx} value={mail.id || `item-${idx}`} className="bg-white border border-gray-200 rounded-md shadow-sm overflow-hidden border-b-0">
+                              <AccordionTrigger className="hover:no-underline px-5 py-4 text-left">
+                                <div className="flex justify-between items-start w-full pr-4">
+                                  <div className="flex items-center gap-3">
+                                    <div className="bg-blue-50 p-2 rounded-full">
+                                      <Mail className="w-4 h-4 text-blue-600" />
+                                    </div>
+                                    <div>
+                                      <h5 className="text-sm font-bold text-gray-900 line-clamp-1">{mail.subject}</h5>
+                                      <p className="text-[11px] text-gray-500">Sent on {new Date(mail.created_at).toLocaleString()}</p>
+                                    </div>
+                                  </div>
+                                  <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-none rounded-full text-[10px] px-2 h-5 lowercase shrink-0">{mail.status || 'sent'}</Badge>
+                                </div>
+                              </AccordionTrigger>
+                              <AccordionContent className="px-5 pb-5">
+                                <div className="flex justify-between items-start mb-4 bg-gray-50/50 p-3 rounded border border-gray-100/50">
+                                  <div className="flex flex-col gap-0.5">
+                                    <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">From</span>
+                                    <span className="text-gray-800 font-semibold text-xs">{formatAssociateName(mail.salesperson_email)}</span>
+                                    <span className="text-[10px] text-gray-400">{mail.salesperson_email}</span>
+                                  </div>
+                                  <div className="flex flex-col gap-0.5 text-right">
+                                    <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">To Client</span>
+                                    <span className="text-gray-800 font-semibold text-xs">{mail.client_email}</span>
+                                    <Badge variant="outline" className={`mt-1 self-end text-[9px] h-4 ${mail.status === 'sent' ? 'text-green-600 bg-green-50' : 'text-red-600 bg-red-50'}`}>{mail.status}</Badge>
+                                  </div>
+                                </div>
+                                <div className="text-sm text-gray-600 whitespace-pre-wrap leading-relaxed bg-white p-4 rounded-md border border-gray-100">
+                                  {mail.body}
+                                </div>
+                              </AccordionContent>
+                            </AccordionItem>
+                          ))}
+                        </Accordion>
+                      )}
                     </div>
                   </div>
                 </TabsContent>
 
-                <TabsContent value="details" className="m-0 h-full">
-                  <div className="p-6">
-                    <div className="flex items-center justify-between mb-6">
-                      <h3 className="text-lg font-bold text-gray-800">Onboarding Details</h3>
+                <TabsContent value="details" className="m-0 h-full p-8">
+                  <div className="max-w-4xl">
+                    <div className="flex items-center justify-between mb-8">
+                      <h3 className="text-lg font-bold text-gray-900 tracking-tight">Onboarding Details</h3>
                       {canEdit && (
-                        <div className="flex gap-2">
-                          {isEditOnboarding ? (
-                            <>
-                              <Button className="bg-blue-600 h-8" size="sm" onClick={saveOnboarding} disabled={savingOnboarding || !onboardingForm}>
-                                {savingOnboarding && <Loader2 className="animate-spin mr-2 h-4 w-4" />} Save
-                              </Button>
-                              <Button variant="outline" size="sm" className="h-8" onClick={() => setIsEditOnboarding(false)}>Cancel</Button>
-                            </>
-                          ) : (
-                            <Button variant="outline" size="sm" className="h-8" onClick={() => setIsEditOnboarding(true)}>Edit</Button>
-                          )}
-                        </div>
+                        <Button variant="outline" size="sm" className="h-8 border-gray-300 text-gray-700 font-medium px-5 rounded-sm" onClick={() => setIsEditOnboarding(true)}>
+                          Edit
+                        </Button>
                       )}
                     </div>
 
                     {!onboarding ? (
-                      <div className="text-gray-400 italic text-sm">No onboarding details submitted yet.</div>
+                      <div className="p-12 text-center bg-gray-50 border border-dashed rounded-md text-gray-400 text-sm">
+                        No onboarding information found for this lead.
+                      </div>
                     ) : (
-                      <div className="grid grid-cols-2 gap-x-12 gap-y-6">
-                        <div className="space-y-4">
-                          <div className="grid grid-cols-3 items-center">
-                            <Label className="text-gray-500 font-normal">Full Name</Label>
-                            <div className="col-span-2">
-                              <Input className="h-8 px-0 border-none focus-visible:ring-0 shadow-none font-medium bg-transparent" value={(isEditOnboarding ? onboardingForm?.full_name : onboarding.full_name) ?? ""} readOnly={!isEditOnboarding} onChange={(e) => isEditOnboarding && handleOB("full_name", e.target.value)} />
-                            </div>
+                      <div className="grid grid-cols-2 gap-x-20 gap-y-6">
+                        {/* Column 1 */}
+                        <div className="space-y-6">
+                          <div className="grid grid-cols-[160px_1fr] gap-4 items-baseline">
+                            <span className="text-gray-400 text-sm">Full Name</span>
+                            <span className="text-gray-800 text-sm font-medium">{onboarding.full_name || "—"}</span>
                           </div>
-                          <div className="grid grid-cols-3 items-center">
-                            <Label className="text-gray-500 font-normal">Personal Email</Label>
-                            <div className="col-span-2">
-                              <Input className="h-8 px-0 border-none focus-visible:ring-0 shadow-none font-medium bg-transparent" value={(isEditOnboarding ? onboardingForm?.personal_email : onboarding.personal_email) ?? ""} readOnly={!isEditOnboarding} onChange={(e) => isEditOnboarding && handleOB("personal_email", e.target.value)} />
-                            </div>
+                          <div className="grid grid-cols-[160px_1fr] gap-4 items-baseline">
+                            <span className="text-gray-400 text-sm">Personal Email</span>
+                            <span className="text-gray-800 text-sm font-medium">{onboarding.personal_email || "—"}</span>
                           </div>
-                          <div className="grid grid-cols-3 items-center">
-                            <Label className="text-gray-500 font-normal">Company Email</Label>
-                            <div className="col-span-2">
-                              <Input className="h-8 px-0 border-none focus-visible:ring-0 shadow-none font-medium bg-transparent" value={(isEditOnboarding ? onboardingForm?.company_email : onboarding.company_email) ?? ""} readOnly={!isEditOnboarding} onChange={(e) => isEditOnboarding && handleOB("company_email", e.target.value)} />
-                            </div>
+                          <div className="grid grid-cols-[160px_1fr] gap-4 items-baseline">
+                            <span className="text-gray-400 text-sm">Company Email</span>
+                            <span className="text-gray-800 text-sm font-medium">{onboarding.company_email || "—"}</span>
                           </div>
-                          <div className="grid grid-cols-3 items-center">
-                            <Label className="text-gray-500 font-normal">Callable Phone</Label>
-                            <div className="col-span-2">
-                              <Input className="h-8 px-0 border-none focus-visible:ring-0 shadow-none font-medium bg-transparent" value={(isEditOnboarding ? onboardingForm?.callable_phone : onboarding.callable_phone) ?? ""} readOnly={!isEditOnboarding} onChange={(e) => isEditOnboarding && handleOB("callable_phone", e.target.value)} />
-                            </div>
+                          <div className="grid grid-cols-[160px_1fr] gap-4 items-baseline">
+                            <span className="text-gray-400 text-sm">Callable Phone</span>
+                            <span className="text-gray-800 text-sm font-medium">{onboarding.callable_phone || "—"}</span>
                           </div>
-                          <div className="grid grid-cols-3 items-center">
-                            <Label className="text-gray-500 font-normal">Date of Birth</Label>
-                            <div className="col-span-2">
-                              {isEditOnboarding ? (
-                                <Input type="date" className="h-8" value={toDateInput(onboardingForm?.date_of_birth)} onChange={(e) => handleOB("date_of_birth", e.target.value)} />
-                              ) : (
-                                <span className="text-sm font-medium h-8 flex items-center">{fmtDateOnly(onboarding.date_of_birth)}</span>
-                              )}
-                            </div>
+                          <div className="grid grid-cols-[160px_1fr] gap-4 items-baseline">
+                            <span className="text-gray-400 text-sm">primary Phone</span>
+                            <span className="text-gray-800 text-sm font-medium">{onboarding.primary_phone || "—"}</span>
+                          </div>
+                          <div className="grid grid-cols-[160px_1fr] gap-4 items-baseline">
+                            <span className="text-gray-400 text-sm">Last Submitted</span>
+                            <span className="text-gray-800 text-sm font-medium">{fmt(onboarding.created_at)}</span>
+                          </div>
+                          <div className="grid grid-cols-[160px_1fr] gap-4 items-baseline border-t border-gray-50 pt-4">
+                            <span className="text-gray-400 text-sm">LinkedIn URL</span>
+                            {onboarding.linkedin_url ? (
+                              <a href={onboarding.linkedin_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline text-sm font-medium truncate" title={onboarding.linkedin_url}>
+                                {onboarding.linkedin_url}
+                              </a>
+                            ) : <span className="text-gray-400 text-sm italic">Not Provided</span>}
+                          </div>
+                          <div className="grid grid-cols-[160px_1fr] gap-4 items-baseline">
+                            <span className="text-gray-400 text-sm">Github link</span>
+                            {onboarding.github_url ? (
+                              <a href={onboarding.github_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline text-sm font-medium truncate" title={onboarding.github_url}>
+                                {onboarding.github_url}
+                              </a>
+                            ) : <span className="text-gray-400 text-sm italic">Not Provided</span>}
+                          </div>
+                          <div className="grid grid-cols-[160px_1fr] gap-4 items-baseline">
+                            <span className="text-gray-400 text-sm">Portfolio link</span>
+                            {onboarding.portfolio_url ? (
+                              <a href={onboarding.portfolio_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline text-sm font-medium truncate" title={onboarding.portfolio_url}>
+                                {onboarding.portfolio_url}
+                              </a>
+                            ) : <span className="text-gray-400 text-sm italic">Not Provided</span>}
                           </div>
                         </div>
 
-                        <div className="space-y-4">
-                          <div className="grid grid-cols-3 items-center">
-                            <Label className="text-gray-500 font-normal">Visa Type</Label>
-                            <div className="col-span-2">
-                              <Input className="h-8 px-0 border-none focus-visible:ring-0 shadow-none font-medium bg-transparent" value={(isEditOnboarding ? onboardingForm?.visatypes : onboarding.visatypes) ?? ""} readOnly={!isEditOnboarding} onChange={(e) => isEditOnboarding && handleOB("visatypes", e.target.value)} />
-                            </div>
+                        {/* Column 2 */}
+                        <div className="space-y-6">
+                          <div className="grid grid-cols-[160px_1fr] gap-4 items-baseline">
+                            <span className="text-gray-400 text-sm">Visa Type</span>
+                            <span className="text-gray-800 text-sm font-medium uppercase font-bold">{onboarding.visatypes || "—"}</span>
                           </div>
-                          <div className="grid grid-cols-3 items-center">
-                            <Label className="text-gray-500 font-normal">Sponsorship?</Label>
-                            <div className="col-span-2">
-                              {isEditOnboarding ? (
-                                <Input className="h-8" placeholder="Yes / No" value={toYesNo(onboardingForm?.needs_sponsorship)} onChange={(e) => handleOB("needs_sponsorship", fromYesNo(e.target.value))} />
-                              ) : (
-                                <span className="text-sm font-medium h-8 flex items-center">{yn(onboarding.needs_sponsorship)}</span>
-                              )}
-                            </div>
+                          <div className="grid grid-cols-[160px_1fr] gap-4 items-baseline">
+                            <span className="text-gray-400 text-sm">Sponsorship?</span>
+                            <span className="text-gray-800 text-sm font-medium">{yn(onboarding.needs_sponsorship)}</span>
                           </div>
-                          <div className="grid grid-cols-3 items-start">
-                            <Label className="text-gray-500 font-normal pt-2">Address</Label>
-                            <div className="col-span-2">
-                              <Textarea rows={3} className="px-0 border-none focus-visible:ring-0 shadow-none font-medium resize-none min-h-0 bg-transparent" value={(isEditOnboarding ? onboardingForm?.full_address : onboarding.full_address) ?? ""} readOnly={!isEditOnboarding} onChange={(e) => isEditOnboarding && handleOB("full_address", e.target.value)} />
-                            </div>
+                          <div className="grid grid-cols-[160px_1fr] gap-4 items-baseline">
+                            <span className="text-gray-400 text-sm">Date of Birth</span>
+                            <span className="text-gray-800 text-sm font-medium">{onboarding.date_of_birth ? new Date(onboarding.date_of_birth).toLocaleDateString('en-GB') : "—"}</span>
+                          </div>
+                          <div className="grid grid-cols-[160px_1fr] gap-4 items-baseline">
+                            <span className="text-gray-400 text-sm">Address</span>
+                            <span className="text-gray-800 text-sm font-medium leading-relaxed">{onboarding.full_address || "—"}</span>
+                          </div>
+                          <div className="grid grid-cols-[160px_1fr] gap-4 items-baseline border-t border-gray-50 pt-4">
+                            <span className="text-gray-400 text-sm">Job Role Preferences</span>
+                            <span className="text-gray-800 text-sm font-medium">{listFmt(onboarding.job_role_preferences)}</span>
+                          </div>
+                          <div className="grid grid-cols-[160px_1fr] gap-4 items-baseline">
+                            <span className="text-gray-400 text-sm">Location Preferences</span>
+                            <span className="text-gray-800 text-sm font-medium">{listFmt(onboarding.location_preferences)}</span>
+                          </div>
+                          <div className="grid grid-cols-[160px_1fr] gap-4 items-baseline">
+                            <span className="text-gray-400 text-sm">Salary Range</span>
+                            <span className="text-gray-800 text-sm font-medium">{onboarding.salary_range || "—"}</span>
+                          </div>
+                          <div className="grid grid-cols-[160px_1fr] gap-4 items-baseline">
+                            <span className="text-gray-400 text-sm">Work Auth Details</span>
+                            <span className="text-gray-800 text-sm font-medium leading-relaxed">{onboarding.work_auth_details || "—"}</span>
                           </div>
                         </div>
                       </div>
                     )}
 
-                    <div className="mt-12 border-t pt-8">
-                      <h3 className="text-lg font-bold text-gray-800 mb-6 font-semibold">Add-ons & Requirements Summary</h3>
+                    <div className="mt-16 pt-8 border-t border-gray-100">
+                      <div className="flex items-center justify-between mb-8">
+                        <h3 className="text-lg font-bold text-gray-900 tracking-tight">Add-ons & Requirements Summary</h3>
+                        {canEdit && (
+                          <Button variant="outline" size="sm" className="h-8 border-gray-300 text-gray-700 font-medium px-5 rounded-sm" onClick={() => setIsEditAddons(true)}>
+                            Edit
+                          </Button>
+                        )}
+                      </div>
                       {saleHistory.length === 0 ? (
-                        <div className="text-gray-400 italic text-sm">No add-ons recorded yet.</div>
+                        <div className="p-8 text-center text-gray-400 italic text-sm">No sales or add-ons recorded.</div>
                       ) : (
                         <div className="grid grid-cols-3 gap-6">
-                          <div className="flex flex-col border rounded-sm p-4 text-center">
-                            <span className="text-xs text-gray-500 uppercase mb-1">Applications</span>
-                            <span className="text-lg font-semibold text-gray-800">{formatMoney(latestAddons?.application_sale_value)}</span>
+                          <div className="bg-white border border-gray-100 rounded-md p-6 py-4 flex flex-col items-center justify-center shadow-sm hover:shadow-md transition-shadow">
+                            <span className="text-[9px] text-gray-400 uppercase font-bold tracking-widest mb-2">Applications</span>
+                            <span className="text-xl font-bold text-gray-800">{formatMoney(latestAddons?.application_sale_value)}</span>
                           </div>
-                          <div className="flex flex-col border rounded-sm p-4 text-center">
-                            <span className="text-xs text-gray-500 uppercase mb-1">Resume</span>
-                            <span className="text-lg font-semibold text-gray-800">{formatMoney(latestAddons?.resume_sale_value)}</span>
+                          <div className="bg-white border border-gray-100 rounded-md p-6 py-4 flex flex-col items-center justify-center shadow-sm hover:shadow-md transition-shadow">
+                            <span className="text-[9px] text-gray-400 uppercase font-bold tracking-widest mb-2">Resume</span>
+                            <span className="text-xl font-bold text-gray-800">{formatMoney(latestAddons?.resume_sale_value)}</span>
                           </div>
-                          <div className="flex flex-col border rounded-sm p-4 text-center">
-                            <span className="text-xs text-gray-500 uppercase mb-1">LinkedIn</span>
-                            <span className="text-lg font-semibold text-gray-800">{formatMoney(latestAddons?.linkedin_sale_value)}</span>
+                          <div className="bg-white border border-gray-100 rounded-md p-6 py-4 flex flex-col items-center justify-center shadow-sm hover:shadow-md transition-shadow">
+                            <span className="text-[9px] text-gray-400 uppercase font-bold tracking-widest mb-2">LinkedIn</span>
+                            <span className="text-xl font-bold text-gray-800">{formatMoney(latestAddons?.linkedin_sale_value)}</span>
+                          </div>
+                          <div className="bg-white border border-gray-100 rounded-md p-6 py-4 flex flex-col items-center justify-center shadow-sm hover:shadow-md transition-shadow">
+                            <span className="text-[9px] text-gray-400 uppercase font-bold tracking-widest mb-2">Github</span>
+                            <span className="text-xl font-bold text-gray-800">{formatMoney(latestAddons?.github_sale_value)}</span>
+                          </div>
+                          <div className="bg-white border border-gray-100 rounded-md p-6 py-4 flex flex-col items-center justify-center shadow-sm hover:shadow-md transition-shadow">
+                            <span className="text-[9px] text-gray-400 uppercase font-bold tracking-widest mb-2">Commitments</span>
+                            <span className="text-xl font-bold text-gray-800">{latestAddons?.commitments || "—"}</span>
+                          </div>
+                          <div className="bg-white border border-gray-100 rounded-md p-6 py-4 flex flex-col items-center justify-center shadow-sm hover:shadow-md transition-shadow">
+                            <span className="text-[9px] text-gray-400 uppercase font-bold tracking-widest mb-2">Badge</span>
+                            <span className="text-xl font-bold text-gray-800">{latestAddons?.badge_value || "—"}</span>
                           </div>
                         </div>
                       )}
@@ -997,94 +1440,383 @@ export default function LeadProfilePage() {
                 </TabsContent>
 
                 <TabsContent value="sales" className="m-0 h-full">
-                  <div className="p-0 flex flex-col h-full">
-                    <div className="p-4 border-b border-gray-100">
-                      <h4 className="text-sm font-semibold text-gray-700">Sale Done History</h4>
+                  <div className="p-0">
+                    <div className="p-4 border-b border-gray-50 bg-gray-50/30 font-semibold text-gray-700 text-sm">
+                      Payment & Subscription History
                     </div>
-                    <div className="flex-1 overflow-auto">
-                      {saleHistory.length === 0 ? (
-                        <div className="p-8 text-center text-gray-400 text-sm italic">No sales done for this client.</div>
-                      ) : (
+                    {saleHistory.length === 0 ? (
+                      <div className="p-12 text-center text-gray-400 italic text-sm">No sales records found for this client.</div>
+                    ) : (
+                      <div className="overflow-x-auto">
                         <table className="w-full text-sm">
-                          <thead className="bg-[#f8f9fa] border-b border-gray-200">
+                          <thead className="bg-[#f8f9fa] border-b border-gray-100">
                             <tr>
-                              <th className="p-3 text-left font-semibold text-gray-600">Plan Value</th>
-                              <th className="p-3 text-left font-semibold text-gray-600">Mode</th>
-                              <th className="p-3 text-left font-semibold text-gray-600">Cycle</th>
-                              <th className="p-3 text-left font-semibold text-gray-600">Assigned To</th>
-                              <th className="p-3 text-left font-semibold text-gray-600">Status</th>
-                              <th className="p-3 text-left font-semibold text-gray-600">Renewal Date</th>
+                              <th className="p-4 text-left font-bold text-gray-500 uppercase text-[10px] tracking-wider">Plan Value</th>
+                              <th className="p-4 text-left font-bold text-gray-500 uppercase text-[10px] tracking-wider">Payment Mode</th>
+                              <th className="p-4 text-left font-bold text-gray-500 uppercase text-[10px] tracking-wider">Cycle</th>
+                              <th className="p-4 text-left font-bold text-gray-500 uppercase text-[10px] tracking-wider">Account Manager</th>
+                              <th className="p-4 text-left font-bold text-gray-500 uppercase text-[10px] tracking-wider">Status</th>
+                              <th className="p-4 text-left font-bold text-gray-500 uppercase text-[10px] tracking-wider">Renewal Due</th>
                             </tr>
                           </thead>
-                          <tbody>
-                            {saleHistory.map((sale, index) => {
+                          <tbody className="divide-y divide-gray-50">
+                            {saleHistory.map((sale, idx) => {
                               const onboardedDate = sale.onboarded_date ? new Date(sale.onboarded_date) : null;
                               const subscriptionDays = Number(sale.subscription_cycle) || 0;
-                              let nextRenewalDate = "-";
+                              let nextRenewalDate = "—";
                               if (onboardedDate && !isNaN(subscriptionDays)) {
                                 const renewalDate = new Date(onboardedDate);
                                 renewalDate.setDate(renewalDate.getDate() + subscriptionDays);
-                                nextRenewalDate = renewalDate.toLocaleDateString();
+                                nextRenewalDate = renewalDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
                               }
                               return (
-                                <tr key={index} className="border-b border-gray-100 hover:bg-gray-50/50">
-                                  <td className="p-3 font-medium text-gray-800">${sale.sale_value}</td>
-                                  <td className="p-3 text-gray-700">{sale.payment_mode}</td>
-                                  <td className="p-3 text-gray-700">{sale.subscription_cycle} days</td>
-                                  <td className="p-3 text-gray-700">{sale.assigned_to || "-"}</td>
-                                  <td className="p-3"><Badge variant="outline" className="font-normal border-gray-200">{sale.finance_status}</Badge></td>
-                                  <td className="p-3 text-gray-700">{nextRenewalDate}</td>
+                                <tr key={idx} className="hover:bg-gray-50/50 transition-colors">
+                                  <td className="p-4 font-bold text-gray-800 tracking-tight">${sale.sale_value}</td>
+                                  <td className="p-4 text-gray-600 font-medium">{sale.payment_mode}</td>
+                                  <td className="p-4 text-gray-600">{sale.subscription_cycle} days</td>
+                                  <td className="p-4 text-[#4a7df4] font-semibold">{sale.assigned_to || "Rahul"}</td>
+                                  <td className="p-4"><Badge variant="outline" className="font-bold text-[10px] uppercase rounded-full px-2 border-gray-200 text-gray-500 bg-gray-50/50">{sale.finance_status}</Badge></td>
+                                  <td className="p-4 text-gray-700 font-medium">{nextRenewalDate}</td>
                                 </tr>
                               );
                             })}
                           </tbody>
                         </table>
-                      )}
-                    </div>
+                      </div>
+                    )}
                   </div>
                 </TabsContent>
 
                 <TabsContent value="feedback" className="m-0 h-full">
-                  <div className="p-0 flex flex-col h-full">
-                    <div className="p-4 border-b border-gray-100">
-                      <h4 className="text-sm font-semibold text-gray-700">Client Feedback Repository</h4>
+                  <div className="p-0 text-gray-800">
+                    <div className="p-4 border-b border-gray-50 bg-gray-50/30 font-semibold text-gray-700 text-sm">
+                      Client Feedback Repository
                     </div>
-                    <div className="flex-1 overflow-auto">
-                      {feedbackList.length === 0 ? (
-                        <div className="p-8 text-center text-gray-400 text-sm italic">No feedback from this client yet.</div>
-                      ) : (
+                    {feedbackList.length === 0 ? (
+                      <div className="p-12 text-center text-gray-400 italic text-sm">No feedback received yet.</div>
+                    ) : (
+                      <div className="overflow-x-auto">
                         <table className="w-full text-sm">
-                          <thead className="bg-[#f8f9fa] border-b border-gray-200">
+                          <thead className="bg-[#f8f9fa] border-b border-gray-100">
                             <tr>
-                              <th className="p-3 text-left font-semibold text-gray-600">Email</th>
-                              <th className="p-3 text-left font-semibold text-gray-600">Emotion</th>
-                              <th className="p-3 text-left font-semibold text-gray-600 text-center">Rating</th>
-                              <th className="p-3 text-left font-semibold text-gray-600">Renew?</th>
-                              <th className="p-3 text-left font-semibold text-gray-600">Notes</th>
+                              <th className="p-4 text-left font-bold text-gray-500 uppercase text-[10px] tracking-wider">Date</th>
+                              <th className="p-4 text-left font-bold text-gray-500 uppercase text-[10px] tracking-wider">Emotion</th>
+                              <th className="p-4 text-center font-bold text-gray-500 uppercase text-[10px] tracking-wider">Rating</th>
+                              <th className="p-4 text-left font-bold text-gray-500 uppercase text-[10px] tracking-wider">Notes / Success Story</th>
                             </tr>
                           </thead>
-                          <tbody>
-                            {feedbackList.map((fb, index) => (
-                              <tr key={index} className="border-b border-gray-100 hover:bg-gray-50/50">
-                                <td className="p-3 text-gray-700">{fb.email || "-"}</td>
-                                <td className="p-3 capitalize">
-                                  {fb.client_emotion === "happy" ? <span className="text-green-600">😊 Happy</span> : fb.client_emotion === "unhappy" ? <span className="text-red-600">😠 Unhappy</span> : fb.client_emotion || "-"}
+                          <tbody className="divide-y divide-gray-50">
+                            {feedbackList.map((fb, idx) => (
+                              <tr key={idx} className="hover:bg-gray-50/50 transition-colors">
+                                <td className="p-4 text-gray-500 text-xs">{new Date(fb.created_at || fb.id).toLocaleDateString()}</td>
+                                <td className="p-4">
+                                  {fb.client_emotion === "happy" ? <span className="bg-green-50 text-green-700 px-3 py-1 rounded-full text-[10px] font-bold uppercase border border-green-100 italic">😊 Happy</span> : <span className="bg-red-50 text-red-700 px-3 py-1 rounded-full text-[10px] font-bold uppercase border border-red-100 italic">😠 Unhappy</span>}
                                 </td>
-                                <td className="p-3 text-center font-bold text-gray-700">{fb.rating || "-"}</td>
-                                <td className="p-3 capitalize">{fb.renew_status || "-"}</td>
-                                <td className="p-3 text-gray-600 max-w-[300px] truncate">{fb.notes || "-"}</td>
+                                <td className="p-4 text-center font-black text-[#e16d2e] text-xl">{fb.rating || "—"}</td>
+                                <td className="p-4 text-gray-600 leading-relaxed text-sm italic max-w-sm truncate" title={fb.notes}>"{fb.notes || "No additional comments provided."}"</td>
                               </tr>
                             ))}
                           </tbody>
                         </table>
-                      )}
-                    </div>
+                      </div>
+                    )}
                   </div>
                 </TabsContent>
               </div>
             </Tabs>
           </div>
         </div>
+
+        {/* Global Save/Edit Onboarding Dialog */}
+        {isEditOnboarding && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+              <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+                <h2 className="text-xl font-bold text-gray-900">Edit Onboarding Details</h2>
+                <Button variant="ghost" size="icon" onClick={() => setIsEditOnboarding(false)}><ExternalLink className="w-5 h-5 rotate-45" /></Button>
+              </div>
+
+              {onboardingForm && (
+                <div className="p-8 grid grid-cols-2 gap-8">
+                  <div className="space-y-4">
+                    <div className="space-y-1.5">
+                      <Label>Full Name</Label>
+                      <Input value={onboardingForm.full_name || ""} onChange={(e) => handleOB("full_name", e.target.value)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Personal Email</Label>
+                      <Input value={onboardingForm.personal_email || ""} onChange={(e) => handleOB("personal_email", e.target.value)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Callable Phone</Label>
+                      <Input value={onboardingForm.callable_phone || ""} onChange={(e) => handleOB("callable_phone", e.target.value)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>primary Phone</Label>
+                      <Input value={onboardingForm.primary_phone || ""} onChange={(e) => handleOB("primary_phone", e.target.value)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Company Email</Label>
+                      <Input value={onboardingForm.company_email || ""} onChange={(e) => handleOB("company_email", e.target.value)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>LinkedIn URL</Label>
+                      <Input value={onboardingForm.linkedin_url || ""} onChange={(e) => handleOB("linkedin_url", e.target.value)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Github link</Label>
+                      <Input value={onboardingForm.github_url || ""} onChange={(e) => handleOB("github_url", e.target.value)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Portfolio link</Label>
+                      <Input value={onboardingForm.portfolio_url || ""} onChange={(e) => handleOB("portfolio_url", e.target.value)} />
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="space-y-1.5">
+                      <Label>Visa Type</Label>
+                      <Input value={onboardingForm.visatypes || ""} onChange={(e) => handleOB("visatypes", e.target.value)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Sponsorship?</Label>
+                      <Select value={toYesNo(onboardingForm.needs_sponsorship)} onValueChange={(val) => handleOB("needs_sponsorship", fromYesNo(val))}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Yes">Yes</SelectItem>
+                          <SelectItem value="No">No</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Date of Birth</Label>
+                      <Input type="date" value={toDateInput(onboardingForm.date_of_birth)} onChange={(e) => handleOB("date_of_birth", e.target.value)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Salary Range</Label>
+                      <Input value={onboardingForm.salary_range || ""} onChange={(e) => handleOB("salary_range", e.target.value)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Job Role Preferences (Comma separated)</Label>
+                      <Input value={jobRoleCSV} onChange={(e) => setJobRoleCSV(e.target.value)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Location Preferences (Comma separated)</Label>
+                      <Input value={locCSV} onChange={(e) => setLocCSV(e.target.value)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Work Auth Details</Label>
+                      <Textarea value={onboardingForm.work_auth_details || ""} onChange={(e) => handleOB("work_auth_details", e.target.value)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Full Address</Label>
+                      <Textarea value={onboardingForm.full_address || ""} onChange={(e) => handleOB("full_address", e.target.value)} rows={2} />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="p-6 border-t border-gray-100 flex justify-end gap-3 bg-gray-50/50">
+                <Button variant="outline" onClick={() => setIsEditOnboarding(false)}>Cancel</Button>
+                <Button onClick={saveOnboarding} disabled={savingOnboarding} className="bg-blue-600 hover:bg-blue-700 min-w-[140px]">
+                  {savingOnboarding ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : null} Save Changes
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Edit Add-ons Dialog */}
+        {isEditAddons && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+              <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+                <h2 className="text-xl font-bold text-gray-900">Edit Add-ons & Requirements</h2>
+                <Button variant="ghost" size="icon" onClick={() => setIsEditAddons(false)}><ExternalLink className="w-5 h-5 rotate-45" /></Button>
+              </div>
+
+              {saleForm && (
+                <div className="p-8 space-y-6">
+                  <div className="grid grid-cols-2 gap-6">
+                    <div className="space-y-1.5">
+                      <Label>Application Sale Value ($)</Label>
+                      <Input type="number" value={saleForm.application_sale_value || 0} onChange={(e) => setSaleForm({ ...saleForm, application_sale_value: e.target.value })} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Resume Sale Value ($)</Label>
+                      <Input type="number" value={saleForm.resume_sale_value || 0} onChange={(e) => setSaleForm({ ...saleForm, resume_sale_value: e.target.value })} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>LinkedIn Sale Value ($)</Label>
+                      <Input type="number" value={saleForm.linkedin_sale_value || 0} onChange={(e) => setSaleForm({ ...saleForm, linkedin_sale_value: e.target.value })} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Github Sale Value ($)</Label>
+                      <Input type="number" value={saleForm.github_sale_value || 0} onChange={(e) => setSaleForm({ ...saleForm, github_sale_value: e.target.value })} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Commitments</Label>
+                      <Input value={saleForm.commitments || ""} onChange={(e) => setSaleForm({ ...saleForm, commitments: e.target.value })} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Badge Value</Label>
+                      <Input type="number" value={saleForm.badge_value || ""} onChange={(e) => setSaleForm({ ...saleForm, badge_value: e.target.value })} />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label>Custom Add-on Label</Label>
+                    <Input value={saleForm.custom_label || ""} onChange={(e) => setSaleForm({ ...saleForm, custom_label: e.target.value })} placeholder="e.g. Portfolio" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Custom Add-on Value ($)</Label>
+                    <Input type="number" value={saleForm.custom_sale_value || 0} onChange={(e) => setSaleForm({ ...saleForm, custom_sale_value: e.target.value })} />
+                  </div>
+                </div>
+              )}
+
+              <div className="p-6 border-t border-gray-100 flex justify-end gap-3 bg-gray-50/50">
+                <Button variant="outline" onClick={() => setIsEditAddons(false)}>Cancel</Button>
+                <Button onClick={saveAddons} disabled={savingSale} className="bg-blue-600 hover:bg-blue-700 min-w-[140px]">
+                  {savingSale ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : null} Save Add-ons
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Send Email Modal */}
+        {isEmailModalOpen && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+            <div className="bg-white rounded-lg shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col border border-gray-100 scale-in-center">
+              <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-gray-50/30">
+                <div className="flex items-center gap-3">
+                  <div className="bg-blue-100 p-2 rounded-full">
+                    <Mail className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <h2 className="text-lg font-bold text-gray-900">Compose Email to Client</h2>
+                </div>
+                <Button variant="ghost" size="icon" onClick={() => setIsEmailModalOpen(false)} className="hover:bg-red-50 hover:text-red-500 rounded-full transition-colors">
+                  <ExternalLink className="w-5 h-5 rotate-45" />
+                </Button>
+              </div>
+
+              <div className="p-8 space-y-6 overflow-y-auto max-h-[70vh]">
+                <div className="grid grid-cols-2 gap-6 p-4 bg-blue-50/30 rounded-lg border border-blue-50">
+                  <div className="space-y-1">
+                    <Label className="text-[10px] uppercase font-bold text-blue-600 tracking-wider">From (Sales Associate)</Label>
+                    <div className="text-sm font-semibold text-gray-800">{user?.name || "Sales Associate"}</div>
+                    <div className="text-[11px] text-gray-500">{user?.email}</div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px] uppercase font-bold text-blue-600 tracking-wider">To (Client)</Label>
+                    <div className="text-sm font-semibold text-gray-800">{lead?.name}</div>
+                    <div className="text-[11px] text-gray-500">{lead?.email}</div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-xs font-bold text-gray-700">Select Template</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {EMAIL_TEMPLATES.map(t => (
+                      <button
+                        key={t.id}
+                        onClick={() => handleTemplateSelect(t.id)}
+                        className={`px-4 py-2 rounded-full text-xs font-semibold transition-all border ${selectedTemplate === t.id
+                          ? "bg-blue-600 text-white border-blue-600 shadow-lg shadow-blue-200"
+                          : "bg-white text-gray-600 border-gray-200 hover:border-blue-400 hover:text-blue-600"
+                          }`}
+                      >
+                        {t.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-4 pt-2">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-bold text-gray-700">Subject Line</Label>
+                    <Input
+                      value={emailSubject}
+                      onChange={(e) => setEmailSubject(e.target.value)}
+                      placeholder="Add an engaging subject..."
+                      className="bg-gray-50/50 border-gray-200 focus:bg-white"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-bold text-gray-700">Message Content</Label>
+                    <Textarea
+                      rows={10}
+                      value={emailBody}
+                      onChange={(e) => setEmailBody(e.target.value)}
+                      placeholder="Type your personal message here..."
+                      className="bg-gray-50/50 border-gray-200 focus:bg-white resize-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-6 border-t border-gray-100 flex justify-end gap-3 bg-gray-50/50">
+                <Button variant="outline" onClick={() => setIsEmailModalOpen(false)} className="rounded-sm px-6 font-semibold">Discard</Button>
+                <Button
+                  onClick={handleSendMail}
+                  disabled={sendingEmail || !emailSubject || !emailBody}
+                  className="bg-blue-600 hover:bg-blue-700 min-w-[160px] rounded-sm font-bold shadow-lg shadow-blue-200"
+                >
+                  {sendingEmail ? (
+                    <><Loader2 className="animate-spin mr-2 h-4 w-4" /> Sending...</>
+                  ) : (
+                    <><Send className="w-4 h-4 mr-2" /> Send Email Now</>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+        {/* Follow-up Dialog */}
+        {followUpDialogOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <div className="bg-white rounded-lg shadow-2xl w-full max-w-md overflow-hidden flex flex-col border border-gray-100">
+              <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-gray-50/30">
+                <h2 className="text-lg font-bold text-gray-900">Schedule Follow-up</h2>
+                <Button variant="ghost" size="icon" onClick={() => setFollowUpDialogOpen(false)} className="rounded-full">
+                  <ExternalLink className="w-5 h-5 rotate-45" />
+                </Button>
+              </div>
+
+              <div className="p-6 space-y-4">
+                <div className="space-y-1.5">
+                  <Label className="text-sm font-semibold text-gray-700">Follow-up Date</Label>
+                  <Input
+                    type="date"
+                    value={followUpData.date}
+                    onChange={(e) => setFollowUpData({ ...followUpData, date: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-sm font-semibold text-gray-700">Notes</Label>
+                  <Textarea
+                    rows={4}
+                    placeholder="Add notes..."
+                    value={followUpData.notes}
+                    onChange={(e) => setFollowUpData({ ...followUpData, notes: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className="p-5 border-t border-gray-100 flex justify-end gap-3 bg-gray-50/50">
+                <Button variant="outline" onClick={() => setFollowUpDialogOpen(false)}>Cancel</Button>
+                <Button
+                  onClick={handleFollowUpSave}
+                  disabled={savingFollowUp || !followUpData.date}
+                  className="bg-gray-900 text-white hover:bg-black min-w-[120px]"
+                >
+                  {savingFollowUp ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : null} Save Follow-up
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </DashboardLayout>
   );
