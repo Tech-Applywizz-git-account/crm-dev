@@ -178,6 +178,7 @@ export default function SalesPage() {
   const [editedNote, setEditedNote] = useState("");
 
   const [allLeads, setAllLeads] = useState<Lead[]>([]);
+  const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
   const [kpiFilteredLeads, setKpiFilteredLeads] = useState<Lead[]>([]);
   const [userEmail, setUserEmail] = useState<string>("");
 
@@ -572,6 +573,10 @@ export default function SalesPage() {
   };
 
   const searchLeadsGlobally = async (term: string) => {
+    if (!term.trim()) {
+      if (userProfile) fetchLeads(userProfile); // Reset to normal view if empty
+      return;
+    }
     try {
       const { data, error } = await supabase
         .from("leads")
@@ -606,16 +611,24 @@ export default function SalesPage() {
 
       setLeads(leadsData);
       setTotalRecords(leadsData.length);
+      setPage(1);
     } catch (err) {
       console.error("Global search failed:", err);
     }
   };
 
-  useEffect(() => {
-    if (!searchTerm.trim()) {
-      if (userProfile) fetchLeads(userProfile);
-    }
-  }, [searchTerm]);
+  // Debounce search to prevent lag
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleSearchChange = (val: string) => {
+    setSearchTerm(val);
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+
+    searchTimeoutRef.current = setTimeout(() => {
+      searchLeadsGlobally(val);
+    }, 400); // 400ms debounce
+  };
+
 
 
 
@@ -1231,7 +1244,26 @@ export default function SalesPage() {
         <div className="flex min-h-screen w-full bg-[#f1f4f9]">
           <AppSidebar />
           <div className="flex-1 flex flex-col min-h-screen overflow-hidden text-gray-800">
-            <Header />
+            <Header
+              searchTerm={searchTerm}
+              onSearchChange={handleSearchChange}
+            >
+              <div className="flex items-center gap-2 ml-4">
+                <Button variant="outline" size="sm" onClick={downloadAllTablesData} className="h-8 gap-2 border-gray-300 font-normal bg-white">
+                  <Download className="w-4 h-4 text-gray-400" /> <span className="hidden lg:inline">Export All Data</span>
+                </Button>
+
+                <Button variant="outline" size="sm" onClick={() => setView("activity")} className="h-8 gap-2 border-gray-300 font-normal bg-white">
+                  <ListOrdered className="w-4 h-4 text-gray-400" /> <span className="hidden lg:inline">Activity View</span>
+                </Button>
+
+                {["Admin", "Super Admin"].includes(userProfile?.roles || "") && (
+                  <Button variant="outline" size="sm" onClick={() => setView("call_stats")} className="h-8 gap-2 border-gray-300 font-normal bg-white">
+                    <BarChart className="w-4 h-4 text-gray-400" /> <span className="hidden lg:inline">View Call Stats</span>
+                  </Button>
+                )}
+              </div>
+            </Header>
             <div className="flex flex-1 overflow-hidden">
               {/* Main Content Area */}
               <div className="flex-1 flex flex-col overflow-y-auto px-6 py-4">
@@ -1265,45 +1297,19 @@ export default function SalesPage() {
                     {/* Filter Section - LeadSquared Style */}
                     <div className="bg-white border rounded shadow-sm mb-6">
                       {/* Row 1: Search & Base Buttons */}
-                      <div className="p-3 border-b flex flex-wrap items-center gap-3">
-                        <div className="flex items-center border rounded overflow-hidden flex-1 max-w-sm">
-                          <Input
-                            type="text"
-                            value={searchTerm}
-                            onChange={(e) => {
-                              setSearchTerm(e.target.value);
-                              searchLeadsGlobally(e.target.value);
-                            }}
-                            placeholder="Find ID, Name, Mail, Mobile, Source..."
-                            className="border-none focus-visible:ring-0 h-8 text-sm"
-                          />
-                          <div className="bg-gray-100 h-8 w-10 flex items-center justify-center border-l cursor-pointer hover:bg-gray-200">
-                            <Search className="w-4 h-4 text-gray-500" />
-                          </div>
+                      {/* Row 1: Tags & Panel Toggle */}
+                      <div className="p-3 border-b flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <Button variant="outline" size="sm" className="h-8 gap-2 border-gray-300 font-normal">
+                            <Tag className="w-4 h-4 text-gray-500" /> Tags
+                          </Button>
                         </div>
 
-                        <div className="h-8 w-px bg-gray-200 mx-2" />
-
-                        <Button variant="outline" size="sm" className="h-8 gap-2 border-gray-300 font-normal">
-                          <Tag className="w-4 h-4 text-gray-500" /> Tags
-                        </Button>
-
-                        <Button variant="outline" size="sm" onClick={downloadAllTablesData} className="h-8 gap-2 border-gray-300 font-normal">
-                          <Download className="w-4 h-4 text-gray-500" /> Export All Data
-                        </Button>
-
-                        <Button variant="outline" size="sm" onClick={() => setView("activity")} className="h-8 gap-2 border-gray-300 font-normal">
-                          <ListOrdered className="w-4 h-4 text-gray-500" /> Activity View
-                        </Button>
-
-                        {["Admin", "Super Admin"].includes(userProfile?.roles || "") && (
-                          <Button variant="outline" size="sm" onClick={() => setView("call_stats")} className="h-8 gap-2 border-gray-300 font-normal">
-                            <BarChart className="w-4 h-4 text-gray-500" /> View Call Stats
-                          </Button>
-                        )}
-
-                        <div className="ml-auto text-sm text-[#00a1e1] hover:underline cursor-pointer flex items-center gap-1">
-                          Collapse Panel <ChevronRight className="w-4 h-4" />
+                        <div
+                          className="text-sm text-[#00a1e1] hover:underline cursor-pointer flex items-center gap-1 font-medium"
+                          onClick={() => setIsRightPanelCollapsed(!isRightPanelCollapsed)}
+                        >
+                          {isRightPanelCollapsed ? "Expand Panel" : "Collapse Panel"} <ChevronRight className={cn("w-4 h-4 transition-transform", isRightPanelCollapsed && "rotate-180")} />
                         </div>
                       </div>
 
@@ -1540,7 +1546,7 @@ export default function SalesPage() {
               </div>
 
               {/* Right Sidebar - Action Panel */}
-              {view === "leads" && (
+              {view === "leads" && !isRightPanelCollapsed && (
                 <div className="w-80 bg-[#f1f4f9] border-l border-gray-200 overflow-y-auto px-5 py-6 space-y-6">
                   <div className="space-y-3">
                     <Button onClick={() => setOnboardDialogOpen(true)} size="lg" className="w-full bg-[#ae1919] hover:bg-[#8e1414] text-white rounded-sm font-semibold text-base py-6 shadow-sm flex items-center gap-3">
