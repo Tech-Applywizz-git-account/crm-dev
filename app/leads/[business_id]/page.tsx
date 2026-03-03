@@ -1,3 +1,4 @@
+
 // app/leads/[business_id]/page.tsx
 "use client";
 
@@ -237,7 +238,6 @@ export default function LeadProfilePage() {
         call_started_at: new Date().toISOString(),
         notes: `Email Sent (Graph): ${emailSubject}`
       }]);
-
       // Refresh local state (Fetch latest from the new table)
       const res = await fetch(`/api/email/sent?email=${user.email}`);
       const data = await res.json();
