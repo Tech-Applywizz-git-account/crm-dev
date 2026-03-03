@@ -315,6 +315,7 @@ export default function OnboardingForm() {
       work_preferences: obWorkPreference || fullOnboardingData?.work_preferences || "Remote",
       exclude_companies: obExcludeCompanies || fullOnboardingData?.exclude_companies || "NA",
       created_at: fullOnboardingData?.created_at || new Date().toISOString(),
+      client_form_fill_date: new Date().toISOString(),
     };
 
     // 3️⃣ Strict Validation Checks (Toast for each)
@@ -349,7 +350,7 @@ export default function OnboardingForm() {
 
   const sendDirectOnboard = async (payload: any) => {
     // 5️⃣ API TARGET
-    const response = await fetch("https://www.apply-wizz.me/api/direct-onboard", {
+    const response = await fetch("/api/direct-onboard", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
