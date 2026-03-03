@@ -1,4 +1,3 @@
-
 //app/sales/page.tsx
 "use client";
 
@@ -1189,10 +1188,7 @@ export default function SalesPage() {
   return (
     <ProtectedRoute allowedRoles={["Sales", "Sales Associate", "Super Admin", "Admin"]}>
       <style jsx global>{`
-        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
-        
         .premium-font {
-          font-family: 'Outfit', sans-serif !important;
           -webkit-font-smoothing: antialiased;
           -moz-osx-font-smoothing: grayscale;
         }

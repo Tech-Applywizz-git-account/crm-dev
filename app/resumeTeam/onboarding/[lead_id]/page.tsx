@@ -1,4 +1,3 @@
-
 // app/resumeTeam/onboarding/[lead_id]/OnboardingForm.tsx
 "use client";
 
