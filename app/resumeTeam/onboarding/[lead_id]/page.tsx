@@ -350,7 +350,7 @@ export default function OnboardingForm() {
 
   const sendDirectOnboard = async (payload: any) => {
     // 5️⃣ API TARGET
-    const response = await fetch("/api/direct-onboard", {
+    const response = await fetch("https://www.apply-wizz.me/api/direct-onboard", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
