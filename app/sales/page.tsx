@@ -1,4 +1,3 @@
-
 //app/sales/page.tsx
 "use client";
 
