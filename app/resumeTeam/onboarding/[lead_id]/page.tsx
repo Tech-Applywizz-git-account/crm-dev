@@ -247,7 +247,7 @@ export default function OnboardingForm() {
     endDate: string | null
   ) => {
     // 1️⃣ Role Validation (Exact Match Check)
-    let isNewDomain = true;
+    let isNewDomain = false;
     const jobRoles = csvToArray(obJobRolesText);
     const roleValue = (jobRoles[0] || fullOnboardingData?.role || "").trim();
 
