@@ -121,14 +121,14 @@ const salesStages: SalesStage[] = [
 
 const getStageColor = (stage: SalesStage) => {
   switch (stage) {
-    case "Prospect": return "bg-blue-100 text-blue-800";
-    case "DNP": return "bg-yellow-100 text-yellow-800";
-    case "Out of TG":
-    case "Not Interested": return "bg-red-100 text-red-800";
-    case "Conversation Done": return "bg-purple-100 text-purple-800";
-    case "sale done": return "bg-green-100 text-green-800";
-    case "Target": return "bg-orange-100 text-orange-800";
-    default: return "bg-gray-100 text-gray-800";
+    case "Prospect": return "bg-blue-50 text-blue-700 border-blue-200";
+    case "DNP": return "bg-amber-50 text-amber-700 border-amber-200";
+    case "Out of TG": return "bg-rose-50 text-rose-700 border-rose-200";
+    case "Not Interested": return "bg-red-50 text-red-700 border-red-200";
+    case "Conversation Done": return "bg-indigo-50 text-indigo-700 border-indigo-200";
+    case "sale done": return "bg-emerald-50 text-emerald-700 border-emerald-200";
+    case "Target": return "bg-orange-50 text-orange-700 border-orange-200";
+    default: return "bg-gray-50 text-gray-700 border-gray-200";
   }
 };
 
@@ -1407,7 +1407,7 @@ export default function SalesPage() {
                                   Lead Score {sortConfig.key === "business_id" && (sortConfig.direction === "asc" ? "↓" : "↑")}
                                 </div>
                               </TableHead>
-                              <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider">Lead Stage</TableHead>
+                              <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider w-[160px]">Lead Stage</TableHead>
                               <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider">Owner</TableHead>
                               <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider">Modified On</TableHead>
                               <TableHead className="font-bold text-slate-700 text-center uppercase text-[11px] tracking-wider w-20">Actions</TableHead>
@@ -1445,28 +1445,28 @@ export default function SalesPage() {
                                     <TableCell className="font-medium text-gray-700 pl-8">
                                       {leadScore}
                                     </TableCell>
-                                    <TableCell>
+                                    <TableCell className="whitespace-nowrap">
                                       <Select
                                         value={item.current_stage}
                                         onValueChange={(val: SalesStage) => handleStageUpdate(item.id, val)}
                                       >
-                                        <SelectTrigger className="w-full h-8 border-none bg-transparent hover:bg-gray-100/50 p-0 shadow-none">
-                                          <div className="flex items-center w-full h-full">
-                                            <Badge className={cn("rounded px-2 py-0 h-5 font-normal text-[11px] border-none shadow-none", getStageColor(item.current_stage))}>
+                                        <SelectTrigger className="w-fit h-7 border-none bg-transparent hover:bg-gray-100/50 p-1 shadow-none transition-all focus:ring-0">
+                                          <div className="flex items-center gap-1.5">
+                                            <Badge className={cn("rounded-md px-2.5 py-0.5 text-[12px] font-medium border shadow-sm transition-all whitespace-nowrap", getStageColor(item.current_stage || "Prospect"))}>
                                               {item.current_stage}
                                             </Badge>
+                                            <ChevronDown className="w-3 h-3 text-gray-400 group-hover:text-gray-600" />
                                           </div>
                                         </SelectTrigger>
-                                        <SelectContent>
+                                        <SelectContent className="min-w-[160px]">
                                           {salesStages
                                             .filter((stage) => {
-                                              // Rule: Once changed from Prospect, it cannot go back to Prospect
                                               if (item.current_stage !== "Prospect" && stage === "Prospect") return false;
                                               return true;
                                             })
                                             .map((stage) => (
-                                              <SelectItem key={stage} value={stage}>
-                                                <Badge className={cn("rounded px-2 py-0 h-5 font-normal text-[11px] border-none shadow-none", getStageColor(stage))}>
+                                              <SelectItem key={stage} value={stage} className="cursor-pointer">
+                                                <Badge className={cn("rounded-md px-2 py-0.5 text-[11px] font-medium border shadow-none whitespace-nowrap", getStageColor(stage))}>
                                                   {stage}
                                                 </Badge>
                                               </SelectItem>
