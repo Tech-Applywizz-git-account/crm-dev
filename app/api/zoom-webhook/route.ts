@@ -35,10 +35,10 @@ export async function POST(req: NextRequest) {
         // Triggered when a call finishes.
         if (body.event === "phone.call_log_completed") {
             const callData = body.payload.object;
-            const calleeNumber = callData.callee_number || "";
-            const callerNumber = callData.caller_number || "";
+            const calleeNumber = callData.callee_did_number || callData.callee_number || "";
+            const callerNumber = callData.caller_did_number || callData.caller_number || "";
             const duration = callData.duration || 0; // Duration in seconds
-            const callTime = callData.date_time; // When the call happened
+            const callTime = callData.date_time || callData.start_time; // When the call happened
 
             // We look for the number that isn't ours (the client)
             // Usually the callee for outbound, or caller for inbound.
@@ -111,10 +111,10 @@ export async function POST(req: NextRequest) {
             console.log("[Zoom Webhook] Recording completed for call");
 
             const recordingData = body.payload.object;
-            const calleeNumber = recordingData.callee_number || "";
-            const callerNumber = recordingData.caller_number || "";
+            const calleeNumber = recordingData.callee_did_number || recordingData.callee_number || "";
+            const callerNumber = recordingData.caller_did_number || recordingData.caller_number || "";
             const downloadUrl = recordingData.download_url || recordingData.share_url;
-            const callTime = recordingData.date_time;
+            const callTime = recordingData.date_time || recordingData.start_time;
 
             const rawPhoneNumber = recordingData.direction === "outbound" ? calleeNumber : callerNumber;
 
