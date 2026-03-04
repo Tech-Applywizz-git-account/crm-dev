@@ -1,4 +1,3 @@
-
 //app/sales/page.tsx
 "use client";
 
@@ -14,7 +13,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { EditIcon, Eye, Search, ExternalLink } from "lucide-react";
+import { EditIcon, Eye, Search, ExternalLink, Bell, User, ChevronDown, ChevronRight, ChevronLeft, Star, Settings, Phone, Trash2, Plus, Download, Tag, Loader2, Calendar, BarChart, ListOrdered } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
@@ -23,6 +30,9 @@ import isBetween from "dayjs/plugin/isBetween";
 import * as XLSX from "xlsx";
 import { useRouter } from "next/navigation";
 import { ZoomPhoneEmbedHandle } from "@/components/ZoomPhoneEmbed";
+import { SidebarProvider } from "@/components/ui/sidebar";
+import { AppSidebar } from "@/components/layout/app-sidebar";
+import { Header } from "@/components/layout/header";
 
 
 dayjs.extend(isBetween);
@@ -68,6 +78,7 @@ interface Lead {
   call_history: CallHistory[];
   created_at: string | null;
   assigned_at: string | null;
+  source?: string;
 }
 
 interface Profile {
@@ -110,14 +121,14 @@ const salesStages: SalesStage[] = [
 
 const getStageColor = (stage: SalesStage) => {
   switch (stage) {
-    case "Prospect": return "bg-blue-100 text-blue-800";
-    case "DNP": return "bg-yellow-100 text-yellow-800";
-    case "Out of TG":
-    case "Not Interested": return "bg-red-100 text-red-800";
-    case "Conversation Done": return "bg-purple-100 text-purple-800";
-    case "sale done": return "bg-green-100 text-green-800";
-    case "Target": return "bg-orange-100 text-orange-800";
-    default: return "bg-gray-100 text-gray-800";
+    case "Prospect": return "bg-blue-50 text-blue-700 border-blue-200";
+    case "DNP": return "bg-amber-50 text-amber-700 border-amber-200";
+    case "Out of TG": return "bg-rose-50 text-rose-700 border-rose-200";
+    case "Not Interested": return "bg-red-50 text-red-700 border-red-200";
+    case "Conversation Done": return "bg-indigo-50 text-indigo-700 border-indigo-200";
+    case "sale done": return "bg-emerald-50 text-emerald-700 border-emerald-200";
+    case "Target": return "bg-orange-50 text-orange-700 border-orange-200";
+    default: return "bg-gray-50 text-gray-700 border-gray-200";
   }
 };
 
@@ -125,10 +136,12 @@ const getStageColor = (stage: SalesStage) => {
 
 import SalesClosureDialog from "@/app/sales/_components/SalesClosureDialog";
 import ActivityView from "@/app/sales/_components/ActivityView";
+import CallStatsView from "@/app/sales/_components/CallStatsView";
 import { ZoomPhoneEmbed } from "@/components/ZoomPhoneEmbed";
 
 export default function SalesPage() {
-  const [view, setView] = useState<"leads" | "activity">("leads");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [view, setView] = useState<"leads" | "activity" | "call_stats">("leads");
   const [showSalesDialog, setShowSalesDialog] = useState(false);
   const [salesDialogMode, setSalesDialogMode] = useState<"all" | "first">("first"); // Default to 'first' for stage filter
 
@@ -146,6 +159,9 @@ export default function SalesPage() {
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
   const [followUpDialogOpen, setFollowUpDialogOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [sources, setSources] = useState<string[]>([]);
+  const [sourceFilter, setSourceFilter] = useState<string>("all");
+  const [ownerFilter, setOwnerFilter] = useState<string>("all");
   const [stageFilter, setStageFilter] = useState<string>("all");
   const [followUpData, setFollowUpData] = useState<FollowUp>({ follow_up_date: "", notes: "" });
   const [followUpSubmitted, setFollowUpSubmitted] = useState(false); // Track if follow-up was submitted
@@ -161,6 +177,7 @@ export default function SalesPage() {
   const [editedNote, setEditedNote] = useState("");
 
   const [allLeads, setAllLeads] = useState<Lead[]>([]);
+  const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
   const [kpiFilteredLeads, setKpiFilteredLeads] = useState<Lead[]>([]);
   const [userEmail, setUserEmail] = useState<string>("");
 
@@ -344,8 +361,23 @@ export default function SalesPage() {
 
   useEffect(() => {
     fetchUserProfile();
-
+    fetchSources();
   }, []);
+
+  const fetchSources = async () => {
+    const { data, error } = await supabase
+      .from("leads")
+      .select("source")
+      .not("source", "is", null);
+
+    if (error) {
+      console.error("Error fetching sources:", error);
+      return;
+    }
+
+    const uniqueSources = Array.from(new Set(data.map(d => d.source)));
+    setSources(uniqueSources);
+  };
 
   const fetchUserProfile = async () => {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -449,7 +481,7 @@ export default function SalesPage() {
 
   useEffect(() => {
     if (userProfile) fetchLeads(userProfile);
-  }, [page, pageSize]);
+  }, [page, pageSize, sourceFilter, ownerFilter, stageFilter]);
 
 
   const fetchLeads = async (profile: Profile) => {
@@ -464,6 +496,18 @@ export default function SalesPage() {
         countQuery = countQuery.eq("assigned_to", profile.full_name);
       }
 
+      if (sourceFilter !== "all") {
+        countQuery = countQuery.eq("source", sourceFilter);
+      }
+
+      if (ownerFilter !== "all" && profile.roles === "Admin") {
+        countQuery = countQuery.eq("assigned_to", ownerFilter);
+      }
+
+      if (stageFilter !== "all") {
+        countQuery = countQuery.eq("current_stage", stageFilter);
+      }
+
       const { count } = await countQuery;
       setTotalRecords(count ?? 0);
 
@@ -476,7 +520,7 @@ export default function SalesPage() {
         .select(`
     id, business_id, name, email, phone,
     assigned_to, current_stage, status,
-    created_at, assigned_at
+    created_at, assigned_at, source
   `)
         .eq("status", "Assigned")
         .order("assigned_at", { ascending: false })   // 👈 NEW SORT
@@ -485,6 +529,18 @@ export default function SalesPage() {
 
       if (profile.roles === "Sales Associate") {
         query = query.eq("assigned_to", profile.full_name);
+      }
+
+      if (sourceFilter !== "all") {
+        query = query.eq("source", sourceFilter);
+      }
+
+      if (ownerFilter !== "all" && profile.roles === "Admin") {
+        query = query.eq("assigned_to", ownerFilter);
+      }
+
+      if (stageFilter !== "all") {
+        query = query.eq("current_stage", stageFilter);
       }
 
       const { data, error } = await query;
@@ -505,6 +561,7 @@ export default function SalesPage() {
         call_history: [],
         created_at: lead.created_at,
         assigned_at: lead.assigned_at,
+        source: lead.source,
       }));
 
       setLeads(leadsData);
@@ -515,15 +572,19 @@ export default function SalesPage() {
   };
 
   const searchLeadsGlobally = async (term: string) => {
+    if (!term.trim()) {
+      if (userProfile) fetchLeads(userProfile); // Reset to normal view if empty
+      return;
+    }
     try {
       const { data, error } = await supabase
         .from("leads")
         .select(`
         id, business_id, name, email, phone,
         assigned_to, assigned_to_email, current_stage,
-        status, created_at, assigned_at
+        status, created_at, assigned_at, source
       `)
-        .or(`name.ilike.%${term}%,email.ilike.%${term}%,phone.ilike.%${term}%,business_id.ilike.%${term}%`)
+        .or(`name.ilike.%${term}%,email.ilike.%${term}%,phone.ilike.%${term}%,business_id.ilike.%${term}%,source.ilike.%${term}%`)
         .eq("status", "Assigned")
         .order("assigned_at", { ascending: false });
 
@@ -544,20 +605,29 @@ export default function SalesPage() {
         call_history: [],
         created_at: lead.created_at,
         assigned_at: lead.assigned_at,
+        source: lead.source,
       }));
 
       setLeads(leadsData);
       setTotalRecords(leadsData.length);
+      setPage(1);
     } catch (err) {
       console.error("Global search failed:", err);
     }
   };
 
-  useEffect(() => {
-    if (!searchTerm.trim()) {
-      if (userProfile) fetchLeads(userProfile);
-    }
-  }, [searchTerm]);
+  // Debounce search to prevent lag
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleSearchChange = (val: string) => {
+    setSearchTerm(val);
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+
+    searchTimeoutRef.current = setTimeout(() => {
+      searchLeadsGlobally(val);
+    }, 400); // 400ms debounce
+  };
+
 
 
 
@@ -710,6 +780,7 @@ export default function SalesPage() {
 
   const filteredLeads = leads.filter((lead) => {
     const matchesStage = stageFilter === "all" || lead.current_stage === stageFilter;
+    const matchesSource = sourceFilter === "all" || lead.source === sourceFilter;
 
     const matchesDate =
       !startDate || !endDate ||
@@ -1113,935 +1184,575 @@ export default function SalesPage() {
   };
 
 
+
   return (
     <ProtectedRoute allowedRoles={["Sales", "Sales Associate", "Super Admin", "Admin"]}>
+      <style jsx global>{`
+        .premium-font {
+          -webkit-font-smoothing: antialiased;
+          -moz-osx-font-smoothing: grayscale;
+        }
 
-      <DashboardLayout>
-        <div className="space-y-6 relative pointer-events-auto">
-          <div className="flex justify-between items-center">
-            <h1 className="text-3xl font-bold">Sales CRM</h1>
+        .text-brighter {
+          color: #0f172a !important; /* Slate 900 */
+        }
 
-            <div className="flex justify-end items-center gap-2 relative z-50 pointer-events-auto">
+        .text-smooth {
+          letter-spacing: -0.01em;
+          line-height: 1.5;
+        }
 
+        .sales-table-header {
+          background-color: #f8fafc !important; /* Slate 50 */
+          border-bottom: 2px solid #e2e8f0 !important;
+        }
 
-              {userProfile?.roles === "Admin" && (
-                <Button
-                  onClick={downloadAllTablesData}
-                  className="ml-2"
-                >
-                  Download All Database data
+        .lead-name-link {
+          color: #0284c7 !important; /* Sky 600 */
+          font-weight: 500 !important;
+          transition: all 0.2s ease;
+        }
+        
+        .lead-name-link:hover {
+          color: #0369a1 !important; /* Sky 700 */
+          text-decoration: underline;
+        }
+
+        /* Global Table Text Enhancements */
+        .premium-font table td {
+          color: #334155 !important; /* Slate 700 - Brighter than gray */
+          font-weight: 400;
+          -webkit-font-smoothing: antialiased;
+        }
+
+        .premium-font table td:nth-child(3) {
+          color: #0f172a !important; /* Slate 900 - Brighter for score */
+          font-weight: 600 !important;
+        }
+
+        .premium-font table thead th {
+          color: #475569 !important; /* Slate 600 */
+          font-weight: 700 !important;
+          letter-spacing: 0.05em;
+        }
+      `}</style>
+      <SidebarProvider className="premium-font">
+        <div className="flex min-h-screen w-full bg-[#f1f4f9]">
+          <AppSidebar />
+          <div className="flex-1 flex flex-col min-h-screen overflow-hidden text-gray-800">
+            <Header
+              searchTerm={searchTerm}
+              onSearchChange={handleSearchChange}
+            >
+              <div className="flex items-center gap-2 ml-4">
+                <Button variant="outline" size="sm" onClick={downloadAllTablesData} className="h-8 gap-2 border-gray-300 font-normal bg-white">
+                  <Download className="w-4 h-4 text-gray-400" /> <span className="hidden lg:inline">Export All Data</span>
                 </Button>
-              )}
 
-              {(userProfile?.roles === "Super Admin" || userProfile?.roles === "Admin" || userProfile?.roles === "Sales Associate" || userProfile?.roles === "Sales") && (
-                <Button
-                  onClick={() => setView(view === "leads" ? "activity" : "leads")}
-                  className="bg-orange-500 hover:bg-orange-600 text-white border-none min-w-[120px] h-10 px-6 cursor-pointer shadow-sm transition-all"
-                >
-                  {view === "leads" ? "Activity" : "Back to Leads"}
+                <Button variant="outline" size="sm" onClick={() => setView("activity")} className="h-8 gap-2 border-gray-300 font-normal bg-white">
+                  <ListOrdered className="w-4 h-4 text-gray-400" /> <span className="hidden lg:inline">Activity View</span>
                 </Button>
-              )}
 
-              <Button
-                onClick={() => window.open("/sales/followups", "_blank")}
-              >
-                Follow Ups
-              </Button>
-              <Button
-                onClick={() => window.open("/SalesAddonsInfo", "_blank")}
-              >
-                Portfolio/Resumes
-              </Button>
+                {["Admin", "Super Admin"].includes(userProfile?.roles || "") && (
+                  <Button variant="outline" size="sm" onClick={() => setView("call_stats")} className="h-8 gap-2 border-gray-300 font-normal bg-white">
+                    <BarChart className="w-4 h-4 text-gray-400" /> <span className="hidden lg:inline">View Call Stats</span>
+                  </Button>
+                )}
+              </div>
+            </Header>
+            <div className="flex flex-1 overflow-hidden">
+              {/* Main Content Area */}
+              <div className="flex-1 flex flex-col overflow-y-auto px-6 py-4">
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-2">
+                    <h1 className="text-2xl font-semibold text-slate-800 tracking-tight">{view === "leads" ? "Manage Leads" : view === "call_stats" ? "Zoom Call Statistics" : "Activity History"}</h1>
+                    <div className="text-gray-400 cursor-pointer hover:text-gray-600">
+                      <ExternalLink className="w-4 h-4" />
+                    </div>
+                  </div>
+
+                  {view !== "leads" && (
+                    <Button
+                      onClick={() => setView("leads")}
+                      variant="outline"
+                      size="sm"
+                      className="gap-2"
+                    >
+                      <ChevronLeft className="w-4 h-4" /> Back to Leads
+                    </Button>
+                  )}
+                </div>
+
+                {view === "activity" ? (
+                  <ActivityView userProfile={userProfile} onBack={() => setView("leads")} />
+                ) : view === "call_stats" ? (
+                  <CallStatsView />
+                ) : (
+                  <>
+
+                    {/* Filter Section - LeadSquared Style */}
+                    <div className="bg-white border rounded shadow-sm mb-6">
+                      {/* Row 1: Search & Base Buttons */}
+                      {/* Row 1: Tags & Panel Toggle */}
+                      <div className="p-3 border-b flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <Button variant="outline" size="sm" className="h-8 gap-2 border-gray-300 font-normal">
+                            <Tag className="w-4 h-4 text-gray-500" /> Tags
+                          </Button>
+                        </div>
+
+                        <div
+                          className="text-sm text-[#00a1e1] hover:underline cursor-pointer flex items-center gap-1 font-medium"
+                          onClick={() => setIsRightPanelCollapsed(!isRightPanelCollapsed)}
+                        >
+                          {isRightPanelCollapsed ? "Expand Panel" : "Collapse Panel"} <ChevronRight className={cn("w-4 h-4 transition-transform", isRightPanelCollapsed && "rotate-180")} />
+                        </div>
+                      </div>
+
+                      {/* Row 2: Advanced Select Filters */}
+                      <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-x-8 gap-y-4 bg-[#f8f9fb]">
+                        <div className="space-y-1 flex-1">
+                          <Label className="text-xs text-gray-500 font-normal uppercase">Lead Stage</Label>
+                          <Select value={stageFilter} onValueChange={setStageFilter}>
+                            <SelectTrigger className="h-8 text-xs border-gray-300 bg-white">
+                              <SelectValue placeholder="All" />
+                            </SelectTrigger>
+                            <SelectContent className="z-50">
+                              <SelectItem value="all">All</SelectItem>
+                              {salesStages.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs text-gray-500 font-normal uppercase">Lead Source</Label>
+                          <Select value={sourceFilter} onValueChange={setSourceFilter}>
+                            <SelectTrigger className="h-8 text-xs border-gray-300 bg-white">
+                              <SelectValue placeholder="All" />
+                            </SelectTrigger>
+                            <SelectContent className="z-50">
+                              <SelectItem value="all">All</SelectItem>
+                              {sources.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {userProfile?.roles === "Admin" && (
+                          <div className="space-y-1">
+                            <Label className="text-xs text-gray-500 font-normal uppercase">Owner</Label>
+                            <Select value={ownerFilter} onValueChange={setOwnerFilter}>
+                              <SelectTrigger className="h-8 text-xs border-gray-300 bg-white">
+                                <SelectValue placeholder="Any" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="all">Any</SelectItem>
+                                {salesUsers.map(u => <SelectItem key={u.user_email} value={u.full_name}>{u.full_name}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
+                        <div className="space-y-1 lg:col-span-2">
+                          <Label className="text-xs text-gray-500 font-normal uppercase">Date Range</Label>
+                          <div className="flex gap-2">
+                            <Select defaultValue="last_activity">
+                              <SelectTrigger className="h-8 text-xs border-gray-300 bg-white flex-1">
+                                <SelectValue placeholder="Last Activity" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="last_activity">Last Activity</SelectItem>
+                                <SelectItem value="assigned_at">Assigned At</SelectItem>
+                                <SelectItem value="created_at">Created At</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <div className="flex items-center gap-2 flex-1">
+                              <Input
+                                type="date"
+                                value={startDate || ""}
+                                onChange={(e) => setStartDate(e.target.value)}
+                                className="h-8 text-xs border-gray-300 bg-white"
+                              />
+                              <span className="text-gray-400">→</span>
+                              <Input
+                                type="date"
+                                value={endDate || ""}
+                                onChange={(e) => setEndDate(e.target.value)}
+                                className="h-8 text-xs border-gray-300 bg-white"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-end mb-1">
+                          <Button
+                            variant="ghost"
+                            className="h-8 text-xs text-red-500 hover:text-red-600 p-0"
+                            onClick={() => { setStartDate(null); setEndDate(null); setStageFilter("all"); setSourceFilter("all"); setOwnerFilter("all"); }}
+                          >
+                            Reset Filters
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Leads Table */}
+                    <div className="bg-white border rounded shadow-sm overflow-hidden flex flex-col min-h-[400px]">
+                      <div className="overflow-x-auto">
+                        <Table className="text-sm">
+                          <TableHeader className="sales-table-header">
+                            <TableRow className="hover:bg-transparent">
+                              <TableHead className="w-10 px-4">
+                                <input type="checkbox" className="rounded" />
+                              </TableHead>
+                              <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider">Lead Name</TableHead>
+                              <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider cursor-pointer" onClick={() => handleSort("business_id")}>
+                                <div className="flex items-center gap-1">
+                                  Lead Score {sortConfig.key === "business_id" && (sortConfig.direction === "asc" ? "↓" : "↑")}
+                                </div>
+                              </TableHead>
+                              <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider w-[160px]">Lead Stage</TableHead>
+                              <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider">Owner</TableHead>
+                              <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider">Modified On</TableHead>
+                              <TableHead className="font-bold text-slate-700 text-center uppercase text-[11px] tracking-wider w-20">Actions</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {sortedLeads.length === 0 ? (
+                              <TableRow>
+                                <TableCell colSpan={7} className="h-32 text-center text-gray-400 italic">No leads matches your criteria.</TableCell>
+                              </TableRow>
+                            ) : (
+                              sortedLeads.map((item, idx) => {
+                                // Dummy Lead Score logic for demo
+                                const leadScore = item.current_stage === "sale done" ? 100 : Math.max(2, 26 - (idx * 3));
+
+                                return (
+                                  <TableRow key={item.id} className="group hover:bg-[#f5faff] transition-colors border-b last:border-0 h-12">
+                                    <TableCell className="px-4">
+                                      <input type="checkbox" className="rounded" />
+                                    </TableCell>
+                                    <TableCell>
+                                      <div className="flex items-center gap-2">
+                                        <div className="flex items-center gap-1 opacity-40 group-hover:opacity-100 transition-opacity">
+                                          <Star className="w-4 h-4 text-gray-400 cursor-pointer hover:text-yellow-500" />
+                                          <div className="w-1.5 h-1.5 rounded-full bg-gray-300" />
+                                        </div>
+                                        <span
+                                          className="lead-name-link text-smooth hover:underline cursor-pointer"
+                                          onClick={() => window.open(`/leads/${item.business_id}`, "_blank")}
+                                        >
+                                          {item.client_name}
+                                        </span>
+                                      </div>
+                                    </TableCell>
+                                    <TableCell className="font-medium text-gray-700 pl-8">
+                                      {leadScore}
+                                    </TableCell>
+                                    <TableCell className="whitespace-nowrap">
+                                      <Select
+                                        value={item.current_stage}
+                                        onValueChange={(val: SalesStage) => handleStageUpdate(item.id, val)}
+                                      >
+                                        <SelectTrigger className="w-fit h-7 border-none bg-transparent hover:bg-gray-100/50 p-1 shadow-none transition-all focus:ring-0">
+                                          <div className="flex items-center gap-1.5">
+                                            <Badge className={cn("rounded-md px-2.5 py-0.5 text-[12px] font-medium border shadow-sm transition-all whitespace-nowrap", getStageColor(item.current_stage || "Prospect"))}>
+                                              {item.current_stage}
+                                            </Badge>
+                                            <ChevronDown className="w-3 h-3 text-gray-400 group-hover:text-gray-600" />
+                                          </div>
+                                        </SelectTrigger>
+                                        <SelectContent className="min-w-[160px]">
+                                          {salesStages
+                                            .filter((stage) => {
+                                              if (item.current_stage !== "Prospect" && stage === "Prospect") return false;
+                                              return true;
+                                            })
+                                            .map((stage) => (
+                                              <SelectItem key={stage} value={stage} className="cursor-pointer">
+                                                <Badge className={cn("rounded-md px-2 py-0.5 text-[11px] font-medium border shadow-none whitespace-nowrap", getStageColor(stage))}>
+                                                  {stage}
+                                                </Badge>
+                                              </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                      </Select>
+                                    </TableCell>
+                                    <TableCell className="text-gray-600 whitespace-nowrap">
+                                      {item.assigned_to || "—"}
+                                    </TableCell>
+                                    <TableCell className="text-gray-500 whitespace-nowrap text-[12px]">
+                                      {item.assigned_at ? dayjs(item.assigned_at).format("MM/DD/YY hh:mm A") : "—"}
+                                    </TableCell>
+                                    <TableCell className="text-center w-28">
+                                      <div className="flex items-center justify-center gap-2">
+                                        <div
+                                          title="Call Lead"
+                                          className="p-1.5 bg-blue-50 text-blue-600 rounded-md cursor-pointer hover:bg-blue-600 hover:text-white transition-all shadow-sm"
+                                          onClick={() => handlePhoneClick(item.phone)}
+                                        >
+                                          <Phone className="w-3.5 h-3.5" />
+                                        </div>
+                                        <div
+                                          title="View Details"
+                                          className="p-1.5 bg-gray-50 text-gray-600 rounded-md cursor-pointer hover:bg-gray-800 hover:text-white transition-all shadow-sm"
+                                          onClick={() => {
+                                            const win = window.open(`/leads/${item.business_id}`, "_blank");
+                                            win?.focus();
+                                          }}
+                                        >
+                                          <Eye className="w-3.5 h-3.5" />
+                                        </div>
+                                        {userProfile?.roles === "Admin" && (
+                                          <div
+                                            title="Delete"
+                                            className="p-1.5 bg-red-50 text-red-600 rounded-md cursor-pointer hover:bg-red-600 hover:text-white transition-all shadow-sm"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </div>
+                                        )}
+                                      </div>
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })
+                            )}
+                          </TableBody>
+                        </Table>
+                      </div>
+
+                      {/* Pagination Section */}
+                      <div className="p-3 border-t bg-gray-50 flex items-center justify-between text-sm text-gray-500">
+                        <div className="flex items-center gap-4">
+                          <span>Page {page} of {Math.ceil(totalRecords / pageSize)}</span>
+                          <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(1); }}>
+                            <SelectTrigger className="h-7 w-20 text-xs border-gray-300">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {[30, 50, 100, 200, 500].map(v => <SelectItem key={v} value={String(v)}>{v}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="flex gap-1">
+                          <Button variant="outline" size="sm" className="h-8 w-8 p-0" disabled={page === 1} onClick={() => setPage(p => p - 1)}><ChevronLeft className="w-4 h-4" /></Button>
+                          <Button variant="outline" size="sm" className="h-8 w-8 p-0 text-white bg-[#00a1e1] border-[#00a1e1] hover:bg-[#0081b5]">{page}</Button>
+                          <Button variant="outline" size="sm" className="h-8 w-8 p-0" disabled={page === Math.ceil(totalRecords / pageSize)} onClick={() => setPage(p => p + 1)}><ChevronRight className="w-4 h-4" /></Button>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Right Sidebar - Action Panel */}
+              {view === "leads" && !isRightPanelCollapsed && (
+                <div className="w-80 bg-[#f1f4f9] border-l border-gray-200 overflow-y-auto px-5 py-6 space-y-6">
+                  <div className="space-y-3">
+                    <Button onClick={() => setOnboardDialogOpen(true)} size="lg" className="w-full bg-[#ae1919] hover:bg-[#8e1414] text-white rounded-sm font-semibold text-base py-6 shadow-sm flex items-center gap-3">
+                      <Plus className="w-5 h-5" /> Add New Lead
+                    </Button>
+                    <Button size="lg" className="w-full bg-[#ae1919] hover:bg-[#8e1414] text-white rounded-sm font-semibold text-base py-6 shadow-sm flex items-center gap-3">
+                      <Download className="w-5 h-5" /> Import Leads
+                    </Button>
+                    <Button size="lg" className="w-full bg-[#ae1919] hover:bg-[#8e1414] text-white rounded-sm font-semibold text-base py-6 shadow-sm flex items-center gap-3">
+                      <Tag className="w-5 h-5" /> Import Lead Tags
+                    </Button>
+                  </div>
+
+                  {/* Quick Filters - LeadSquared Style */}
+                  <div className="bg-white border rounded shadow-sm overflow-hidden mt-8">
+                    <div className="p-3 border-b flex justify-between items-center bg-gray-50/50">
+                      <span className="font-semibold text-gray-700 text-sm">Quick Filters</span>
+                      <Plus className="w-3.5 h-3.5 text-gray-400 cursor-pointer" />
+                    </div>
+                    <div className="divide-y text-sm">
+                      {[
+                        { icon: Star, label: "Starred Leads" },
+                        { label: "Engaged Leads", secondary: true },
+                        { label: "Leads who visited website in the last 7 days", secondary: true },
+                        { label: "Leads with activity in last 7 days", secondary: true },
+                        { label: "New Leads in last 7 days", secondary: true },
+                      ].map((item, i) => (
+                        <div key={i} className="px-4 py-3 hover:bg-gray-50 cursor-pointer text-[#00a1e1] flex items-center gap-2">
+                          {item.icon && <item.icon className="w-4 h-4 text-yellow-500 fill-yellow-500" />}
+                          <span className={cn(item.secondary && "text-[13px] leading-tight")}>{item.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 mt-4">
+                    <Button onClick={() => window.open("/sales/followups", "_blank")} variant="outline" className="w-full bg-white border-gray-300 text-gray-700 h-10 shadow-sm">
+                      Open Follow Ups Grid
+                    </Button>
+                    <Button onClick={() => window.open("/SalesAddonsInfo", "_blank")} variant="outline" className="w-full bg-white border-gray-300 text-gray-700 h-10 shadow-sm">
+                      View Portfolio/Resumes
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </SidebarProvider>
+
+      {/* Keep existing Dialogs & Components */}
+      <Dialog open={onboardDialogOpen} onOpenChange={setOnboardDialogOpen}>
+        <DialogContent className="max-w-5xl" onPointerDownOutside={(e) => e.preventDefault()}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              🧾 Onboard New Client
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Client Details */}
+            <div className="border rounded-md p-4 space-y-3">
+              <Label className="font-semibold">Client Details <span className="text-red-500">*</span></Label>
+              <Input
+                placeholder="Client Full Name"
+                value={clientName}
+                onChange={(e) => setClientName(e.target.value)}
+              />
+
+              <Input
+                placeholder="Client Email"
+                value={clientEmail}
+                onChange={(e) => setClientEmail(e.target.value)}
+              />
+
+              <Input
+                placeholder="Contact Number with country code"
+                value={contactNumber}
+                onChange={(e) => setContactNumber(e.target.value)}
+              />
+
+              <Input
+                placeholder="City"
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
+              />
+
+              <Input
+                type="date"
+                value={onboardingDate}
+                onChange={(e) => setOnboardingDate(e.target.value)}
+                placeholder="dd-mm-yyyy"
+              />
 
 
             </div>
 
-          </div>
-          {view === "activity" ? (
-            <ActivityView userProfile={userProfile} onBack={() => setView("leads")} />
-          ) : (
-            <>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                <Dialog open={followUpsDialogOpen} onOpenChange={setFollowUpsDialogOpen}>
-                  <DialogContent className="max-w-7xl" onPointerDownOutside={(e) => e.preventDefault()}>
-
-                    <DialogHeader>
-                      <DialogTitle>Follow Ups – DNP / Conversation Done</DialogTitle>
-                      <DialogDescription>Leads with scheduled follow-ups</DialogDescription>
-                      <div className="flex justify-end mb-4">
-                        <Select value={followUpsFilter} onValueChange={(val) => setFollowUpsFilter(val as "today" | "all")}>
-                          <SelectTrigger className="w-40">
-                            <SelectValue placeholder="Filter by Date" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="today">Today</SelectItem>
-                            <SelectItem value="all">All Dates</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                    </DialogHeader>
-
-                    <div className="max-h-[70vh] overflow-y-auto overflow-x-auto">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>S.No</TableHead>
-                            <TableHead>Business ID</TableHead>
-                            <TableHead>Name</TableHead>
-                            <TableHead>Email</TableHead>
-                            <TableHead>Phone</TableHead>
-                            <TableHead>Assigned To</TableHead>
-                            <TableHead>Stage</TableHead>
-                            <TableHead>Follow-up Date</TableHead>
-                            <TableHead>Notes</TableHead>
-                          </TableRow>
-                        </TableHeader>
-
-                        <TableBody>
-                          {followUpsData.filter((item) => {
-                            if (followUpsFilter === "all") return true;
-                            if (!item.followup_date) return false;
-                            const today = todayLocalYMD();
-                            return item.followup_date === today;
-                          }).length === 0 ? (
-                            <TableRow>
-                              <TableCell colSpan={8} className="text-center text-muted-foreground py-6">
-                                {followUpsFilter === "all"
-                                  ? "No follow-up data available."
-                                  : "There are no follow ups today."}
-                              </TableCell>
-                            </TableRow>
-                          ) : (
-                            followUpsData
-                              .filter((item) => {
-                                if (followUpsFilter === "all") return true;
-                                if (!item.followup_date) return false;
-                                const today = todayLocalYMD();
-                                return item.followup_date === today;
-                              })
-                              .map((item, idx) => (
-                                <TableRow key={idx}>
-                                  <TableCell>{idx + 1}</TableCell>
-                                  <TableCell>{item.business_id}</TableCell>
-                                  {/* <TableCell>{item.name}</TableCell> */}
-
-                                  <TableCell
-                                    className="font-medium max-w-[150px] break-words whitespace-normal cursor-pointer text-blue-600 hover:underline"
-                                    onClick={() => window.open(`/leads/${item.business_id}`, "_blank")}
-                                  >
-                                    {item.name}
-                                  </TableCell>
-
-                                  <TableCell>{item.email}</TableCell>
-                                  <TableCell>{item.phone}</TableCell>
-                                  <TableCell>{item.assigned_to}</TableCell>
-                                  <TableCell>
-                                    <Select value={item.current_stage}
-                                      onValueChange={(value: SalesStage) => {
-                                        const selectedItem = followUpsData.find((f) => f.id === item.id);
-                                        if (!selectedItem) return;
-                                        handleStageUpdate(item.id, value);
-                                      }}
-
-                                    >
-                                      {/* <SelectTrigger className="w-40"><SelectValue /></SelectTrigger> */}
-                                      <SelectTrigger
-                                        className={`w-40 ${item.current_stage === "sale done"
-                                          ? "pointer-events-none opacity-100 text-black bg-gray-100 border border-gray-300 cursor-not-allowed"
-                                          : ""
-                                          }`}
-                                      >
-                                        <SelectValue />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        {salesStages
-                                          .filter((stage) => item.current_stage === "Prospect" || stage !== "Prospect")
-                                          .map((stage) => (
-                                            <SelectItem key={stage} value={stage}>
-                                              <Badge className={getStageColor(stage)}>{stage}</Badge>
-                                            </SelectItem>
-                                          ))}
-                                      </SelectContent>
-                                    </Select>
-                                  </TableCell>
-
-                                  <TableCell>{item.followup_date}</TableCell>
-                                  <TableCell>{item.notes}</TableCell>
-                                </TableRow>
-                              ))
-                          )}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  </DialogContent>
-                </Dialog>
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium ">All leads</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold">{kpiFilteredTotal}</div>
-                    <p className="text-xs text-green-600 font-bold">
-                      Total (Based on filter and pagination): {totalLeadsCount}
-                    </p>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium">Prospects</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold">{kpiFilteredProspect}</div>
-                    <p className="text-xs text-green-600 font-bold">
-                      Total: {prospectCount}
-                    </p>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium">DNP & Conversation Done</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold">{kpiFilteredDnp + kpiFilteredConvo}</div>
-                    <p className="text-xs text-green-600 font-bold">
-                      Total: {dnpCount + convoDoneCount}
-                    </p>
-                  </CardContent>
-                </Card>
-
-
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium">Sales Done (from leads)</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold">{kpiFilteredSale}</div>
-                    <p className="text-xs text-green-600 font-bold">
-                      Total: {saleDoneCount}
-                    </p>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium">Target</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold">{kpiFilteredTarget}</div>
-                    <p className="text-xs text-green-600 font-bold">
-                      Total: {targetCount}
-                    </p>
-                  </CardContent>
-                </Card>
-
-
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium">Others</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold">{kpiOthersCount}</div>
-                    <p className="text-xs text-green-600 font-bold">
-                      Total: {othersCount}
-                    </p>
-                  </CardContent>
-                </Card>
-
-
-              </div>
-
-              {/* Search & Filter */}
-              <div className="flex flex-col sm:flex-row gap-4 mb-6">
-
-
-                <div className="flex gap-3 flex-1">
-                  <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                    <Input
-                      placeholder="Search..."
-                      value={inputSearch}
-                      onChange={(e) => setInputSearch(e.target.value)}
-                      className="pl-10"
-                    />
-
-                  </div>
-
-                  <Button
-                    disabled={isChecking || !inputSearch.trim()}
-                    onClick={async () => {
-                      setIsChecking(true);
-
-                      setSearchTerm(inputSearch.trim()); // <- assign here
-                      await searchLeadsGlobally(inputSearch.trim());
-
-                      setIsChecking(false);
-                    }}
-                    className="w-28"
-                  >
-                    {isChecking ? "Searching..." : "Search"}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    disabled={isChecking}
-                    onMouseEnter={() => setIsHoveringClear(true)}
-                    onMouseLeave={() => setIsHoveringClear(false)}
-                    onClick={() => {
-                      setInputSearch("");
-                      setSearchTerm("");
-                      if (userProfile) fetchLeads(userProfile);
-                    }}
-                    className="px-4 bg-red-50 text-gray-900 hover:bg-red-300 focus:ring-red-500 transition-all duration-200"
-                  >
-                    {isHoveringClear ? "Clear Search" : "❌"}
-                  </Button>
-
-
-                </div>
-
-                <Select value={String(pageSize)} onValueChange={(v) => {
-                  if (v === "all") {
-                    setPageSize(totalRecords);
-                    setPage(1);
-                  } else {
-                    setPageSize(Number(v));
-                    setPage(1);
-                  }
-                }}>
-                  <SelectTrigger className="w-40">
-                    <SelectValue placeholder="Rows per page" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="30">30 per page</SelectItem>
-                    <SelectItem value="50">50 per page</SelectItem>
-                    <SelectItem value="100">100 per page</SelectItem>
-                    <SelectItem value="200">200 per page</SelectItem>
-                    <SelectItem value="500">500 per page</SelectItem>
-                    <SelectItem value="1000">1000 per page</SelectItem>
-
-                    <SelectItem value="all">All</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Select value={stageFilter} onValueChange={(val) => {
-                  if (val === "sale done") {
-                    setSalesDialogMode("all");
-                    setShowSalesDialog(true);
-                    // Keep the filter as is, or set to 'all', or 'sale done' based on preference.
-                    setStageFilter("sale done");
-                  } else {
-                    setStageFilter(val);
-                    setPage(1);
-                  }
-                }}>
-                  <SelectTrigger className="w-full sm:w-48">
-                    <SelectValue placeholder="Filter by stage" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Stages</SelectItem>
-                    {salesStages.map(stage => (<SelectItem key={stage} value={stage}>{stage}</SelectItem>))}
-                  </SelectContent>
-                </Select>
-
-                <div className="relative w-full sm:w-[300px]">
-                  {/* 📅 Button Trigger */}
-                  <div
-                    onClick={() => setIsDateDropdownOpen(!isDateDropdownOpen)}
-                    className="bg-white border rounded-md shadow-sm px-4 py-2 cursor-pointer flex justify-between items-center"
-                  >
-                    <span>
-                      {startDate && endDate
-                        ? `📅 ${dayjs(startDate).format('DD MMM')} → ${dayjs(endDate).format('DD MMM')}`
-                        : "📅 Date Range"}
-                    </span>
-                    <span className="text-gray-400">▼</span>
-                  </div>
-
-                  {/* 📅 Dropdown Content */}
-                  {isDateDropdownOpen && (
-                    <div className="absolute z-50 mt-2 bg-white rounded-md shadow-lg p-4 w-[300px] border space-y-4">
-                      <div>
-                        <Label className="text-sm text-gray-600">Start Date</Label>
-                        <Input
-                          type="date"
-                          value={startDate ?? ""}
-                          onChange={(e) => setStartDate(e.target.value)}
-                        />
-                      </div>
-
-                      <div>
-                        <Label className="text-sm text-gray-600">End Date</Label>
-                        <Input
-                          type="date"
-                          value={endDate ?? ""}
-                          onChange={(e) => setEndDate(e.target.value)}
-                        />
-                      </div>
-
-                      <Button
-                        variant="ghost"
-                        className="text-red-500 text-sm p-0"
-                        onClick={() => {
-                          setStartDate(null);
-                          setEndDate(null);
-                          setIsDateDropdownOpen(false); // close on clear
-                        }}
-                      >
-                        ❌ Clear Filter
-                      </Button>
-                    </div>
-                  )}
-                </div>
-
-                {/* Advanced Report Button */}
-                {/* <Button
-              className="bg-indigo-600 hover:bg-indigo-700 text-white"
-              onClick={() => {
-                setSalesDialogMode("all");
-                setShowSalesDialog(true);
-              }}
-            >
-              Advanced Report
-            </Button> */}
-
-              </div>
-              <Card>
-                <CardHeader>
-                  <CardTitle>Sales Pipeline</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="rounded-md border overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>S.No</TableHead>
-
-
-                          <TableHead onClick={() => handleSort("business_id")} className="cursor-pointer select-none">
-                            <div className="flex items-center gap-1">
-                              Business ID
-                              <span className="text-sm">
-                                <span className={sortConfig.key === "business_id" && sortConfig.direction === "asc" ? "font-bold text-blue-600" : "text-gray-400"}>
-                                  ↓
-                                </span>
-                                <span className={sortConfig.key === "business_id" && sortConfig.direction === "desc" ? "font-bold text-blue-600" : "text-gray-400"}>
-                                  ↑
-                                </span>
-                              </span>
-                            </div>
-                          </TableHead>
-
-                          <TableHead onClick={() => handleSort("client_name")} className="cursor-pointer select-none">
-                            <div className="flex items-center gap-1">
-                              Client Name
-                              <span className="text-sm">
-                                <span className={sortConfig.key === "client_name" && sortConfig.direction === "asc" ? "font-bold text-blue-600" : "text-gray-400"}>
-                                  ↑
-                                </span>
-                                <span className={sortConfig.key === "client_name" && sortConfig.direction === "desc" ? "font-bold text-blue-600" : "text-gray-400"}>
-                                  ↓
-                                </span>
-                              </span>
-                            </div>
-                          </TableHead>
-
-                          <TableHead className="w-32">Email</TableHead>
-                          <TableHead>Phone</TableHead>
-
-                          <TableHead onClick={() => handleSort("created_at")} className="cursor-pointer select-none w-40">
-                            <div className="flex items-center gap-1">
-                              Created At
-                              <span className="text-sm">
-                                <span className={sortConfig.key === "created_at" && sortConfig.direction === "asc" ? "font-bold text-blue-600" : "text-gray-400"}>
-                                  ↑
-                                </span>
-                                <span className={sortConfig.key === "created_at" && sortConfig.direction === "desc" ? "font-bold text-blue-600" : "text-gray-400"}>
-                                  ↓
-                                </span>
-                              </span>
-                            </div>
-                          </TableHead>
-                          <TableHead onClick={() => handleSort("created_at")} className="cursor-pointer select-none w-20">
-                            <div className="flex items-center gap-1">
-                              Lead Age
-                              <span className="text-sm">
-                                <span className={sortConfig.key === "created_at" && sortConfig.direction === "asc" ? "font-bold text-blue-600" : "text-gray-400"}>
-                                  ↑
-                                </span>
-                                <span className={sortConfig.key === "created_at" && sortConfig.direction === "desc" ? "font-bold text-blue-600" : "text-gray-400"}>
-                                  ↓
-                                </span>
-                              </span>
-                            </div>
-                          </TableHead>
-
-                          <TableHead onClick={() => handleSort("assigned_at")} className="cursor-pointer select-none w-40">
-                            <div className="flex items-center gap-1">
-                              Assigned At
-                              <span className="text-sm">
-                                <span className={sortConfig.key === "assigned_at" && sortConfig.direction === "asc" ? "font-bold text-blue-600" : "text-gray-400"}>
-                                  ↑
-                                </span>
-                                <span className={sortConfig.key === "assigned_at" && sortConfig.direction === "desc" ? "font-bold text-blue-600" : "text-gray-400"}>
-                                  ↓
-                                </span>
-                              </span>
-                            </div>
-                          </TableHead>
-
-                          <TableHead onClick={() => handleSort("assigned_to")} className="cursor-pointer select-none">
-                            <div className="flex items-center gap-1">
-                              Assigned To
-                              <span className="text-sm">
-                                <span className={sortConfig.key === "assigned_to" && sortConfig.direction === "asc" ? "font-bold text-blue-600" : "text-gray-400"}>
-                                  ↑
-                                </span>
-                                <span className={sortConfig.key === "assigned_to" && sortConfig.direction === "desc" ? "font-bold text-blue-600" : "text-gray-400"}>
-                                  ↓
-                                </span>
-                              </span>
-                            </div>
-                          </TableHead>
-                          <TableHead>Re-assign</TableHead>
-                          <TableHead>Stage</TableHead>
-                          <TableHead>Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-
-                      <TableBody>
-                        {sortedLeads.map((lead, idx) => (
-                          <TableRow key={lead.id}>
-                            <TableCell>{idx + 1}</TableCell>
-                            <TableCell>{lead.business_id}</TableCell>
-                            {/* <TableCell>{lead.client_name}</TableCell> */}
-                            <TableCell
-                              className="font-medium max-w-[150px] break-words whitespace-normal cursor-pointer text-blue-600 hover:underline"
-                              onClick={() => window.open(`/leads/${lead.business_id}`, "_blank")}
-                            >
-                              {lead.client_name}
-                            </TableCell>
-                            <TableCell className="w-32 truncate">{lead.email}</TableCell>
-                            <TableCell
-                              className="cursor-pointer text-blue-600 hover:underline hover:bg-blue-50 transition-colors"
-                              onClick={() => handlePhoneClick(lead.phone)}
-                              title="Click to call"
-                            >
-                              {lead.phone}
-                            </TableCell>
-
-                            <TableCell className="w-40">
-                              {lead.created_at ? dayjs(lead.created_at).format("DD MMM YYYY") : "N/A"}
-                            </TableCell>
-
-                            <TableCell>
-                              {lead.created_at ? `${dayjs().diff(dayjs(lead.created_at), "day")} days` : "N/A"}
-                            </TableCell>
-
-                            <TableCell className="w-40">
-                              {lead.assigned_at ? dayjs(lead.assigned_at).format("DD MMM YYYY") : "N/A"}
-                            </TableCell>
-
-                            <TableCell >{lead.assigned_to}</TableCell>
-
-                            <TableCell>
-                              <Select
-                                value={lead.assigned_to || ""}
-                                onValueChange={(selectedName) => {
-                                  const selectedUser = salesUsers.find(user => user.full_name === selectedName);
-                                  const selectedEmail = selectedUser ? selectedUser.user_email : ""; // Get the email from the selected user
-                                  handleUpdateAssignedTo(lead.id, selectedName, selectedEmail); // Pass both name and email
-                                }}
-                              >
-                                <SelectTrigger className="w-52 cursor-pointer">
-                                  <SelectValue placeholder="Assign to..." />
-                                </SelectTrigger>
-
-                                <SelectContent>
-                                  {salesUsers.map((user) => (
-                                    <SelectItem key={user.full_name} value={user.full_name}>
-                                      {user.full_name}{" "}
-                                      <span className="text-gray-500 text-xs">({user.user_email})</span>
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-
-                            </TableCell>
-
-
-
-                            <TableCell>
-                              <div className="flex items-center gap-4 relative z-50 pointer-events-auto">
-                                <Select
-                                  value={lead.current_stage}
-                                  onValueChange={(value: SalesStage) => handleStageUpdate(lead.id, value)}
-                                >
-                                  <SelectTrigger className="w-40 cursor-pointer">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {salesStages
-                                      .filter((stage) => lead.current_stage === "Prospect" || stage !== "Prospect")
-                                      .map((stage) => (
-                                        <SelectItem key={stage} value={stage}>
-                                          <Badge className={getStageColor(stage)}>{stage}</Badge>
-                                        </SelectItem>
-                                      ))}
-                                  </SelectContent>
-                                </Select>
-                                {lead.current_stage === "sale done" && (
-                                  <Button
-                                    size="icon"
-                                    variant="outline"
-                                    onClick={() =>
-                                      window.open(`/SaleUpdate/${lead.business_id}?mode=edit`, "_blank")
-                                    }
-                                    title="Edit sale close"
-                                  >
-                                    <EditIcon className="h-5 w-5" />
-                                  </Button>
-                                )}
-                              </div>
-                            </TableCell>
-
-
-
-                            <TableCell className="relative z-50 pointer-events-auto">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className=""
-                                onClick={async () => {
-                                  const callHistory = await fetchCallHistory(lead.id);
-                                  setSelectedLead({ ...lead, call_history: callHistory });
-                                  setHistoryDialogOpen(true);
-                                }}
-                              >
-                                <Eye className="h-3 w-3" />
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-
-                    <div className="flex items-center justify-between py-4">
-
-                      <div className="text-sm text-gray-600">
-                        Page {page} of {Math.ceil(totalRecords / pageSize)}
-                      </div>
-
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          disabled={page === 1}
-                          onClick={() => setPage((p) => p - 1)}
-                        >
-                          Previous
-                        </Button>
-
-                        <Button
-                          variant="outline"
-                          disabled={page === Math.ceil(totalRecords / pageSize)}
-                          onClick={() => setPage((p) => p + 1)}
-                        >
-                          Next
-                        </Button>
-                      </div>
-                    </div>
-
-                  </div>
-                </CardContent>
-              </Card>
-
-
-              {/* History Dialog */}
-              <Dialog open={historyDialogOpen} onOpenChange={setHistoryDialogOpen} >
-                {/* <DialogContent className="max-w-2xl"> */}
-                <DialogContent className="max-w-5xl" onPointerDownOutside={(e) => e.preventDefault()}>
-
-                  <DialogHeader>
-                    <DialogTitle>{selectedLead?.client_name} - Call History</DialogTitle>
-                    <DialogDescription>Complete call history</DialogDescription>
-                  </DialogHeader>
-
-                  {selectedLead && (
-                    <div className="space-y-6">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div><Label>Email</Label><p>{selectedLead.email}</p></div>
-                        <div><Label>Phone</Label><p>{selectedLead.phone}</p></div>
-                        <div><Label>Assigned To</Label><p>{selectedLead.assigned_to}</p></div>
-                        <div><Label>Current Stage</Label><Badge className={getStageColor(selectedLead.current_stage)}>{selectedLead.current_stage}</Badge></div>
-                      </div>
-
-                      <div>
-                        <Label>Call History</Label>
-                        <div className="space-y-3 max-h-64 overflow-y-auto">
-
-                          {selectedLead.call_history.map((call, index) => {
-                            const isLatest = index === 0;
-                            const recordNumber = selectedLead.call_history.length - index;
-                            return (
-                              <div key={index} className="p-3 bg-gray-50 rounded-lg space-y-1">
-                                <div className="flex justify-between items-center mb-1">
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-xs font-bold text-gray-400">#{recordNumber}</span>
-                                    <Badge className={getStageColor(call.stage)}>{call.stage}</Badge>
-                                  </div>
-                                  <span className="text-xs text-gray-500">{call.date}</span>
-                                </div>
-
-                                {/* ✏️ Editable note for latest only */}
-                                {isLatest && editingNote ? (
-                                  <div className="space-y-2">
-                                    <Textarea
-                                      value={editedNote}
-                                      onChange={(e) => setEditedNote(e.target.value)}
-                                    />
-                                    <Button size="sm" onClick={() => handleUpdateNote(call)}>
-                                      Save
-                                    </Button>
-                                  </div>
-                                ) : (
-                                  <div className="flex flex-col w-full">
-                                    <div className="flex justify-between items-start">
-                                      <p className="text-sm text-gray-600 flex-1">{call.notes}</p>
-                                      {isLatest && (
-                                        <Button
-                                          size="icon"
-                                          variant="ghost"
-                                          className="h-5 w-5 text-lg text-gray-500 ml-2"
-                                          onClick={() => {
-                                            setEditingNote(true);
-                                            setEditedNote(call.notes);
-                                          }}
-                                        >
-                                          <EditIcon className="h-3 w-3" />
-                                        </Button>
-                                      )}
-                                    </div>
-
-                                    <div className="flex flex-wrap justify-between items-center mt-3 pt-2 border-t border-gray-100 gap-4">
-                                      {call.duration !== undefined && call.duration > 0 && (
-                                        <div className="flex items-center gap-1 text-xs text-blue-600 font-medium">
-                                          <span>⏱️ Duration:</span>
-                                          <span>{Math.floor(call.duration / 60)}m {call.duration % 60}s</span>
-                                        </div>
-                                      )}
-                                      {call.recording_url && (
-                                        <div className="flex items-center gap-3">
-                                          <a
-                                            href={call.recording_url}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="text-blue-600 hover:text-blue-800 text-xs underline flex items-center gap-1 font-medium"
-                                          >
-                                            <ExternalLink className="h-3 w-3" />
-                                            Open Recording
-                                          </a>
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </DialogContent>
-              </Dialog>
-
-              <Dialog open={followUpDialogOpen} onOpenChange={handleFollowUpDialogClose}>
-                <DialogContent onPointerDownOutside={(e) => e.preventDefault()}>
-
-                  <DialogHeader><DialogTitle>Schedule Follow-up</DialogTitle></DialogHeader>
-                  <div className="space-y-4">
-                    <div>
-                      <Label>Follow-up Date</Label>
-                      <Input type="date" value={followUpData.follow_up_date} onChange={(e) =>
-                        setFollowUpData((prev) => ({ ...prev, follow_up_date: e.target.value }))} />
-                    </div>
-                    <div>
-                      <Label>Notes</Label>
-                      <Textarea placeholder="Add notes..." value={followUpData.notes} onChange={(e) =>
-                        setFollowUpData((prev) => ({ ...prev, notes: e.target.value }))} />
-                    </div>
-                  </div>
-                  <DialogFooter><Button onClick={handleFollowUpSubmit}>Save Follow-up</Button></DialogFooter>
-                </DialogContent>
-              </Dialog>
-
-              <Dialog open={onboardDialogOpen} onOpenChange={setOnboardDialogOpen}>
-                <DialogContent className="max-w-5xl" onPointerDownOutside={(e) => e.preventDefault()}>
-                  <DialogHeader>
-                    <DialogTitle className="flex items-center gap-2">
-                      🧾 Onboard New Client
-                    </DialogTitle>
-                  </DialogHeader>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* Client Details */}
-                    <div className="border rounded-md p-4 space-y-3">
-                      <Label className="font-semibold">Client Details <span className="text-red-500">*</span></Label>
-                      <Input
-                        placeholder="Client Full Name"
-                        value={clientName}
-                        onChange={(e) => setClientName(e.target.value)}
-                      />
-
-                      <Input
-                        placeholder="Client Email"
-                        value={clientEmail}
-                        onChange={(e) => setClientEmail(e.target.value)}
-                      />
-
-                      <Input
-                        placeholder="Contact Number with country code"
-                        value={contactNumber}
-                        onChange={(e) => setContactNumber(e.target.value)}
-                      />
-
-                      <Input
-                        placeholder="City"
-                        value={city}
-                        onChange={(e) => setCity(e.target.value)}
-                      />
-
-                      <Input
-                        type="date"
-                        value={onboardingDate}
-                        onChange={(e) => setOnboardingDate(e.target.value)}
-                        placeholder="dd-mm-yyyy"
-                      />
-
-
-                    </div>
-
-                    {/* Subscription & Payment Info */}
-                    <div className="border rounded-md p-4 space-y-3">
-                      <Label className="font-semibold">Subscription & Payment Info <span className="text-red-500">*</span></Label>
-                      <Select value={paymentMode} onValueChange={setPaymentMode}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select Payment Mode" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="UPI">UPI</SelectItem>
-                          <SelectItem value="PayPal">PayPal</SelectItem>
-                          <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
-                          <SelectItem value="Credit/Debit Card">Credit/Debit Card</SelectItem>
-                        </SelectContent>
-                      </Select>
-
-                      <Select value={subscriptionCycle} onValueChange={setSubscriptionCycle}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select Subscription Duration" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="0">No applications subscription</SelectItem>
-                          <SelectItem value="15">15 Days</SelectItem>
-                          <SelectItem value="30">1 Month</SelectItem>
-                          <SelectItem value="60">2 Months</SelectItem>
-                          <SelectItem value="90">3 Months</SelectItem>
-                        </SelectContent>
-                      </Select>
-
-                      <Input
-                        placeholder="Subscription Sale Value ($)"
-                        value={subscriptionSaleValue}
-                        onChange={(e) => setSubscriptionSaleValue(e.target.value)}
-                      />
-
-                      <Input
-                        placeholder="Auto Total (Subscription Only)"
-                        value={autoTotal}
-                        disabled
-                      />
-
-                      <Select value={subscriptionSource} onValueChange={setSubscriptionSource}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select Client Source" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Referral">Referral</SelectItem>
-                          <SelectItem value="NEW">NEW</SelectItem>
-                        </SelectContent>
-                      </Select>
-
-                    </div>
-                  </div>
-
-                  {/* Add-on Services */}
-                  <div className="border rounded-md p-4 mt-4 space-y-3">
-                    <Label className="font-semibold">Optional Add-On Services</Label>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <Input
-                        placeholder="Resume Sale Value ($)"
-                        value={resumeValue}
-                        onChange={(e) => setResumeValue(e.target.value)}
-                      />
-
-                      <Input
-                        placeholder="Portfolio Creation Value ($)"
-                        value={portfolioValue}
-                        onChange={(e) => setPortfolioValue(e.target.value)}
-                      />
-
-                      <Input
-                        placeholder="LinkedIn Optimization Value ($)"
-                        value={linkedinValue}
-                        onChange={(e) => setLinkedinValue(e.target.value)}
-                      />
-
-                      <Input
-                        placeholder="GitHub Optimization Value ($)"
-                        value={githubValue}
-                        onChange={(e) => setGithubValue(e.target.value)}
-                      />
-
-                    </div>
-                  </div>
-
-                  <div className="border rounded-md p-4 mt-4">
-                    <Label className="font-semibold">Auto Calculated</Label>
-                    <div className="flex justify-between mt-2">
-
-                      <p>Total Sale Value: <strong>${totalSale}</strong></p>
-                      <p>Next Payment Due Date: <strong>{nextDueDate}</strong></p>
-
-                    </div>
-                  </div>
-
-                  {/* Submit */}
-                  <DialogFooter className="pt-4">
-                    <Button
-                      className="bg-green-600 text-white hover:bg-green-700"
-                      onClick={handleOnboardClientSubmit}
-                    >
-                      Submit
-                    </Button>
-
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
-              <SalesClosureDialog
-                isOpen={showSalesDialog}
-                onClose={() => {
-                  setShowSalesDialog(false);
-                  // Optional: reset filter to 'all' if user closes dialog so they see data again
-                  if (stageFilter === "sale done") setStageFilter("all");
-                }}
-                currentUser={userProfile}
-                defaultMode={salesDialogMode}
+            {/* Subscription & Payment Info */}
+            <div className="border rounded-md p-4 space-y-3">
+              <Label className="font-semibold">Subscription & Payment Info <span className="text-red-500">*</span></Label>
+              <Select value={paymentMode} onValueChange={(val: any) => setPaymentMode(val)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select Payment Mode" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="UPI">UPI</SelectItem>
+                  <SelectItem value="PayPal">PayPal</SelectItem>
+                  <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
+                  <SelectItem value="Credit/Debit Card">Credit/Debit Card</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select value={subscriptionCycle} onValueChange={(val: any) => setSubscriptionCycle(val)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select Subscription Duration" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0">No applications subscription</SelectItem>
+                  <SelectItem value="15">15 Days</SelectItem>
+                  <SelectItem value="30">1 Month</SelectItem>
+                  <SelectItem value="60">2 Months</SelectItem>
+                  <SelectItem value="90">3 Months</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Input
+                placeholder="Subscription Sale Value ($)"
+                value={subscriptionSaleValue}
+                onChange={(e) => setSubscriptionSaleValue(e.target.value)}
               />
-              <ZoomPhoneEmbed ref={zoomEmbedRef} callerEmail={userEmail} />
-            </>
-          )}
-        </div>
-      </DashboardLayout>
+
+              <Input
+                placeholder="Auto Total (Subscription Only)"
+                value={autoTotal}
+                disabled
+              />
+
+              <Select value={subscriptionSource} onValueChange={(val: any) => setSubscriptionSource(val)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select Client Source" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Referral">Referral</SelectItem>
+                  <SelectItem value="NEW">NEW</SelectItem>
+                </SelectContent>
+              </Select>
+
+            </div>
+          </div>
+
+          {/* Add-on Services */}
+          <div className="border rounded-md p-4 mt-4 space-y-3">
+            <Label className="font-semibold">Optional Add-On Services</Label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Input
+                placeholder="Resume Sale Value ($)"
+                value={resumeValue}
+                onChange={(e) => setResumeValue(e.target.value)}
+              />
+
+              <Input
+                placeholder="Portfolio Creation Value ($)"
+                value={portfolioValue}
+                onChange={(e) => setPortfolioValue(e.target.value)}
+              />
+
+              <Input
+                placeholder="LinkedIn Optimization Value ($)"
+                value={linkedinValue}
+                onChange={(e) => setLinkedinValue(e.target.value)}
+              />
+
+              <Input
+                placeholder="GitHub Optimization Value ($)"
+                value={githubValue}
+                onChange={(e) => setGithubValue(e.target.value)}
+              />
+
+            </div>
+          </div>
+
+          <div className="border rounded-md p-4 mt-4">
+            <Label className="font-semibold">Auto Calculated</Label>
+            <div className="flex justify-between mt-2">
+
+              <p>Total Sale Value: <strong>${totalSale}</strong></p>
+              <p>Next Payment Due Date: <strong>{nextDueDate}</strong></p>
+
+            </div>
+          </div>
+
+          {/* Submit */}
+          <DialogFooter className="pt-4">
+            <Button
+              className="bg-green-600 text-white hover:bg-green-700"
+              onClick={handleOnboardClientSubmit}
+            >
+              {isSubmitting ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Submitting...</> : "Submit"}
+            </Button>
+
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <SalesClosureDialog
+        isOpen={showSalesDialog}
+        onClose={() => { setShowSalesDialog(false); if (stageFilter === "sale done") setStageFilter("all"); }}
+        currentUser={userProfile}
+        defaultMode={salesDialogMode}
+      />
+      <ZoomPhoneEmbed ref={zoomEmbedRef} callerEmail={userEmail} />
     </ProtectedRoute>
   );
 }

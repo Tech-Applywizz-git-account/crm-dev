@@ -1400,7 +1400,12 @@ export default function LeadProfilePage() {
                       <div className="flex items-center justify-between mb-8">
                         <h3 className="text-lg font-bold text-gray-900 tracking-tight">Add-ons & Requirements Summary</h3>
                         {canEdit && (
-                          <Button variant="outline" size="sm" className="h-8 border-gray-300 text-gray-700 font-medium px-5 rounded-sm" onClick={() => setIsEditAddons(true)}>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 border-gray-300 text-gray-700 font-medium px-5 rounded-sm"
+                            onClick={() => window.open(`/client_sale_history_update/${business_id}`, "_blank")}
+                          >
                             Edit
                           </Button>
                         )}
