@@ -556,7 +556,7 @@ export default function AccountManagementPage() {
         current_stage: "Conversation Done",
         followup_date: feedbackForm.date,
         notes: `Feedback recorded: rating ${feedbackForm.rating}/5. ${feedbackForm.notes}`.slice(0, 1000),
-        assigned_to: selectedClient.assigned_to || "Unassigned",
+        assigned_to: me.name || "Accounts",
         email: emailToUse,
         phone: phoneToUse,
       },
@@ -591,7 +591,7 @@ export default function AccountManagementPage() {
       current_stage: pendingStage,
       followup_date: followUpForm.date,
       notes: followUpForm.notes.trim(),
-      assigned_to: selectedClient.assigned_to || "Unassigned",
+      assigned_to: me.name || "Accounts",
       email: emailToUse,
       phone: phoneToUse,
     };
@@ -607,10 +607,10 @@ export default function AccountManagementPage() {
       prev.map((client) =>
         client.id === selectedClient.id
           ? {
-              ...client,
-              stage: pendingStage,
-              follow_ups: [...(client.follow_ups || []), { date: followUpForm.date, notes: followUpForm.notes }],
-            }
+            ...client,
+            stage: pendingStage,
+            follow_ups: [...(client.follow_ups || []), { date: followUpForm.date, notes: followUpForm.notes }],
+          }
           : client
       )
     );
@@ -677,6 +677,8 @@ export default function AccountManagementPage() {
           finance_status: "Paid",
           closed_at: sale_done.toISOString(),
           onboarded_date: date.toISOString().split("T")[0],
+          account_assigned_name: me.name || me.email || "Accounts",
+          account_assigned_email: me.email || null,
         });
       }
 
@@ -739,10 +741,10 @@ export default function AccountManagementPage() {
     const { data, error } = await supabase
       .from("profiles")
       .select("full_name, user_email, roles")
-      .in("roles", ["Sales Associate", "Accounts Associate","Admin","Resume Head","Finance","Sales","Accounts"]);
+      .in("roles", ["Sales Associate", "Accounts Associate", "Admin", "Resume Head", "Finance", "Sales", "Accounts"]);
 
 
-      // .in("roles",["Sales Associate","Admin"]);
+    // .in("roles",["Sales Associate","Admin"]);
 
 
 
@@ -1079,19 +1081,19 @@ export default function AccountManagementPage() {
                             <TableCell>{getRenewWithinBadge(client.created_at)}</TableCell>
 
                             {/* Account Owner cell with red 'Not Assigned' */}
-                           <TableCell className="text-center">
-   {client.account_assigned_name && client.account_assigned_name.trim() ? (
-    <span className="bg-gray-200 text-gray-800 text-md font-bold p-2 rounded-lg">
-      {client.account_assigned_name}
-    </span>
-  ) : (
-    <Badge className="bg-red-100 text-red-800">
-      Not Assigned
-    </Badge>
-  )}
-</TableCell>
+                            <TableCell className="text-center">
+                              {client.account_assigned_name && client.account_assigned_name.trim() ? (
+                                <span className="bg-gray-200 text-gray-800 text-md font-bold p-2 rounded-lg">
+                                  {client.account_assigned_name}
+                                </span>
+                              ) : (
+                                <Badge className="bg-red-100 text-red-800">
+                                  Not Assigned
+                                </Badge>
+                              )}
+                            </TableCell>
 
- {/* <TableCell className="text-center">
+                            {/* <TableCell className="text-center">
                               {client.account_assigned_name && client.account_assigned_name.trim() ? (
                                 <Badge className="bg-green-100 text-green-800">{client.account_assigned_name}</Badge>
                               ) : (

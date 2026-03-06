@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { useAuth } from "@/components/providers/auth-provider";
 import {
   Select,
   SelectTrigger,
@@ -43,7 +44,7 @@ type LeadRow = {
 };
 
 
-const user = supabase.auth.getUser();
+
 
 
 /* --- Helpers (same as EditSaleCloseForm) --- */
@@ -135,7 +136,7 @@ export default function NewSaleCloseForm({ leadId }: NewSaleCloseFormProps) {
   // Client details (prefilled from leads)
   const [clientName, setClientName] = useState("");
   const [clientEmail, setClientEmail] = useState("");
-//   const [companyApplicationEmail, setCompanyApplicationEmail] = useState("");
+  //   const [companyApplicationEmail, setCompanyApplicationEmail] = useState("");
   const [leadPhone, setLeadPhone] = useState("");
 
 
@@ -156,7 +157,8 @@ export default function NewSaleCloseForm({ leadId }: NewSaleCloseFormProps) {
     useState<number>(0);
 
 
-    const [currentUser, setCurrentUser] = useState<any>(null);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const { user } = useAuth();
 
 
 
@@ -192,12 +194,12 @@ export default function NewSaleCloseForm({ leadId }: NewSaleCloseFormProps) {
     useState<number>(0);
 
 
-   
-useEffect(() => {
-  supabase.auth.getUser().then(({ data }) => {
-    setCurrentUser(data.user);
-  });
-}, []);
+
+  useEffect(() => {
+    if (user) {
+      setCurrentUser(user);
+    }
+  }, [user]);
 
 
 
@@ -226,7 +228,7 @@ useEffect(() => {
           setClientName(leadData.name ?? "");
           setClientEmail(leadData.email ?? "");
           setLeadPhone(leadData.phone ?? "");
-       
+
         }
       } catch (e: any) {
         console.error(e);
@@ -311,19 +313,20 @@ useEffect(() => {
       setError(null);
 
 
-      if(!paymentMode){
+      if (!paymentMode) {
         alert("Please select Payment Mode");
         return;
-    }
-    if(!no_of_job_applications){
+      }
+      if (!no_of_job_applications) {
         alert("Please select No. of Job Applications");
-        return;}
+        return;
+      }
       // 1) Insert NEW sales_closure
       const insertPayload: any = {
         lead_id: leadId,
         lead_name: clientName || null,
         email: clientEmail || null,
-       
+
         // company_application_email: companyApplicationEmail || null,
 
 
@@ -359,6 +362,10 @@ useEffect(() => {
 
         // date stored in UTC midnight
         closed_at: dateOnlyToIsoUTC(closedAtDate),
+
+        // ⭐ NEW — Store closer name and email in sales_closure for attribution
+        account_assigned_name: user?.name || user?.email || "Unknown",
+        account_assigned_email: user?.email || null
       };
 
 
@@ -376,12 +383,12 @@ useEffect(() => {
           name: clientName || null,
           email: clientEmail || null,
           phone: leadPhone || null,
-           current_stage:"sale done",
-        subscribed:"yes",
-     
-  // ⭐ NEW — Assign automatically
-  assigned_to: currentUser?.user_metadata?.full_name ?? null,
-  assigned_to_email: currentUser?.email ?? null,
+          current_stage: "sale done",
+          subscribed: "yes",
+
+          // ⭐ NEW — Assign automatically
+          assigned_to: user?.name || user?.email || null,
+          assigned_to_email: user?.email || null,
         };
 
 
@@ -419,58 +426,58 @@ useEffect(() => {
   /* ---------- UI (same as EditSaleCloseForm) ---------- */
   return (
     // <DashboardLayout>
-      <div className="p-6 pt-0">
-        <div className="mb-2 flex items-center justify-between">
-          <h1 className="text-2xl font-bold">Close Sale — {leadId}</h1>
-        </div>
+    <div className="p-6 pt-0">
+      <div className="mb-2 flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Close Sale — {leadId}</h1>
+      </div>
 
 
-        {loading ? (
-          <Card>
-            <CardContent className="p-6">Loading client details…</CardContent>
-          </Card>
-        ) : error ? (
-          <Card>
-            <CardContent className="p-6 text-red-600">{error}</CardContent>
-          </Card>
-        ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <Card className="lg:col-span-2">
-              <CardHeader>
-                <CardTitle>🧾 Close Sale — New Client</CardTitle>
-              </CardHeader>
+      {loading ? (
+        <Card>
+          <CardContent className="p-6">Loading client details…</CardContent>
+        </Card>
+      ) : error ? (
+        <Card>
+          <CardContent className="p-6 text-red-600">{error}</CardContent>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <Card className="lg:col-span-2">
+            <CardHeader>
+              <CardTitle>🧾 Close Sale — New Client</CardTitle>
+            </CardHeader>
 
 
-              <CardContent className="space-y-6">
-                {/* Client Details + Phone */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="border rounded-md p-4 space-y-3">
-                    <Label className="font-semibold">
-                      Client Details <span className="text-red-500">*</span>
-                    </Label>
+            <CardContent className="space-y-6">
+              {/* Client Details + Phone */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="border rounded-md p-4 space-y-3">
+                  <Label className="font-semibold">
+                    Client Details <span className="text-red-500">*</span>
+                  </Label>
 
 
-                    <div className="space-y-1">
-                      <Label>Client name</Label>
-                      <Input
-                        placeholder="Client Full Name"
-                        value={clientName}
-                        onChange={(e) => setClientName(e.target.value)}
-                      />
-                    </div>
+                  <div className="space-y-1">
+                    <Label>Client name</Label>
+                    <Input
+                      placeholder="Client Full Name"
+                      value={clientName}
+                      onChange={(e) => setClientName(e.target.value)}
+                    />
+                  </div>
 
 
-                    <div className="space-y-1">
-                      <Label>Client personal email</Label>
-                      <Input
-                        placeholder="Client Email"
-                        value={clientEmail}
-                        onChange={(e) => setClientEmail(e.target.value)}
-                      />
-                    </div>
+                  <div className="space-y-1">
+                    <Label>Client personal email</Label>
+                    <Input
+                      placeholder="Client Email"
+                      value={clientEmail}
+                      onChange={(e) => setClientEmail(e.target.value)}
+                    />
+                  </div>
 
 
-                    {/* <div className="space-y-1">
+                  {/* <div className="space-y-1">
                       <Label>Client company email</Label>
                       <Input
                         placeholder="Company Application Email PWD: Created@123"
@@ -482,319 +489,319 @@ useEffect(() => {
                     </div> */}
 
 
-                    {/* Sale Closed At */}
-                    <div className="space-y-1">
-                      <Label>Sale Closed At</Label>
-                      <Input
-                        type="date"
-                        value={closedAtDate}
-                        onChange={(e) => setClosedAtDate(e.target.value)}
-                      />
-                    </div>
-
-
-                    {/* Lead Phone */}
-                    <div className="space-y-1">
-                      <Label>Lead Phone</Label>
-                      <Input
-                        placeholder="Phone"
-                        value={leadPhone}
-                        onChange={(e) => setLeadPhone(e.target.value)}
-                      />
-                      <p className="text-xs text-gray-500">
-                        This will update leads table on save.
-                      </p>
-                    </div>
+                  {/* Sale Closed At */}
+                  <div className="space-y-1">
+                    <Label>Sale Closed At</Label>
+                    <Input
+                      type="date"
+                      value={closedAtDate}
+                      onChange={(e) => setClosedAtDate(e.target.value)}
+                    />
                   </div>
 
 
-                  {/* Subscription & Payment Info */}
-                  <div className="border rounded-md p-4 space-y-3">
-                    <Label className="font-semibold">
-                      Subscription & Payment Info{" "}
-                      <span className="text-red-500">*</span>
-                    </Label>
-
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      {/* Payment Mode */}
-                      <div className="md:col-span-3">
-                        <Select
-                          value={paymentMode}
-                          onValueChange={(v) =>
-                            setPaymentMode(v as PaymentMode)
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select Payment Mode" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="UPI">UPI</SelectItem>
-                            <SelectItem value="PayPal">PayPal</SelectItem>
-                            <SelectItem value="Bank Transfer">
-                              Bank Transfer
-                            </SelectItem>
-                            <SelectItem value="Credit/Debit Card">
-                              Credit/Debit Card
-                            </SelectItem>
-                            <SelectItem value="Stripe">Stripe</SelectItem>
-                            <SelectItem value="Razorpay">Razorpay</SelectItem>
-                            <SelectItem value="Other">Other</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-
-                      {/* Subscription Cycle */}
-                      <div className="md:col-span-3">
-                        <Select
-                          value={String(subscriptionCycle)}
-                          onValueChange={(v) =>
-                            setSubscriptionCycle(Number(v))
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select Subscription Duration" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="15">15 Days</SelectItem>
-                            <SelectItem value="30">1 Month</SelectItem>
-                            <SelectItem value="60">2 Months</SelectItem>
-                            <SelectItem value="90">3 Months</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-
-                      {/* Application Sale Value */}
-                      <div className="md:col-span-3 grid grid-cols-1 gap-2 mt-2">
-                        <Label className="text-sm">
-                          Application Sale Value
-                        </Label>
-                        <Input
-                          type="number"
-                          inputMode="decimal"
-                          min="0"
-                          value={applicationSaleValue}
-                          onChange={(e) =>
-                            setApplicationSaleValue(
-                              parseFloat(e.target.value) || 0
-                            )
-                          }
-                        />
-                      </div>
-
-
-                      {/* Auto-calculated */}
-                      <div className="md:col-span-3 grid grid-cols-1 gap-2 mt-2">
-                        <Label className="text-sm">
-                          Auto-Calculated Value
-                        </Label>
-                        <Input
-                          type="number"
-                          value={autoCalculatedValue}
-                          disabled
-                        />
-                        <p className="text-xs text-gray-500">
-                          Always ={" "}
-                          <code>
-                            (subscription_cycle / 30) × application_sale_value
-                          </code>
-                        </p>
-                      </div>
-
-
-                      {/* No. of Job Applications */}
-                      <div className="md:col-span-3">
-                        <div className="space-y-1">
-                          <Label>
-                            No. of Job Applications
-                            <span className="text-red-700">*</span>
-                          </Label>
-                          <Select
-                            value={no_of_job_applications}
-                            onValueChange={(v) =>
-                              set_no_of_job_applications(v)
-                            }
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select count" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="0">
-                                No applications
-                              </SelectItem>
-                              <SelectItem value="20">20+</SelectItem>
-                              <SelectItem value="40">40+</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                    </div>
+                  {/* Lead Phone */}
+                  <div className="space-y-1">
+                    <Label>Lead Phone</Label>
+                    <Input
+                      placeholder="Phone"
+                      value={leadPhone}
+                      onChange={(e) => setLeadPhone(e.target.value)}
+                    />
+                    <p className="text-xs text-gray-500">
+                      This will update leads table on save.
+                    </p>
                   </div>
                 </div>
 
 
-                {/* Add-ons */}
+                {/* Subscription & Payment Info */}
                 <div className="border rounded-md p-4 space-y-3">
                   <Label className="font-semibold">
-                    Optional Add-On Services
+                    Subscription & Payment Info{" "}
+                    <span className="text-red-500">*</span>
                   </Label>
 
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="flex gap-2">
-                      <Label className="w-1/3 m-2">Resume value</Label>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {/* Payment Mode */}
+                    <div className="md:col-span-3">
+                      <Select
+                        value={paymentMode}
+                        onValueChange={(v) =>
+                          setPaymentMode(v as PaymentMode)
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select Payment Mode" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="UPI">UPI</SelectItem>
+                          <SelectItem value="PayPal">PayPal</SelectItem>
+                          <SelectItem value="Bank Transfer">
+                            Bank Transfer
+                          </SelectItem>
+                          <SelectItem value="Credit/Debit Card">
+                            Credit/Debit Card
+                          </SelectItem>
+                          <SelectItem value="Stripe">Stripe</SelectItem>
+                          <SelectItem value="Razorpay">Razorpay</SelectItem>
+                          <SelectItem value="Other">Other</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+
+                    {/* Subscription Cycle */}
+                    <div className="md:col-span-3">
+                      <Select
+                        value={String(subscriptionCycle)}
+                        onValueChange={(v) =>
+                          setSubscriptionCycle(Number(v))
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select Subscription Duration" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="15">15 Days</SelectItem>
+                          <SelectItem value="30">1 Month</SelectItem>
+                          <SelectItem value="60">2 Months</SelectItem>
+                          <SelectItem value="90">3 Months</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+
+                    {/* Application Sale Value */}
+                    <div className="md:col-span-3 grid grid-cols-1 gap-2 mt-2">
+                      <Label className="text-sm">
+                        Application Sale Value
+                      </Label>
                       <Input
                         type="number"
                         inputMode="decimal"
                         min="0"
-                        placeholder="Resume Sale Value ($)"
-                        value={resumeValue}
-                        onChange={(e) => setResumeValue(e.target.value)}
+                        value={applicationSaleValue}
+                        onChange={(e) =>
+                          setApplicationSaleValue(
+                            parseFloat(e.target.value) || 0
+                          )
+                        }
                       />
                     </div>
 
 
-                    <div className="flex gap-2">
-                      <Label className="w-1/3 m-2">Portfolio value</Label>
+                    {/* Auto-calculated */}
+                    <div className="md:col-span-3 grid grid-cols-1 gap-2 mt-2">
+                      <Label className="text-sm">
+                        Auto-Calculated Value
+                      </Label>
                       <Input
                         type="number"
-                        inputMode="decimal"
-                        min="0"
-                        placeholder="Portfolio Creation Value ($)"
-                        value={portfolioValue}
-                        onChange={(e) => setPortfolioValue(e.target.value)}
+                        value={autoCalculatedValue}
+                        disabled
                       />
+                      <p className="text-xs text-gray-500">
+                        Always ={" "}
+                        <code>
+                          (subscription_cycle / 30) × application_sale_value
+                        </code>
+                      </p>
                     </div>
 
 
-                    <div className="flex gap-2">
-                      <Label className="w-1/3 m-2">Linkedin value</Label>
-                      <Input
-                        type="number"
-                        inputMode="decimal"
-                        min="0"
-                        placeholder="LinkedIn Optimization Value ($)"
-                        value={linkedinValue}
-                        onChange={(e) => setLinkedinValue(e.target.value)}
-                      />
+                    {/* No. of Job Applications */}
+                    <div className="md:col-span-3">
+                      <div className="space-y-1">
+                        <Label>
+                          No. of Job Applications
+                          <span className="text-red-700">*</span>
+                        </Label>
+                        <Select
+                          value={no_of_job_applications}
+                          onValueChange={(v) =>
+                            set_no_of_job_applications(v)
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select count" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="0">
+                              No applications
+                            </SelectItem>
+                            <SelectItem value="20">20+</SelectItem>
+                            <SelectItem value="40">40+</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </div>
+                  </div>
+                </div>
+              </div>
 
 
-                    <div className="flex gap-2">
-                      <Label className="w-1/3 m-2">Github value</Label>
-                      <Input
-                        type="number"
-                        inputMode="decimal"
-                        min="0"
-                        placeholder="GitHub Optimization Value ($)"
-                        value={githubValue}
-                        onChange={(e) => setGithubValue(e.target.value)}
-                      />
-                    </div>
+              {/* Add-ons */}
+              <div className="border rounded-md p-4 space-y-3">
+                <Label className="font-semibold">
+                  Optional Add-On Services
+                </Label>
 
 
-                    <div className="flex gap-2">
-                      <Label className="w-1/3 m-2">Courses value</Label>
-                      <Input
-                        type="number"
-                        inputMode="decimal"
-                        min="0"
-                        placeholder="Courses / Certifications Value ($)"
-                        value={coursesValue}
-                        onChange={(e) => setCoursesValue(e.target.value)}
-                      />
-                    </div>
-
-
-                    <div className="flex gap-2">
-                      <Label className="w-1/3 m-2">Badge value</Label>
-                      <Input
-                        type="number"
-                        inputMode="decimal"
-                        min="0"
-                        placeholder="Badge Value ($)"
-                        value={badgeValue}
-                        onChange={(e) => setBadgeValue(e.target.value)}
-                      />
-                    </div>
-
-
-                    <div className="flex gap-2">
-                      <Label className="w-1/3 m-2">Job board value</Label>
-                      <Input
-                        type="number"
-                        inputMode="decimal"
-                        min="0"
-                        placeholder="Job Board Value ($)"
-                        value={jobBoardValue}
-                        onChange={(e) => setJobBoardValue(e.target.value)}
-                      />
-                    </div>
-
-
-                    <div className="flex gap-2">
-                      <Input
-                        placeholder="Custom Add-on (e.g., Courses)"
-                        value={customLabel}
-                        onChange={(e) => setCustomLabel(e.target.value)}
-                        className="w-1/2"
-                      />
-                      <Input
-                        type="number"
-                        inputMode="decimal"
-                        min="0"
-                        placeholder="Custom Add-on Value ($)"
-                        value={customValue}
-                        onChange={(e) => setCustomValue(e.target.value)}
-                        className="w-1/2"
-                      />
-                    </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="flex gap-2">
+                    <Label className="w-1/3 m-2">Resume value</Label>
+                    <Input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      placeholder="Resume Sale Value ($)"
+                      value={resumeValue}
+                      onChange={(e) => setResumeValue(e.target.value)}
+                    />
                   </div>
 
 
-                  <div className="border rounded-md p-4 space-y-2">
-                    <Label className="font-semibold">Commitments</Label>
-                    <Textarea
-                      placeholder="Enter commitments…"
-                      value={commitments}
-                      onChange={(e) => setCommitments(e.target.value)}
+                  <div className="flex gap-2">
+                    <Label className="w-1/3 m-2">Portfolio value</Label>
+                    <Input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      placeholder="Portfolio Creation Value ($)"
+                      value={portfolioValue}
+                      onChange={(e) => setPortfolioValue(e.target.value)}
+                    />
+                  </div>
+
+
+                  <div className="flex gap-2">
+                    <Label className="w-1/3 m-2">Linkedin value</Label>
+                    <Input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      placeholder="LinkedIn Optimization Value ($)"
+                      value={linkedinValue}
+                      onChange={(e) => setLinkedinValue(e.target.value)}
+                    />
+                  </div>
+
+
+                  <div className="flex gap-2">
+                    <Label className="w-1/3 m-2">Github value</Label>
+                    <Input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      placeholder="GitHub Optimization Value ($)"
+                      value={githubValue}
+                      onChange={(e) => setGithubValue(e.target.value)}
+                    />
+                  </div>
+
+
+                  <div className="flex gap-2">
+                    <Label className="w-1/3 m-2">Courses value</Label>
+                    <Input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      placeholder="Courses / Certifications Value ($)"
+                      value={coursesValue}
+                      onChange={(e) => setCoursesValue(e.target.value)}
+                    />
+                  </div>
+
+
+                  <div className="flex gap-2">
+                    <Label className="w-1/3 m-2">Badge value</Label>
+                    <Input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      placeholder="Badge Value ($)"
+                      value={badgeValue}
+                      onChange={(e) => setBadgeValue(e.target.value)}
+                    />
+                  </div>
+
+
+                  <div className="flex gap-2">
+                    <Label className="w-1/3 m-2">Job board value</Label>
+                    <Input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      placeholder="Job Board Value ($)"
+                      value={jobBoardValue}
+                      onChange={(e) => setJobBoardValue(e.target.value)}
+                    />
+                  </div>
+
+
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Custom Add-on (e.g., Courses)"
+                      value={customLabel}
+                      onChange={(e) => setCustomLabel(e.target.value)}
+                      className="w-1/2"
+                    />
+                    <Input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      placeholder="Custom Add-on Value ($)"
+                      value={customValue}
+                      onChange={(e) => setCustomValue(e.target.value)}
+                      className="w-1/2"
                     />
                   </div>
                 </div>
 
 
-                {/* Auto calculated summary */}
-                <div className="border rounded-md p-4">
-                  <Label className="font-semibold">Auto Calculated</Label>
-
-
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-2">
-                    <p>
-                      Total Sale Value:{" "}
-                      <strong>${totalSale.toFixed(2)}</strong>
-                    </p>
-                    <p>
-                      Next Payment Due Date:{" "}
-                      <strong>{nextDueDate || "-"}</strong>
-                    </p>
-
-
-                    <Button
-                      className="bg-green-600 text-white hover:bg-green-700"
-                      onClick={handleSave}
-                      disabled={saving}
-                    >
-                      {saving ? "Saving..." : "Save Sale"}
-                    </Button>
-                  </div>
+                <div className="border rounded-md p-4 space-y-2">
+                  <Label className="font-semibold">Commitments</Label>
+                  <Textarea
+                    placeholder="Enter commitments…"
+                    value={commitments}
+                    onChange={(e) => setCommitments(e.target.value)}
+                  />
                 </div>
-              </CardContent>
-            </Card>
-          </div>
-        )}
-      </div>
+              </div>
+
+
+              {/* Auto calculated summary */}
+              <div className="border rounded-md p-4">
+                <Label className="font-semibold">Auto Calculated</Label>
+
+
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-2">
+                  <p>
+                    Total Sale Value:{" "}
+                    <strong>${totalSale.toFixed(2)}</strong>
+                  </p>
+                  <p>
+                    Next Payment Due Date:{" "}
+                    <strong>{nextDueDate || "-"}</strong>
+                  </p>
+
+
+                  <Button
+                    className="bg-green-600 text-white hover:bg-green-700"
+                    onClick={handleSave}
+                    disabled={saving}
+                  >
+                    {saving ? "Saving..." : "Save Sale"}
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+    </div>
     // </DashboardLayout>
   );
 }

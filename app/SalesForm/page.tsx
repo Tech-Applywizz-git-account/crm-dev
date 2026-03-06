@@ -86,15 +86,15 @@ export default function SalesFormPage() {
   const [githubValue, setGithubValue] = useState<string>("");
   const [jobBoardValue, setJobBoardValue] = useState<string>("");
   // Add with the other add-on states
-const [badgeValue, setBadgeValue] = useState<string>("");
+  const [badgeValue, setBadgeValue] = useState<string>("");
 
 
   // NEW add-ons + notes
-const [coursesValue, setCoursesValue] = useState<string>("");
-const [customLabel, setCustomLabel] = useState<string>("");
-const [customValue, setCustomValue] = useState<string>("");
-const [commitments, setCommitments] = useState<string>("");
-const [noOfJobApps, setNoOfJobApps] = useState<string>("");
+  const [coursesValue, setCoursesValue] = useState<string>("");
+  const [customLabel, setCustomLabel] = useState<string>("");
+  const [customValue, setCustomValue] = useState<string>("");
+  const [commitments, setCommitments] = useState<string>("");
+  const [noOfJobApps, setNoOfJobApps] = useState<string>("");
 
 
 
@@ -103,79 +103,79 @@ const [noOfJobApps, setNoOfJobApps] = useState<string>("");
   const [referrerId, setReferrerId] = useState("");
 
   const [refLookupLoading, setRefLookupLoading] = useState(false);
-const [refLookupError, setRefLookupError] = useState<string | null>(null);
+  const [refLookupError, setRefLookupError] = useState<string | null>(null);
 
 
   const [referrerName, setReferrerName] = useState("");
 
-    const router = useRouter();
-
-
-   useEffect(() => {
-  if (user === null) return;
-  type UserRole = "Super Admin" | "Sales" | "Sales Associate" | "Marketing" | "Account Management" | "Finance" | "Resume Head" | "Technical Head";
-  const allowed: UserRole[] = [
-    "Super Admin","Sales","Sales Associate",
-    "Marketing","Account Management","Finance",
-    "Resume Head","Technical Head",
-  ];
-  if (!user || !allowed.includes(user.role)) {
-    router.push("/unauthorized");
-    return;
-  }
-  setLoading(false);
-}, [user, router]);
+  const router = useRouter();
 
 
   useEffect(() => {
-  if (!user) return;
-  const allowed = new Set(["Super Admin", "Resume Head", "Technical Head", "Marketing","Account Management","Finance"]);
-
-}, [user]);
+    if (user === null) return;
+    type UserRole = "Super Admin" | "Sales" | "Sales Associate" | "Marketing" | "Account Management" | "Finance" | "Resume Head" | "Technical Head";
+    const allowed: UserRole[] = [
+      "Super Admin", "Sales", "Sales Associate",
+      "Marketing", "Account Management", "Finance",
+      "Resume Head", "Technical Head",
+    ];
+    if (!user || !allowed.includes(user.role)) {
+      router.push("/unauthorized");
+      return;
+    }
+    setLoading(false);
+  }, [user, router]);
 
 
   useEffect(() => {
-  if (subscriptionSource === "Referral") {
-    if (!referrerId) setReferrerId("AWL-"); // seed the prefix once
-  } else {
-    setReferrerId("");
-    setReferrerName("");
-  }
-}, [subscriptionSource]);
+    if (!user) return;
+    const allowed = new Set(["Super Admin", "Resume Head", "Technical Head", "Marketing", "Account Management", "Finance"]);
+
+  }, [user]);
+
+
+  useEffect(() => {
+    if (subscriptionSource === "Referral") {
+      if (!referrerId) setReferrerId("AWL-"); // seed the prefix once
+    } else {
+      setReferrerId("");
+      setReferrerName("");
+    }
+  }, [subscriptionSource]);
 
 
   const [loading, setLoading] = useState(false);
 
   // ---- Quick search state ----
-const [searchLoading, setSearchLoading] = useState(false);
-const [searchError, setSearchError] = useState<string | null>(null);
-const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchResults, setSearchResults] = useState<any[]>([]);
 
 
-// Get a unique Lead ID: prefer the typed one if it's unused, otherwise RPC-generate
-const getUniqueLeadId = async (preferredId?: string): Promise<string> => {
-  const typed = preferredId?.trim();
-  if (typed) {
-    const { data: existing, error } = await supabase
-      .from("leads")
-      .select("business_id")
-      .eq("business_id", typed)
-      .maybeSingle();
-    if (!error && !existing) return typed; // free to use
-  }
+  // Get a unique Lead ID: prefer the typed one if it's unused, otherwise RPC-generate
+  const getUniqueLeadId = async (preferredId?: string): Promise<string> => {
+    const typed = preferredId?.trim();
+    if (typed) {
+      const { data: existing, error } = await supabase
+        .from("leads")
+        .select("business_id")
+        .eq("business_id", typed)
+        .maybeSingle();
+      if (!error && !existing) return typed; // free to use
+    }
 
-  const { data: newLeadIdResult, error: idError } = await supabase.rpc("generate_custom_lead_id");
-  if (idError || !newLeadIdResult) {
-    throw new Error("Failed to generate new Lead ID");
-  }
-  return String(newLeadIdResult);
-};
+    const { data: newLeadIdResult, error: idError } = await supabase.rpc("generate_custom_lead_id");
+    if (idError || !newLeadIdResult) {
+      throw new Error("Failed to generate new Lead ID");
+    }
+    return String(newLeadIdResult);
+  };
 
-// Format timestamp safely
-const fmtDate = (s?: string | null) => {
-  if (!s) return "—";
-  try { return new Date(s).toLocaleString(); } catch { return s; }
-};
+  // Format timestamp safely
+  const fmtDate = (s?: string | null) => {
+    if (!s) return "—";
+    try { return new Date(s).toLocaleString(); } catch { return s; }
+  };
 
 
   // ---------- Derived ----------
@@ -198,9 +198,9 @@ const fmtDate = (s?: string | null) => {
   );
 
   const applicationSaleValue = useMemo(
-  () => Number(autoTotal.toFixed(2)),
-  [autoTotal]
-);
+    () => Number(autoTotal.toFixed(2)),
+    [autoTotal]
+  );
 
   // grand total (subscription for duration + add-ons)
   const totalSale = useMemo(
@@ -209,11 +209,11 @@ const fmtDate = (s?: string | null) => {
       n(resumeValue) +
       n(portfolioValue) +
       n(linkedinValue) +
-      n(githubValue)+
-       n(coursesValue) +
-       n(badgeValue)+   // NEW
-    n(customValue)+     // NEW
-    n(jobBoardValue) ,
+      n(githubValue) +
+      n(coursesValue) +
+      n(badgeValue) +   // NEW
+      n(customValue) +     // NEW
+      n(jobBoardValue),
     [autoTotal, resumeValue, portfolioValue, linkedinValue, githubValue, coursesValue, customValue, badgeValue, jobBoardValue]
   );
 
@@ -224,252 +224,254 @@ const fmtDate = (s?: string | null) => {
   }, [saleCloseDate, subscriptionCycle]);
 
   // Fetch referrer by cleaned AWL-#### id and fill the name
-const handleReferrerLookup = async () => {
-  const cleaned = formatReferrerId(referrerId || "");
-  setReferrerId(cleaned);
+  const handleReferrerLookup = async () => {
+    const cleaned = formatReferrerId(referrerId || "");
+    setReferrerId(cleaned);
 
-  // only lookup if it looks like a real id: AWL-<digits>
-  if (!/^AWL-\d+$/.test(cleaned)) {
-    setReferrerName("");
-    setRefLookupError(null);
-    return;
-  }
+    // only lookup if it looks like a real id: AWL-<digits>
+    if (!/^AWL-\d+$/.test(cleaned)) {
+      setReferrerName("");
+      setRefLookupError(null);
+      return;
+    }
 
-  try {
-    setRefLookupLoading(true);
-    setRefLookupError(null);
+    try {
+      setRefLookupLoading(true);
+      setRefLookupError(null);
 
-    const { data, error } = await supabase
-      .from("leads")
-      .select("name, source")
-      .eq("business_id", cleaned)
-      .maybeSingle();
+      const { data, error } = await supabase
+        .from("leads")
+        .select("name, source")
+        .eq("business_id", cleaned)
+        .maybeSingle();
 
-    if (error) throw error;
+      if (error) throw error;
 
-    setReferrerName(data?.name ?? "");
-  } catch (e: any) {
-    setReferrerName("");
-    setRefLookupError(e?.message || "Could not find referrer");
-  } finally {
-    setRefLookupLoading(false);
-  }
-};
+      setReferrerName(data?.name ?? "");
+    } catch (e: any) {
+      setReferrerName("");
+      setRefLookupError(e?.message || "Could not find referrer");
+    } finally {
+      setRefLookupLoading(false);
+    }
+  };
 
   const handleSubmit = async () => {
-  try {
+    try {
 
-    if (contactNumber && !/^\+?\d{7,15}$/.test(contactNumber)) {
-  return alert("Enter a valid phone number: '+' optional, 7–15 digits.");
-}
+      if (contactNumber && !/^\+?\d{7,15}$/.test(contactNumber)) {
+        return alert("Enter a valid phone number: '+' optional, 7–15 digits.");
+      }
 
-    // Front-end validations mapped to table constraints
-    if (!clientName.trim()) return alert("Client name is required.");
-    if (!clientEmail.trim()) return alert("Client email is required.");
-    if (!paymentMode) return alert("Payment mode is required.");
-    if (!subscriptionCycle) return alert("Subscription duration is required.");
-    if (!saleCloseDate) return alert("sale close date is required.");
-    if (totalSale <= 0) return alert("Total sale value must be greater than 0.");
-    if (noOfJobApps.trim() === "") return alert("Number of job applications is required.");
+      // Front-end validations mapped to table constraints
+      if (!clientName.trim()) return alert("Client name is required.");
+      if (!clientEmail.trim()) return alert("Client email is required.");
+      if (!paymentMode) return alert("Payment mode is required.");
+      if (!subscriptionCycle) return alert("Subscription duration is required.");
+      if (!saleCloseDate) return alert("sale close date is required.");
+      if (totalSale <= 0) return alert("Total sale value must be greater than 0.");
+      if (noOfJobApps.trim() === "") return alert("Number of job applications is required.");
 
-    const normalizedEmail = clientEmail.trim().toLowerCase();
-    const durationInDays = parseInt(subscriptionCycle, 10);
-    const createdAt = new Date().toISOString();
+      const normalizedEmail = clientEmail.trim().toLowerCase();
+      const durationInDays = parseInt(subscriptionCycle, 10);
+      const createdAt = new Date().toISOString();
 
-    setLoading(true);
+      setLoading(true);
 
-    // 0) Always resolve a unique lead id (uses typed one if free, else RPC)
-    let finalLeadId = await getUniqueLeadId(leadId);
+      // 0) Always resolve a unique lead id (uses typed one if free, else RPC)
+      let finalLeadId = await getUniqueLeadId(leadId);
 
-   // Cleaned referrer id (AWL-####) if Referral
-const cleanedRefId =
-  subscriptionSource === "Referral" && referrerId.trim()
-    ? formatReferrerId(referrerId)
-    : null;
+      // Cleaned referrer id (AWL-####) if Referral
+      const cleanedRefId =
+        subscriptionSource === "Referral" && referrerId.trim()
+          ? formatReferrerId(referrerId)
+          : null;
 
-// Look up referrer's source using the cleaned id
-let referrerSourceValue: string | null = null;
-if (cleanedRefId) {
-  const { data: refLead, error: refErr } = await supabase
-    .from("leads")
-    .select("source")
-    .eq("business_id", cleanedRefId)
-    .maybeSingle();
-  if (refErr) {
-    console.warn("Could not fetch referrer source", refErr.message);
-  } else {
-    referrerSourceValue = refLead?.source ?? null;
-  }
-}
+      // Look up referrer's source using the cleaned id
+      let referrerSourceValue: string | null = null;
+      if (cleanedRefId) {
+        const { data: refLead, error: refErr } = await supabase
+          .from("leads")
+          .select("source")
+          .eq("business_id", cleanedRefId)
+          .maybeSingle();
+        if (refErr) {
+          console.warn("Could not fetch referrer source", refErr.message);
+        } else {
+          referrerSourceValue = refLead?.source ?? null;
+        }
+      }
 
-// Incentives
-const incentivesValue = subscriptionSource === "Referral" ? 1.5 : 0;
+      // Incentives
+      const incentivesValue = subscriptionSource === "Referral" ? 1.5 : 0;
 
 
-const normalizedCompanyAppEmail =
-  (companyApplicationEmail || "").trim().toLowerCase() || null;
+      const normalizedCompanyAppEmail =
+        (companyApplicationEmail || "").trim().toLowerCase() || null;
 
-    // 1) Insert into leads first
-   const leadsPayload: any = {
-  business_id: finalLeadId,               // explicit; avoids relying on default
-  name: clientName.trim(),
-  phone: contactNumber.trim() || null,
-  email: normalizedEmail,
-    status:"Assigned",
-    current_stage:"sale done",
-  city: city.trim() || null,
-  source: referrerSourceValue || null,     // "Referral" or "NEW"
-  created_at: createdAt,
-  assigned_to: closerName?.trim() || null,
-  assigned_to_email: closerEmail || null,
-referral_id: cleanedRefId,
-  incentives: incentivesValue,            // <-- NEW
-  metadata: cleanedRefId
-  ? {
-      referrer_name: referrerName.trim() || null,
-      referrer_source: referrerSourceValue,
-    }
-  : null,
-  // status/current_stage use DB defaults
-};
-    let leadInsert = await supabase
-      .from("leads")
-      .insert(leadsPayload)
-      .select("business_id")
-      .single();
-console.log("Lead insert result:", leadInsert);
-    // 1b) Rare race: if duplicate key, generate a new ID and retry once
-    if (leadInsert.error && (leadInsert.error as any).code === "23505") {
-      finalLeadId = await getUniqueLeadId(); // force RPC
-      leadsPayload.business_id = finalLeadId;
-      leadInsert = await supabase
+      // 1) Insert into leads first
+      const leadsPayload: any = {
+        business_id: finalLeadId,               // explicit; avoids relying on default
+        name: clientName.trim(),
+        phone: contactNumber.trim() || null,
+        email: normalizedEmail,
+        status: "Assigned",
+        current_stage: "sale done",
+        city: city.trim() || null,
+        source: referrerSourceValue || null,     // "Referral" or "NEW"
+        created_at: createdAt,
+        assigned_to: closerName?.trim() || null,
+        assigned_to_email: closerEmail || null,
+        referral_id: cleanedRefId,
+        incentives: incentivesValue,            // <-- NEW
+        metadata: cleanedRefId
+          ? {
+            referrer_name: referrerName.trim() || null,
+            referrer_source: referrerSourceValue,
+          }
+          : null,
+        // status/current_stage use DB defaults
+      };
+      let leadInsert = await supabase
         .from("leads")
         .insert(leadsPayload)
         .select("business_id")
         .single();
-    }
-    if (leadInsert.error) throw leadInsert.error;
+      console.log("Lead insert result:", leadInsert);
+      // 1b) Rare race: if duplicate key, generate a new ID and retry once
+      if (leadInsert.error && (leadInsert.error as any).code === "23505") {
+        finalLeadId = await getUniqueLeadId(); // force RPC
+        leadsPayload.business_id = finalLeadId;
+        leadInsert = await supabase
+          .from("leads")
+          .insert(leadsPayload)
+          .select("business_id")
+          .single();
+      }
+      if (leadInsert.error) throw leadInsert.error;
 
-    // 2) Insert into sales_closure using finalLeadId
-    const salesPayload = {
-      lead_id: finalLeadId,                       // text NOT NULL
-      email: normalizedEmail,
-      lead_name: clientName.trim(),
-          company_application_email: normalizedCompanyAppEmail,
+      // 2) Insert into sales_closure using finalLeadId
+      const salesPayload = {
+        lead_id: finalLeadId,                       // text NOT NULL
+        email: normalizedEmail,
+        lead_name: clientName.trim(),
+        company_application_email: normalizedCompanyAppEmail,
 
-      payment_mode: paymentMode,
-      subscription_cycle: durationInDays,
-      sale_value: totalSale,
+        payment_mode: paymentMode,
+        subscription_cycle: durationInDays,
+        sale_value: totalSale,
         application_sale_value: applicationSaleValue,
 
-      // omit closed_at to use DB default now()
-      closed_at: new Date(saleCloseDate).toISOString(),
-      onboarded_date: null,
-      finance_status: "Paid" as const,
-      resume_sale_value: numOrNull(resumeValue),
-      linkedin_sale_value: numOrNull(linkedinValue),
-      github_sale_value: numOrNull(githubValue),
-      portfolio_sale_value: numOrNull(portfolioValue),
-      job_board_value: numOrNull(jobBoardValue),
+        // omit closed_at to use DB default now()
+        closed_at: new Date(saleCloseDate).toISOString(),
+        onboarded_date: null,
+        finance_status: "Paid" as const,
+        resume_sale_value: numOrNull(resumeValue),
+        linkedin_sale_value: numOrNull(linkedinValue),
+        github_sale_value: numOrNull(githubValue),
+        portfolio_sale_value: numOrNull(portfolioValue),
+        job_board_value: numOrNull(jobBoardValue),
 
-      courses_sale_value: numOrNull(coursesValue),
-  custom_label: (customLabel.trim() || null),
-  custom_sale_value: numOrNull(customValue),
-  commitments: (commitments.trim() || null),
- no_of_job_applications:
-    noOfJobApps.trim() === "" ? null : Math.max(0, parseInt(noOfJobApps, 10) || 0),
-  badge_value: numOrNull(badgeValue),
+        courses_sale_value: numOrNull(coursesValue),
+        custom_label: (customLabel.trim() || null),
+        custom_sale_value: numOrNull(customValue),
+        commitments: (commitments.trim() || null),
+        no_of_job_applications:
+          noOfJobApps.trim() === "" ? null : Math.max(0, parseInt(noOfJobApps, 10) || 0),
+        badge_value: numOrNull(badgeValue),
 
-      checkout_date: null,
-      invoice_url: "",
-      associates_email: "",
-      associates_name: "",
-      associates_tl_email: "",
-      associates_tl_name: "",
-    };
+        checkout_date: null,
+        invoice_url: "",
+        associates_email: "",
+        associates_name: "",
+        associates_tl_email: "",
+        associates_tl_name: "",
+        account_assigned_name: closerName?.trim() || null,
+        account_assigned_email: closerEmail || null,
+      };
 
-    const { error: salesErr } = await supabase.from("sales_closure").insert(salesPayload);
-    if (salesErr) {
-      // cleanup if second insert fails
-      await supabase.from("leads").delete().eq("business_id", finalLeadId);
-      throw salesErr;
+      const { error: salesErr } = await supabase.from("sales_closure").insert(salesPayload);
+      if (salesErr) {
+        // cleanup if second insert fails
+        await supabase.from("leads").delete().eq("business_id", finalLeadId);
+        throw salesErr;
+      }
+
+      setLoading(false);
+
+      // Reset the form
+      setClientName("");
+      setClientEmail("");
+      setCompanyApplicationEmail("");
+
+      setContactNumber("");
+      setCity("");
+      setSalCloseDate("");
+      setSubscriptionCycle("");
+      setSubscriptionSaleValue("");
+      setPaymentMode("");
+      setResumeValue("");
+      setPortfolioValue("");
+      setLinkedinValue("");
+      setGithubValue("");
+      setCoursesValue("");
+      setBadgeValue("");
+      setJobBoardValue("");
+
+      setCustomLabel("");
+      setCustomValue("");
+      setCommitments("");
+      setNoOfJobApps("");
+
+      setSubscriptionSource("");
+      setReferrerId("");
+      setReferrerName("");
+      setLeadId("");
+
+      alert(`✅ Saved! Lead ID: ${finalLeadId}`);
+    } catch (err: any) {
+      setLoading(false);
+      console.error("❌ Error onboarding client:", err?.message || err);
+      alert(`Failed to onboard client: ${err?.message || "Unknown error"}`);
     }
-
-    setLoading(false);
-
-    // Reset the form
-    setClientName("");
-    setClientEmail("");
-    setCompanyApplicationEmail("");
-
-    setContactNumber("");
-    setCity("");
-    setSalCloseDate("");
-    setSubscriptionCycle("");
-    setSubscriptionSaleValue("");
-    setPaymentMode("");
-    setResumeValue("");
-    setPortfolioValue("");
-    setLinkedinValue("");
-    setGithubValue("");
-    setCoursesValue("");
-    setBadgeValue("");
-    setJobBoardValue("");
-
-setCustomLabel("");
-setCustomValue("");
-setCommitments("");
-setNoOfJobApps("");
-
-    setSubscriptionSource("");
-    setReferrerId("");
-    setReferrerName("");
-    setLeadId("");
-
-    alert(`✅ Saved! Lead ID: ${finalLeadId}`);
-  } catch (err: any) {
-    setLoading(false);
-    console.error("❌ Error onboarding client:", err?.message || err);
-    alert(`Failed to onboard client: ${err?.message || "Unknown error"}`);
-  }
-};
+  };
 
 
   const handleQuickSearch = async () => {
-  // require at least one filter
-  const hasAny =
-    qlName.trim() || qlEmail.trim() || qlPhone.trim() || qlLeadId.trim();
-  if (!hasAny) {
-    alert("Enter at least one filter (Name / Email / Phone / Lead ID).");
-    return;
-  }
+    // require at least one filter
+    const hasAny =
+      qlName.trim() || qlEmail.trim() || qlPhone.trim() || qlLeadId.trim();
+    if (!hasAny) {
+      alert("Enter at least one filter (Name / Email / Phone / Lead ID).");
+      return;
+    }
 
-  try {
-    setSearchLoading(true);
-    setSearchError(null);
+    try {
+      setSearchLoading(true);
+      setSearchError(null);
 
-    let query: any = supabase
-      .from("leads")
-      .select("business_id,name,email,source,current_stage,created_at")
-      .order("created_at", { ascending: false });
+      let query: any = supabase
+        .from("leads")
+        .select("business_id,name,email,source,current_stage,created_at")
+        .order("created_at", { ascending: false });
 
-    if (qlName.trim())   query = query.ilike("name", `%${qlName.trim()}%`);
-    if (qlEmail.trim())  query = query.ilike("email", `%${qlEmail.trim().toLowerCase()}%`);
-    if (qlPhone.trim())  query = query.ilike("phone", `%${qlPhone.trim()}%`);
-    if (qlLeadId.trim()) query = query.ilike("business_id", `%${qlLeadId.trim()}%`);
+      if (qlName.trim()) query = query.ilike("name", `%${qlName.trim()}%`);
+      if (qlEmail.trim()) query = query.ilike("email", `%${qlEmail.trim().toLowerCase()}%`);
+      if (qlPhone.trim()) query = query.ilike("phone", `%${qlPhone.trim()}%`);
+      if (qlLeadId.trim()) query = query.ilike("business_id", `%${qlLeadId.trim()}%`);
 
-    const { data, error } = await query.limit(100);
-    if (error) throw error;
+      const { data, error } = await query.limit(100);
+      if (error) throw error;
 
-    setSearchResults(data ?? []);
-  } catch (err: any) {
-    console.error(err);
-    setSearchError(err?.message || "Search failed");
-    setSearchResults([]);
-  } finally {
-    setSearchLoading(false);
-  }
-};
+      setSearchResults(data ?? []);
+    } catch (err: any) {
+      console.error(err);
+      setSearchError(err?.message || "Search failed");
+      setSearchResults([]);
+    } finally {
+      setSearchLoading(false);
+    }
+  };
 
 
   // ---------- Quick Lead Info (RIGHT FORM) ----------
@@ -494,36 +496,36 @@ setNoOfJobApps("");
   };
 
   // Keep only one leading "+" and digits; cap to E.164 (max 15 digits)
-const sanitizePhone = (input: string) => {
-  const raw = (input || "").replace(/[^\d+]/g, ""); // strip everything except + and digits
-  let out = "";
-  for (const ch of raw) {
-    if (ch === "+") {
-      if (out.length === 0) out = "+"; // only allow + at the start, once
-    } else {
-      out += ch; // digits
+  const sanitizePhone = (input: string) => {
+    const raw = (input || "").replace(/[^\d+]/g, ""); // strip everything except + and digits
+    let out = "";
+    for (const ch of raw) {
+      if (ch === "+") {
+        if (out.length === 0) out = "+"; // only allow + at the start, once
+      } else {
+        out += ch; // digits
+      }
     }
-  }
-  // limit to 15 digits total (E.164). Keep leading + if present.
-  if (out.startsWith("+")) out = "+" + out.slice(1).replace(/\D/g, "").slice(0, 15);
-  else out = out.replace(/\D/g, "").slice(0, 15);
-  return out;
-};
+    // limit to 15 digits total (E.164). Keep leading + if present.
+    if (out.startsWith("+")) out = "+" + out.slice(1).replace(/\D/g, "").slice(0, 15);
+    else out = out.replace(/\D/g, "").slice(0, 15);
+    return out;
+  };
 
- 
+
   return (
-<ProtectedRoute
-  allowedRoles={[
-    "Sales",
-    "Sales Associate",
-    "Marketing",
-    "Finance",
-    "Account Management",  // ← was "Accounts"
-    "Resume Head",
-    "Technical Head",
-    "Super Admin",
-  ]}
->
+    <ProtectedRoute
+      allowedRoles={[
+        "Sales",
+        "Sales Associate",
+        "Marketing",
+        "Finance",
+        "Account Management",  // ← was "Accounts"
+        "Resume Head",
+        "Technical Head",
+        "Super Admin",
+      ]}
+    >
       <DashboardLayout>
         <main className="py-0 px-0 mx-0 my-0 max-w-full p-6">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -563,21 +565,21 @@ const sanitizePhone = (input: string) => {
                       onChange={(e) => setClientEmail(e.target.value)}
                     />
                     <Input
-  placeholder="Company Application Email PWD: Created@123"
-  value={companyApplicationEmail}
-  onChange={(e) => setCompanyApplicationEmail(e.target.value)}
-/>
+                      placeholder="Company Application Email PWD: Created@123"
+                      value={companyApplicationEmail}
+                      onChange={(e) => setCompanyApplicationEmail(e.target.value)}
+                    />
 
                     <Input
-  placeholder="Contact Number with country code"
-  value={contactNumber}
-  onChange={(e) => setContactNumber(sanitizePhone(e.target.value))}
-  onBlur={() => setContactNumber(sanitizePhone(contactNumber))}
-  inputMode="tel"
-  maxLength={16} // "+" + up to 15 digits
-  pattern="^\+?[0-9]{0,15}$"
-  className="font-mono"
-/>
+                      placeholder="Contact Number with country code"
+                      value={contactNumber}
+                      onChange={(e) => setContactNumber(sanitizePhone(e.target.value))}
+                      onBlur={() => setContactNumber(sanitizePhone(contactNumber))}
+                      inputMode="tel"
+                      maxLength={16} // "+" + up to 15 digits
+                      pattern="^\+?[0-9]{0,15}$"
+                      className="font-mono"
+                    />
 
 
                     <Input
@@ -613,7 +615,7 @@ const sanitizePhone = (input: string) => {
                             <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
                             <SelectItem value="Credit/Debit Card">Credit/Debit Card</SelectItem>
                             <SelectItem value="Stripe">Stripe</SelectItem>
-                              <SelectItem value="Razorpay">Razorpay</SelectItem> {/* NEW */}
+                            <SelectItem value="Razorpay">Razorpay</SelectItem> {/* NEW */}
 
                             <SelectItem value="Other">Other</SelectItem>
                           </SelectContent>
@@ -668,55 +670,55 @@ const sanitizePhone = (input: string) => {
                       </div>
 
                       {/* Referral extras */}
-                   {subscriptionSource === "Referral" && (
-  <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-    <div className="space-y-1">
-      <Input
-        placeholder="Referrer ID (AWL-123)"
-        value={referrerId || "AWL-"}
-        onChange={(e) => setReferrerId(formatReferrerId(e.target.value))}
-        onBlur={handleReferrerLookup}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            handleReferrerLookup();
-          }
-        }}
-        inputMode="numeric"
-        className="font-mono"
-      />
-      <p className="text-xs text-gray-500">
-        {refLookupLoading ? "Looking up referrer…" :
-         refLookupError ? <span className="text-red-600">{refLookupError}</span> :
-         referrerName ? "Referrer found." : ""}
-      </p>
-    </div>
+                      {subscriptionSource === "Referral" && (
+                        <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <Input
+                              placeholder="Referrer ID (AWL-123)"
+                              value={referrerId || "AWL-"}
+                              onChange={(e) => setReferrerId(formatReferrerId(e.target.value))}
+                              onBlur={handleReferrerLookup}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  handleReferrerLookup();
+                                }
+                              }}
+                              inputMode="numeric"
+                              className="font-mono"
+                            />
+                            <p className="text-xs text-gray-500">
+                              {refLookupLoading ? "Looking up referrer…" :
+                                refLookupError ? <span className="text-red-600">{refLookupError}</span> :
+                                  referrerName ? "Referrer found." : ""}
+                            </p>
+                          </div>
 
-    <Input
-      placeholder="Referrer Name"
-      value={referrerName}
-      onChange={(e) => setReferrerName(e.target.value)}
-    />
-  </div>
-)}
+                          <Input
+                            placeholder="Referrer Name"
+                            value={referrerName}
+                            onChange={(e) => setReferrerName(e.target.value)}
+                          />
+                        </div>
+                      )}
 
 
 
                       {/* Sale Closing By (disabled) */}
-                        <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-                         <Input
-                         value="Sale Closing By"
+                      <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <Input
+                          value="Sale Closing By"
                           disabled
-                            readOnly
+                          readOnly
                           placeholder="Sale Closing By" className="mt-1 text-gray-900 bg-gray-50 disabled:opacity-100 disabled:cursor-default"
                         />                      <Input
-    value={closerName || "—"}
-    disabled
-    readOnly
-    className="mt-1 text-gray-900 bg-gray-50 disabled:opacity-100 disabled:cursor-default"
-    // If your Input base forces opacity via CSS, this guarantees full visibility:
-    style={{ opacity: 1 }}
-  />
+                          value={closerName || "—"}
+                          disabled
+                          readOnly
+                          className="mt-1 text-gray-900 bg-gray-50 disabled:opacity-100 disabled:cursor-default"
+                          // If your Input base forces opacity via CSS, this guarantees full visibility:
+                          style={{ opacity: 1 }}
+                        />
                       </div>
                     </div>
                   </div>
@@ -780,18 +782,18 @@ const sanitizePhone = (input: string) => {
                       value={jobBoardValue}
                       onChange={(e) => setJobBoardValue(e.target.value)}
                     />
-                                      {/* Courses / Certifications ($) */}
-<div className="flex gap-2">
-                    <Input
-  type="number"
-  inputMode="decimal"
-  min="0"
-  step="0.01"
-  placeholder="Courses Value ($)"
-  value={coursesValue}
-  onChange={(e) => setCoursesValue(e.target.value)}
-/>
-{/* 
+                    {/* Courses / Certifications ($) */}
+                    <div className="flex gap-2">
+                      <Input
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        step="0.01"
+                        placeholder="Courses Value ($)"
+                        value={coursesValue}
+                        onChange={(e) => setCoursesValue(e.target.value)}
+                      />
+                      {/* 
 <Input
   type="number"
   inputMode="numeric"
@@ -806,54 +808,54 @@ const sanitizePhone = (input: string) => {
   }}
 /> */}
 
-<select
-  className="border rounded-md p-2 w-full"
-  value={noOfJobApps}
-  required
-  onChange={(e) => setNoOfJobApps(e.target.value)}
->
-  <option value="">Select number of job applications</option>
-  <option value="0"> No applications</option>
-  <option value="20">20+</option>
-  <option value="40">40+</option>
-</select>
+                      <select
+                        className="border rounded-md p-2 w-full"
+                        value={noOfJobApps}
+                        required
+                        onChange={(e) => setNoOfJobApps(e.target.value)}
+                      >
+                        <option value="">Select number of job applications</option>
+                        <option value="0"> No applications</option>
+                        <option value="20">20+</option>
+                        <option value="40">40+</option>
+                      </select>
 
 
 
-</div>
-<div className="flex gap-2">
-  <Input
-    placeholder="Custom Add-on (e.g., Courses)"
-    value={customLabel}
-    onChange={(e) => setCustomLabel(e.target.value)}
-    className="w-1/2"
-  />
-  <Input
-    type="number"
-    inputMode="decimal"
-    min="0"
-    step="0.01"
-    placeholder="Custom Add-on Value ($)"
-    value={customValue}
-    onChange={(e) => setCustomValue(e.target.value)}
-    className="w-1/2"
-  />
-</div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="Custom Add-on (e.g., Courses)"
+                        value={customLabel}
+                        onChange={(e) => setCustomLabel(e.target.value)}
+                        className="w-1/2"
+                      />
+                      <Input
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        step="0.01"
+                        placeholder="Custom Add-on Value ($)"
+                        value={customValue}
+                        onChange={(e) => setCustomValue(e.target.value)}
+                        className="w-1/2"
+                      />
+                    </div>
                   </div>
 
 
-{/* Custom add-on: label + amount */}
+                  {/* Custom add-on: label + amount */}
 
-{/* Commitments */}
-<div className="border rounded-md p-4 space-y-2">
-  <Label className="font-semibold">Commitments</Label>
-  <Textarea
-    placeholder="Enter commitments (e.g., # of applications per week, review calls, deliverables, timelines…)"
-    value={commitments}
-    onChange={(e) => setCommitments(e.target.value)}
-    required
-  />
-</div>
+                  {/* Commitments */}
+                  <div className="border rounded-md p-4 space-y-2">
+                    <Label className="font-semibold">Commitments</Label>
+                    <Textarea
+                      placeholder="Enter commitments (e.g., # of applications per week, review calls, deliverables, timelines…)"
+                      value={commitments}
+                      onChange={(e) => setCommitments(e.target.value)}
+                      required
+                    />
+                  </div>
 
                 </div>
 
@@ -881,144 +883,144 @@ const sanitizePhone = (input: string) => {
 
             {/* RIGHT: Quick Lead Info (4 fields) */}
             <div className="lg:col-span-1 grid grid-cols-1 gap-6 overflow-hidden">
-         <Card className="lg:col-span-1">
-  <CardHeader>
-    <CardTitle>Quick Lead Info</CardTitle>
-  </CardHeader>
+              <Card className="lg:col-span-1">
+                <CardHeader>
+                  <CardTitle>Quick Lead Info</CardTitle>
+                </CardHeader>
 
-  {/* Submit triggers search; Enter works in any field */}
-  <CardContent>
-    <form
-      onSubmit={(e) => { e.preventDefault(); handleQuickSearch(); }}
-      className="space-y-3"
-    >
-      {/* Lead ID */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3">
-        <Label htmlFor="qlLeadId" className="sm:w-36 shrink-0 text-sm text-gray-600">
-          Lead ID
-        </Label>
-        <Input
-          id="qlLeadId"
-          placeholder="AWL-000"
-          value={qlLeadId}
-          onChange={(e) => setQlLeadId(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleQuickSearch(); } }}
-          className="sm:flex-1"
-        />
-      </div>
+                {/* Submit triggers search; Enter works in any field */}
+                <CardContent>
+                  <form
+                    onSubmit={(e) => { e.preventDefault(); handleQuickSearch(); }}
+                    className="space-y-3"
+                  >
+                    {/* Lead ID */}
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3">
+                      <Label htmlFor="qlLeadId" className="sm:w-36 shrink-0 text-sm text-gray-600">
+                        Lead ID
+                      </Label>
+                      <Input
+                        id="qlLeadId"
+                        placeholder="AWL-000"
+                        value={qlLeadId}
+                        onChange={(e) => setQlLeadId(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleQuickSearch(); } }}
+                        className="sm:flex-1"
+                      />
+                    </div>
 
-      {/* Name */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3">
-        <Label htmlFor="qlName" className="sm:w-36 shrink-0 text-sm text-gray-600">
-          Name
-        </Label>
-        <Input
-          id="qlName"
-          placeholder="Lead Full Name"
-          value={qlName}
-          onChange={(e) => setQlName(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleQuickSearch(); } }}
-          className="sm:flex-1"
-        />
-      </div>
+                    {/* Name */}
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3">
+                      <Label htmlFor="qlName" className="sm:w-36 shrink-0 text-sm text-gray-600">
+                        Name
+                      </Label>
+                      <Input
+                        id="qlName"
+                        placeholder="Lead Full Name"
+                        value={qlName}
+                        onChange={(e) => setQlName(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleQuickSearch(); } }}
+                        className="sm:flex-1"
+                      />
+                    </div>
 
-      {/* Email */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3">
-        <Label htmlFor="qlEmail" className="sm:w-36 shrink-0 text-sm text-gray-600">
-          Email
-        </Label>
-        <Input
-          id="qlEmail"
-          placeholder="lead@email.com"
-          value={qlEmail}
-          onChange={(e) => setQlEmail(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleQuickSearch(); } }}
-          className="sm:flex-1"
-        />
-      </div>
+                    {/* Email */}
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3">
+                      <Label htmlFor="qlEmail" className="sm:w-36 shrink-0 text-sm text-gray-600">
+                        Email
+                      </Label>
+                      <Input
+                        id="qlEmail"
+                        placeholder="lead@email.com"
+                        value={qlEmail}
+                        onChange={(e) => setQlEmail(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleQuickSearch(); } }}
+                        className="sm:flex-1"
+                      />
+                    </div>
 
-      {/* Phone */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3">
-        <Label htmlFor="qlPhone" className="sm:w-36 shrink-0 text-sm text-gray-600">
-          Phone Number
-        </Label>
-        <Input
-          id="qlPhone"
-          placeholder="+1 555 123 4567"
-          value={qlPhone}
-          onChange={(e) => setQlPhone(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleQuickSearch(); } }}
-          className="sm:flex-1"
-        />
-      </div>
+                    {/* Phone */}
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3">
+                      <Label htmlFor="qlPhone" className="sm:w-36 shrink-0 text-sm text-gray-600">
+                        Phone Number
+                      </Label>
+                      <Input
+                        id="qlPhone"
+                        placeholder="+1 555 123 4567"
+                        value={qlPhone}
+                        onChange={(e) => setQlPhone(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleQuickSearch(); } }}
+                        className="sm:flex-1"
+                      />
+                    </div>
 
-      {/* Actions */}
-<div className="flex w-full items-center justify-end gap-2 pt-2">
-        <Button type="submit" className="bg-emerald-600 hover:bg-emerald-700 text-white">
-          Search
-        </Button>
-       
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => { resetQuickLead(); setSearchResults([]); }}
-        >
-          Reset
-        </Button>
-      </div>
+                    {/* Actions */}
+                    <div className="flex w-full items-center justify-end gap-2 pt-2">
+                      <Button type="submit" className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                        Search
+                      </Button>
 
-      <p className="text-xs text-gray-500">
-        Type any combination (Name, Email, Phone, Lead ID) then press Enter or click Search.
-      </p>
-    </form>
-  </CardContent>
-</Card>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => { resetQuickLead(); setSearchResults([]); }}
+                      >
+                        Reset
+                      </Button>
+                    </div>
 
-<Card className="lg:col-span-1 mt-4 h-[56vh] flex flex-col">
-  <CardHeader className="shrink-0">
-    <CardTitle>Search Results </CardTitle>
-    <p className="text-gray-400">slide to left to see complete data</p>
-  </CardHeader>
-  <CardContent className="flex-1 overflow-y-auto overflow-x-hidden p-0">
-    {searchLoading && <p className="p-4 text-sm text-gray-600">Searching…</p>}
-    {searchError && <p className="p-4 text-sm text-red-600">{searchError}</p>}
+                    <p className="text-xs text-gray-500">
+                      Type any combination (Name, Email, Phone, Lead ID) then press Enter or click Search.
+                    </p>
+                  </form>
+                </CardContent>
+              </Card>
 
-    {!searchLoading && !searchError && searchResults.length === 0 && (
-      <p className="p-4 text-sm text-gray-500">No results yet. Enter filters and search.</p>
-    )}
+              <Card className="lg:col-span-1 mt-4 h-[56vh] flex flex-col">
+                <CardHeader className="shrink-0">
+                  <CardTitle>Search Results </CardTitle>
+                  <p className="text-gray-400">slide to left to see complete data</p>
+                </CardHeader>
+                <CardContent className="flex-1 overflow-y-auto overflow-x-hidden p-0">
+                  {searchLoading && <p className="p-4 text-sm text-gray-600">Searching…</p>}
+                  {searchError && <p className="p-4 text-sm text-red-600">{searchError}</p>}
 
-    {!searchLoading && !searchError && searchResults.length > 0 && (
-      <div className="overflow-x-auto">
-        <Table className="w-full">
-          {/* Keep header visible when scrolling */}
-          <TableHeader className="sticky top-0 bg-white z-10">
-            <TableRow>
-              <TableHead>Lead ID</TableHead>
-              <TableHead>Name</TableHead>
-              <TableHead>Email</TableHead>
-              <TableHead>Source</TableHead>
-              <TableHead>Stage</TableHead>
-              <TableHead>Created</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {searchResults.map((row) => (
-              <TableRow key={row.business_id}>
-                <TableCell className="font-medium">{row.business_id}</TableCell>
-                <TableCell>{row.name}</TableCell>
-                <TableCell>{row.email}</TableCell>
-                <TableCell>{row.source ?? "—"}</TableCell>
-                <TableCell>{row.current_stage ?? "—"}</TableCell>
-                <TableCell>{fmtDate(row.created_at)}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-    )}
-  </CardContent>
-</Card>
-</div>
+                  {!searchLoading && !searchError && searchResults.length === 0 && (
+                    <p className="p-4 text-sm text-gray-500">No results yet. Enter filters and search.</p>
+                  )}
+
+                  {!searchLoading && !searchError && searchResults.length > 0 && (
+                    <div className="overflow-x-auto">
+                      <Table className="w-full">
+                        {/* Keep header visible when scrolling */}
+                        <TableHeader className="sticky top-0 bg-white z-10">
+                          <TableRow>
+                            <TableHead>Lead ID</TableHead>
+                            <TableHead>Name</TableHead>
+                            <TableHead>Email</TableHead>
+                            <TableHead>Source</TableHead>
+                            <TableHead>Stage</TableHead>
+                            <TableHead>Created</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {searchResults.map((row) => (
+                            <TableRow key={row.business_id}>
+                              <TableCell className="font-medium">{row.business_id}</TableCell>
+                              <TableCell>{row.name}</TableCell>
+                              <TableCell>{row.email}</TableCell>
+                              <TableCell>{row.source ?? "—"}</TableCell>
+                              <TableCell>{row.current_stage ?? "—"}</TableCell>
+                              <TableCell>{fmtDate(row.created_at)}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
 
           </div>
         </main>

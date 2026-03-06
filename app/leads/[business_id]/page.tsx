@@ -33,6 +33,9 @@ interface Lead {
   city?: string;
   source?: string;
   assigned_at?: string;
+  linkedin_url?: string;
+  github_url?: string;
+  portfolio_url?: string;
 }
 
 interface ResumeProgress {
@@ -109,7 +112,8 @@ function getLatestAddons(rows: any[]) {
     badge_value: findLatestValue(sorted, "badge_value"),
     commitments: findLatestValue(sorted, "commitments"),
     application_sale_value: findLatestValue(sorted, "application_sale_value"),
-    // You can include more fields if needed
+    no_of_job_applications: findLatestValue(sorted, "no_of_job_applications"),
+    closed_by: sorted[0]?.closed_by
   };
 }
 
@@ -134,6 +138,7 @@ export default function LeadProfilePage() {
 
   const [resumeProg, setResumeProg] = useState<ResumeProgress | null>(null);
   const [portfolioProg, setPortfolioProg] = useState<PortfolioProgress | null>(null);
+  const [githubProg, setGithubProg] = useState<any | null>(null);
 
   // ⬇️ NEW local edit state
   const [isEditOnboarding, setIsEditOnboarding] = useState(false);
@@ -152,7 +157,17 @@ export default function LeadProfilePage() {
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emails, setEmails] = useState<any[]>([]);
 
-  // Follow-up Dialog State
+  // ------------------ RENEWAL AUTOMATION ------------------
+  // Added for Phase 6
+  const upcomingRenewalDate = useMemo(() => {
+    if (!saleHistory.length) return null;
+    const latest = saleHistory[0];
+    if (!latest.onboarded_date || !latest.subscription_cycle) return null;
+    const date = new Date(latest.onboarded_date);
+    date.setDate(date.getDate() + latest.subscription_cycle);
+    return date;
+  }, [saleHistory]);
+
   const [followUpDialogOpen, setFollowUpDialogOpen] = useState(false);
   const [followUpData, setFollowUpData] = useState({ date: "", notes: "" });
   const [pendingStageUpdate, setPendingStageUpdate] = useState<{ stage: string; callId?: number } | null>(null);
@@ -186,6 +201,12 @@ export default function LeadProfilePage() {
       name: "Payment Success",
       subject: "Welcome Aboard! Payment Received - ApplyWizz",
       body: `Hi ${lead?.name || 'there'},\n\nGreat news! We have successfully received your payment. Welcome to the ApplyWizz family!\n\nOur technical team has been notified and will reach out to you within the next 24 business hours to begin your profile optimization and official onboarding.\n\nWe're thrilled to have you with us.\n\nBest regards,\n${formatAssociateName(user?.email, user?.name)}\nApplyWizz Team`
+    },
+    {
+      id: "renewal_manual",
+      name: "Manual Renewal Notification",
+      subject: `Renewal Due for ${upcomingRenewalDate ? upcomingRenewalDate.toLocaleDateString() : 'your subscription'}`,
+      body: `Hi ${lead?.name || 'there'},\n\nI'm reaching out from the accounts team regarding your upcoming renewal. Your current subscription cycle is nearing its end on ${upcomingRenewalDate ? upcomingRenewalDate.toLocaleDateString() : 'soon'}.\n\nPlease let us know if you'd like to continue with your job application support for the next cycle.\n\nBest regards,\n${formatAssociateName(user?.email, user?.name)}\nApplyWizz Team`
     },
     {
       id: "custom",
@@ -231,7 +252,7 @@ export default function LeadProfilePage() {
         lead_id: lead.business_id,
         email: lead.email,
         phone: lead.phone,
-        assigned_to: user?.user_metadata?.full_name || user?.email,
+        assigned_to: (user as any)?.user_metadata?.full_name || user?.email,
         current_stage: lead.current_stage || "Prospect",
         followup_date: new Date().toISOString().split("T")[0],
         call_started_at: new Date().toISOString(),
@@ -259,6 +280,32 @@ export default function LeadProfilePage() {
     if (!lead || !user) return;
 
     if (newStage === "sale done") {
+      try {
+        const { error } = await supabase
+          .from("leads")
+          .update({ current_stage: newStage })
+          .eq("business_id", lead.business_id);
+
+        if (error) throw error;
+
+        await supabase.from("call_history").insert([{
+          lead_id: lead.business_id,
+          email: lead.email,
+          phone: lead.phone,
+          assigned_to: user?.name || user?.email,
+          current_stage: newStage,
+          followup_date: new Date().toISOString().split("T")[0],
+          call_started_at: new Date().toISOString(),
+          notes: `Stage changed via Profile to: ${newStage}`
+        }]);
+
+        setLead(prev => prev ? ({ ...prev, current_stage: newStage }) : null);
+        fetchAll(); // Refresh everything
+      } catch (err: any) {
+        console.error(err);
+        alert("Error updating stage: " + err.message);
+      }
+
       window.open(`/SaleUpdate/${lead.business_id}?mode=new`, "_blank");
       return;
     }
@@ -349,6 +396,25 @@ export default function LeadProfilePage() {
     if (!lead || !user) return;
 
     if (newStage === "sale done") {
+      try {
+        const { error: callErr } = await supabase
+          .from("call_history")
+          .update({ current_stage: newStage })
+          .eq("id", callId);
+        if (callErr) throw callErr;
+
+        const { error: leadErr } = await supabase
+          .from("leads")
+          .update({ current_stage: newStage })
+          .eq("business_id", lead.business_id);
+        if (leadErr) throw leadErr;
+
+        setLead(prev => prev ? ({ ...prev, current_stage: newStage }) : null);
+        fetchAll();
+      } catch (err: any) {
+        console.error(err);
+      }
+
       window.open(`/SaleUpdate/${lead.business_id}?mode=new`, "_blank");
       return;
     }
@@ -674,6 +740,15 @@ export default function LeadProfilePage() {
     if (ppErr) console.error("Error fetching portfolio_progress:", ppErr.message);
     setPortfolioProg(ppRow ?? null);
 
+    // Github Progress
+    const { data: gpRow, error: gpErr } = await supabase
+      .from("github_progress")
+      .select("lead_id,status,link,assigned_email,assigned_name,updated_at")
+      .eq("lead_id", targetBusinessId)
+      .maybeSingle();
+    if (gpErr) console.error("Error fetching github_progress:", gpErr.message);
+    setGithubProg(gpRow ?? null);
+
     // 📝 Fetch CRM Call History (manual notes and matched zoom calls)
     const { data: crmHistory, error: crmErr } = await supabase
       .from("call_history")
@@ -813,6 +888,8 @@ export default function LeadProfilePage() {
       commitments: saleForm.commitments ?? null,
       badge_value:
         saleForm.badge_value === "" || saleForm.badge_value == null ? null : Number(saleForm.badge_value),
+      account_assigned_name: user?.name || user?.email || "Unknown",
+      account_assigned_email: user?.email || null,
     };
 
     const { error } = await supabase.from("sales_closure").update(payload).eq("id", saleForm.id);
@@ -878,14 +955,14 @@ export default function LeadProfilePage() {
         <div className="bg-white border-b border-gray-200 px-6 py-2 flex items-center justify-between shadow-sm flex-shrink-0">
           <div className="flex items-center gap-6">
             <h1 className="text-xl font-medium text-gray-700">Lead Details</h1>
-            <Button
+            {/* <Button
               variant="outline"
               size="sm"
               onClick={() => router.back()}
               className="bg-[#444] text-white hover:bg-black border-none h-7 px-4 rounded-sm text-xs flex items-center gap-1"
             >
               <ArrowLeft className="w-3 h-3" /> Back
-            </Button>
+            </Button> */}
           </div>
           <div className="flex items-center gap-5">
             <Button variant="ghost" size="icon" className="text-gray-400 hover:text-gray-600 h-8 w-8" onClick={() => syncZoomCalls(lead.phone || "", true)}>
@@ -979,7 +1056,7 @@ export default function LeadProfilePage() {
               <div className="p-4 py-2 space-y-0 text-sm">
                 <div className="flex justify-between py-2 border-b border-gray-50 last:border-0">
                   <span className="text-gray-400">Owner</span>
-                  <span className="text-gray-700 font-medium">{lead.assigned_to || "Rahul"}</span>
+                  <span className="text-gray-700 font-medium">{lead.assigned_to || "Unassigned"}</span>
                 </div>
                 <div className="flex justify-between py-2 border-b border-gray-50 last:border-0">
                   <span className="text-gray-400">Lead Source</span>
@@ -1025,7 +1102,7 @@ export default function LeadProfilePage() {
                     </DropdownMenuContent>
                   </DropdownMenu>
 
-                  {["sales", "sales associate", "admin"].includes(norm(user?.role)) && (
+                  {["sales", "admin", "finance", "account-management"].includes(roleKey) && (
                     <Button
                       size="sm"
                       className="h-9 bg-[#4a7df4] hover:bg-blue-600 text-white font-medium px-6 rounded-sm"
@@ -1334,25 +1411,25 @@ export default function LeadProfilePage() {
                           </div>
                           <div className="grid grid-cols-[160px_1fr] gap-4 items-baseline border-t border-gray-50 pt-4">
                             <span className="text-gray-400 text-sm">LinkedIn URL</span>
-                            {onboarding.linkedin_url ? (
-                              <a href={onboarding.linkedin_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline text-sm font-medium truncate" title={onboarding.linkedin_url}>
-                                {onboarding.linkedin_url}
+                            {(onboarding.linkedin_url || (lead as any).linkedin_url) ? (
+                              <a href={(onboarding.linkedin_url || (lead as any).linkedin_url).startsWith('http') ? (onboarding.linkedin_url || (lead as any).linkedin_url) : `https://www.linkedin.com/in/${onboarding.linkedin_url || (lead as any).linkedin_url}`} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline text-sm font-medium truncate" title={onboarding.linkedin_url || (lead as any).linkedin_url}>
+                                {onboarding.linkedin_url || (lead as any).linkedin_url}
                               </a>
                             ) : <span className="text-gray-400 text-sm italic">Not Provided</span>}
                           </div>
                           <div className="grid grid-cols-[160px_1fr] gap-4 items-baseline">
                             <span className="text-gray-400 text-sm">Github link</span>
-                            {onboarding.github_url ? (
-                              <a href={onboarding.github_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline text-sm font-medium truncate" title={onboarding.github_url}>
-                                {onboarding.github_url}
+                            {(onboarding.github_url || githubProg?.link || (lead as any).github_url) ? (
+                              <a href={(onboarding.github_url || githubProg?.link || (lead as any).github_url).startsWith('http') ? (onboarding.github_url || githubProg?.link || (lead as any).github_url) : `https://github.com/${onboarding.github_url || githubProg?.link || (lead as any).github_url}`} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline text-sm font-medium truncate" title={onboarding.github_url || githubProg?.link || (lead as any).github_url}>
+                                {onboarding.github_url || githubProg?.link || (lead as any).github_url}
                               </a>
                             ) : <span className="text-gray-400 text-sm italic">Not Provided</span>}
                           </div>
                           <div className="grid grid-cols-[160px_1fr] gap-4 items-baseline">
                             <span className="text-gray-400 text-sm">Portfolio link</span>
-                            {onboarding.portfolio_url ? (
-                              <a href={onboarding.portfolio_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline text-sm font-medium truncate" title={onboarding.portfolio_url}>
-                                {onboarding.portfolio_url}
+                            {(onboarding.portfolio_url || portfolioProg?.link || (lead as any).portfolio_url) ? (
+                              <a href={(onboarding.portfolio_url || portfolioProg?.link || (lead as any).portfolio_url)?.startsWith('http') ? (onboarding.portfolio_url || portfolioProg?.link || (lead as any).portfolio_url) : `https://${onboarding.portfolio_url || portfolioProg?.link || (lead as any).portfolio_url}`} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline text-sm font-medium truncate" title={onboarding.portfolio_url || portfolioProg?.link || (lead as any).portfolio_url || ""}>
+                                {onboarding.portfolio_url || portfolioProg?.link || (lead as any).portfolio_url}
                               </a>
                             ) : <span className="text-gray-400 text-sm italic">Not Provided</span>}
                           </div>
@@ -1413,32 +1490,109 @@ export default function LeadProfilePage() {
                       {saleHistory.length === 0 ? (
                         <div className="p-8 text-center text-gray-400 italic text-sm">No sales or add-ons recorded.</div>
                       ) : (
-                        <div className="grid grid-cols-3 gap-6">
-                          <div className="bg-white border border-gray-100 rounded-md p-6 py-4 flex flex-col items-center justify-center shadow-sm hover:shadow-md transition-shadow">
-                            <span className="text-[9px] text-gray-400 uppercase font-bold tracking-widest mb-2">Applications</span>
-                            <span className="text-xl font-bold text-gray-800">{formatMoney(latestAddons?.application_sale_value)}</span>
+                        <>
+                          {/* Current Add-ons Summary */}
+                          <div className="grid grid-cols-3 gap-6 mb-8">
+                            <div className="bg-white border border-gray-100 rounded-md p-6 py-4 flex flex-col items-center justify-center shadow-sm hover:shadow-md transition-shadow">
+                              <span className="text-[9px] text-gray-400 uppercase font-bold tracking-widest mb-1">Applications</span>
+                              <span className="text-[8px] text-blue-500 font-semibold mb-2">Monthly Subscription</span>
+                              <span className="text-xl font-bold text-gray-800">{formatMoney(latestAddons?.application_sale_value)}</span>
+                              {latestAddons?.no_of_job_applications > 0 && (
+                                <span className="text-[10px] text-indigo-600 font-bold mt-1 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100 italic">
+                                  {latestAddons.no_of_job_applications} Apps
+                                </span>
+                              )}
+                            </div>
+                            <div className="bg-white border border-gray-100 rounded-md p-6 py-4 flex flex-col items-center justify-center shadow-sm hover:shadow-md transition-shadow">
+                              <span className="text-[9px] text-gray-400 uppercase font-bold tracking-widest mb-1">Resume</span>
+                              <span className="text-[8px] text-green-500 font-semibold mb-2">One-Time Payment</span>
+                              <span className="text-xl font-bold text-gray-800">{formatMoney(latestAddons?.resume_sale_value)}</span>
+                            </div>
+                            <div className="bg-white border border-gray-100 rounded-md p-6 py-4 flex flex-col items-center justify-center shadow-sm hover:shadow-md transition-shadow">
+                              <span className="text-[9px] text-gray-400 uppercase font-bold tracking-widest mb-1">LinkedIn</span>
+                              <span className="text-[8px] text-green-500 font-semibold mb-2">One-Time Payment</span>
+                              <span className="text-xl font-bold text-gray-800">{formatMoney(latestAddons?.linkedin_sale_value)}</span>
+                            </div>
+                            <div className="bg-white border border-gray-100 rounded-md p-6 py-4 flex flex-col items-center justify-center shadow-sm hover:shadow-md transition-shadow">
+                              <span className="text-[9px] text-gray-400 uppercase font-bold tracking-widest mb-1">Portfolio</span>
+                              <span className="text-[8px] text-green-500 font-semibold mb-2">One-Time Payment</span>
+                              <span className="text-xl font-bold text-gray-800">{formatMoney(latestAddons?.portfolio_sale_value)}</span>
+                            </div>
+                            <div className="bg-white border border-gray-100 rounded-md p-6 py-4 flex flex-col items-center justify-center shadow-sm hover:shadow-md transition-shadow">
+                              <span className="text-[9px] text-gray-400 uppercase font-bold tracking-widest mb-1">Github</span>
+                              <span className="text-[8px] text-green-500 font-semibold mb-2">One-Time Payment</span>
+                              <span className="text-xl font-bold text-gray-800">{formatMoney(latestAddons?.github_sale_value)}</span>
+                            </div>
+                            <div className="bg-white border border-gray-100 rounded-md p-6 py-4 flex flex-col items-center justify-center shadow-sm hover:shadow-md transition-shadow">
+                              <span className="text-[9px] text-gray-400 uppercase font-bold tracking-widest mb-1">Badge</span>
+                              <span className="text-[8px] text-green-500 font-semibold mb-2">One-Time Payment</span>
+                              <span className="text-xl font-bold text-gray-800">{latestAddons?.badge_value || "—"}</span>
+                            </div>
                           </div>
-                          <div className="bg-white border border-gray-100 rounded-md p-6 py-4 flex flex-col items-center justify-center shadow-sm hover:shadow-md transition-shadow">
-                            <span className="text-[9px] text-gray-400 uppercase font-bold tracking-widest mb-2">Resume</span>
-                            <span className="text-xl font-bold text-gray-800">{formatMoney(latestAddons?.resume_sale_value)}</span>
+
+                          {/* Purchase History Timeline */}
+                          <div className="mt-8">
+                            <h4 className="text-sm font-bold text-gray-700 mb-4">Complete Purchase History</h4>
+                            <div className="space-y-3">
+                              {[...saleHistory].sort((a, b) => new Date(a.closed_at).getTime() - new Date(b.closed_at).getTime()).map((sale, idx) => {
+                                const items: { name: string; value: number; type: string }[] = [];
+                                if (Number(sale.application_sale_value) > 0) items.push({ name: "Applications", value: sale.application_sale_value, type: "Monthly" });
+                                if (Number(sale.resume_sale_value) > 0) items.push({ name: "Resume", value: sale.resume_sale_value, type: "One-Time" });
+                                if (Number(sale.linkedin_sale_value) > 0) items.push({ name: "LinkedIn", value: sale.linkedin_sale_value, type: "One-Time" });
+                                if (Number(sale.portfolio_sale_value) > 0) items.push({ name: "Portfolio", value: sale.portfolio_sale_value, type: "One-Time" });
+                                if (Number(sale.github_sale_value) > 0) items.push({ name: "GitHub", value: sale.github_sale_value, type: "One-Time" });
+                                if (Number(sale.badge_value) > 0) items.push({ name: "Badge", value: sale.badge_value, type: "One-Time" });
+                                if (Number(sale.custom_sale_value) > 0) items.push({ name: sale.custom_label || "Custom", value: sale.custom_sale_value, type: "One-Time" });
+
+                                return (
+                                  <div key={sale.id || idx} className="border border-gray-100 rounded-lg p-4 bg-gray-50/30 hover:bg-gray-50 transition-colors">
+                                    <div className="flex justify-between items-center mb-2">
+                                      <div className="flex items-center gap-3">
+                                        <Badge variant="outline" className={`text-[9px] h-5 font-bold uppercase ${idx === 0 ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-orange-50 text-orange-600 border-orange-200'}`}>
+                                          {idx === 0 ? "Initial Sale" : `Renewal #${idx}`}
+                                        </Badge>
+                                        <span className="text-sm font-bold text-gray-800">${sale.sale_value}</span>
+                                      </div>
+                                      <div className="flex flex-col items-end">
+                                        <span className="text-[10px] text-gray-500 font-medium">
+                                          {new Date(sale.closed_at).toLocaleString('en-IN', {
+                                            day: '2-digit', month: 'short', year: 'numeric',
+                                            hour: '2-digit', minute: '2-digit', hour12: true
+                                          })}
+                                        </span>
+                                        {/* <span className="text-[10px] font-bold text-indigo-600">
+                                          {idx === 0 ? "Sold by" : "Renewed by"}: {idx === 0 ? (sale.account_assigned_name || sale.closed_by || sale.assigned_to || lead.assigned_to || "Unknown") : (sale.account_assigned_name || sale.closed_by || "Unknown")}
+                                        </span> */}
+                                        {/* <span className="text-[10px] font-bold text-indigo-600">
+                                          {idx === 0 ? "Sold by" : "Renewed by"}:{" "}
+                                          {idx === 0
+                                            ? (sale.closed_by || sale.account_assigned_name || "Unknown")
+                                            : (sale.account_assigned_name || "Finance Associate")}
+                                        </span> */}
+                                        <span className="text-[10px] font-bold text-indigo-600">
+                                          {idx === 0 ? "Sold by" : "Renewed by"}:{" "}
+                                          {idx === 0
+                                            ? (sale.closed_by || "Unknown")
+                                            : (sale.associates_tl_name || sale.account_assigned_name || "Unknown")}
+                                        </span>
+                                      </div>
+                                    </div>
+                                    {items.length > 0 && (
+                                      <div className="flex flex-wrap gap-2 mt-2">
+                                        {items.map((item, i) => (
+                                          <span key={i} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${item.type === 'Monthly' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-green-50 text-green-700 border-green-200'}`}>
+                                            {item.name}: ${item.value}
+                                            <span className="text-[8px] opacity-70">({item.type})</span>
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
                           </div>
-                          <div className="bg-white border border-gray-100 rounded-md p-6 py-4 flex flex-col items-center justify-center shadow-sm hover:shadow-md transition-shadow">
-                            <span className="text-[9px] text-gray-400 uppercase font-bold tracking-widest mb-2">LinkedIn</span>
-                            <span className="text-xl font-bold text-gray-800">{formatMoney(latestAddons?.linkedin_sale_value)}</span>
-                          </div>
-                          <div className="bg-white border border-gray-100 rounded-md p-6 py-4 flex flex-col items-center justify-center shadow-sm hover:shadow-md transition-shadow">
-                            <span className="text-[9px] text-gray-400 uppercase font-bold tracking-widest mb-2">Github</span>
-                            <span className="text-xl font-bold text-gray-800">{formatMoney(latestAddons?.github_sale_value)}</span>
-                          </div>
-                          <div className="bg-white border border-gray-100 rounded-md p-6 py-4 flex flex-col items-center justify-center shadow-sm hover:shadow-md transition-shadow">
-                            <span className="text-[9px] text-gray-400 uppercase font-bold tracking-widest mb-2">Commitments</span>
-                            <span className="text-xl font-bold text-gray-800">{latestAddons?.commitments || "—"}</span>
-                          </div>
-                          <div className="bg-white border border-gray-100 rounded-md p-6 py-4 flex flex-col items-center justify-center shadow-sm hover:shadow-md transition-shadow">
-                            <span className="text-[9px] text-gray-400 uppercase font-bold tracking-widest mb-2">Badge</span>
-                            <span className="text-xl font-bold text-gray-800">{latestAddons?.badge_value || "—"}</span>
-                          </div>
-                        </div>
+                        </>
                       )}
                     </div>
                   </div>
@@ -1446,47 +1600,113 @@ export default function LeadProfilePage() {
 
                 <TabsContent value="sales" className="m-0 h-full">
                   <div className="p-0">
-                    <div className="p-4 border-b border-gray-50 bg-gray-50/30 font-semibold text-gray-700 text-sm">
-                      Payment & Subscription History
+                    <div className="p-4 border-b border-gray-50 bg-gray-50/30 font-semibold text-gray-700 text-sm flex items-center justify-between">
+                      <span>Payment & Subscription History</span>
+                      <span className="text-xs text-gray-400 font-normal">{saleHistory.length} transaction{saleHistory.length !== 1 ? 's' : ''}</span>
                     </div>
                     {saleHistory.length === 0 ? (
                       <div className="p-12 text-center text-gray-400 italic text-sm">No sales records found for this client.</div>
                     ) : (
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
-                          <thead className="bg-[#f8f9fa] border-b border-gray-100">
-                            <tr>
-                              <th className="p-4 text-left font-bold text-gray-500 uppercase text-[10px] tracking-wider">Plan Value</th>
-                              <th className="p-4 text-left font-bold text-gray-500 uppercase text-[10px] tracking-wider">Payment Mode</th>
-                              <th className="p-4 text-left font-bold text-gray-500 uppercase text-[10px] tracking-wider">Cycle</th>
-                              <th className="p-4 text-left font-bold text-gray-500 uppercase text-[10px] tracking-wider">Account Manager</th>
-                              <th className="p-4 text-left font-bold text-gray-500 uppercase text-[10px] tracking-wider">Status</th>
-                              <th className="p-4 text-left font-bold text-gray-500 uppercase text-[10px] tracking-wider">Renewal Due</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-50">
-                            {saleHistory.map((sale, idx) => {
-                              const onboardedDate = sale.onboarded_date ? new Date(sale.onboarded_date) : null;
-                              const subscriptionDays = Number(sale.subscription_cycle) || 0;
-                              let nextRenewalDate = "—";
-                              if (onboardedDate && !isNaN(subscriptionDays)) {
-                                const renewalDate = new Date(onboardedDate);
-                                renewalDate.setDate(renewalDate.getDate() + subscriptionDays);
-                                nextRenewalDate = renewalDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
-                              }
-                              return (
-                                <tr key={idx} className="hover:bg-gray-50/50 transition-colors">
-                                  <td className="p-4 font-bold text-gray-800 tracking-tight">${sale.sale_value}</td>
-                                  <td className="p-4 text-gray-600 font-medium">{sale.payment_mode}</td>
-                                  <td className="p-4 text-gray-600">{sale.subscription_cycle} days</td>
-                                  <td className="p-4 text-[#4a7df4] font-semibold">{sale.assigned_to || "Rahul"}</td>
-                                  <td className="p-4"><Badge variant="outline" className="font-bold text-[10px] uppercase rounded-full px-2 border-gray-200 text-gray-500 bg-gray-50/50">{sale.finance_status}</Badge></td>
-                                  <td className="p-4 text-gray-700 font-medium">{nextRenewalDate}</td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
+                      <div className="divide-y divide-gray-100">
+                        {[...saleHistory].sort((a, b) => new Date(a.closed_at).getTime() - new Date(b.closed_at).getTime()).map((sale, idx) => {
+                          const onboardedDate = sale.onboarded_date ? new Date(sale.onboarded_date) : null;
+                          const subscriptionDays = Number(sale.subscription_cycle) || 0;
+                          let nextRenewalDate = "—";
+                          if (onboardedDate && !isNaN(subscriptionDays)) {
+                            const renewalDate = new Date(onboardedDate);
+                            renewalDate.setDate(renewalDate.getDate() + subscriptionDays);
+                            nextRenewalDate = renewalDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+                          }
+
+                          // Build items list
+                          const items: { name: string; value: number; type: string }[] = [];
+                          if (Number(sale.application_sale_value) > 0) items.push({ name: "Applications", value: sale.application_sale_value, type: "Monthly" });
+                          if (Number(sale.resume_sale_value) > 0) items.push({ name: "Resume", value: sale.resume_sale_value, type: "One-Time" });
+                          if (Number(sale.linkedin_sale_value) > 0) items.push({ name: "LinkedIn", value: sale.linkedin_sale_value, type: "One-Time" });
+                          if (Number(sale.portfolio_sale_value) > 0) items.push({ name: "Portfolio", value: sale.portfolio_sale_value, type: "One-Time" });
+                          if (Number(sale.github_sale_value) > 0) items.push({ name: "GitHub", value: sale.github_sale_value, type: "One-Time" });
+                          if (Number(sale.badge_value) > 0) items.push({ name: "Badge", value: sale.badge_value, type: "One-Time" });
+                          if (Number(sale.custom_sale_value) > 0) items.push({ name: sale.custom_label || "Custom", value: sale.custom_sale_value, type: "One-Time" });
+
+                          // const closerName = idx === 0 ? (sale.account_assigned_name || sale.closed_by || sale.assigned_to || lead.assigned_to || "Unknown") : (sale.account_assigned_name || sale.closed_by || "Unknown");
+                          // const closerName = idx === 0
+                          //   ? (sale.closed_by || sale.assigned_to || lead.assigned_to || "Unknown")
+                          //   : (sale.account_assigned_name || "Finance Associate");
+                          const closerName = idx === 0
+                            ? (sale.closed_by || sale.assigned_to || lead.assigned_to || "Unknown")
+                            : (sale.associates_tl_name || sale.account_assigned_name || "Finance Associate");
+                          const isRenewal = idx > 0;
+
+                          return (
+                            <div key={sale.id || idx} className="p-5 hover:bg-gray-50/50 transition-colors">
+                              {/* Transaction header */}
+                              <div className="flex items-center justify-between mb-3">
+                                <div className="flex items-center gap-3">
+                                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold ${isRenewal ? 'bg-orange-500' : 'bg-blue-600'}`}>
+                                    {idx + 1}
+                                  </div>
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-bold text-gray-800 text-base">${sale.sale_value}</span>
+                                      <Badge variant="outline" className={`text-[9px] h-5 font-bold uppercase ${isRenewal ? 'bg-orange-50 text-orange-600 border-orange-200' : 'bg-blue-50 text-blue-600 border-blue-200'}`}>
+                                        {isRenewal ? `Renewal #${idx}` : 'Initial Payment'}
+                                      </Badge>
+                                      <Badge variant="outline" className="font-bold text-[10px] uppercase rounded-full px-2 border-gray-200 text-gray-500 bg-gray-50/50">
+                                        {sale.finance_status}
+                                      </Badge>
+                                    </div>
+                                    <p className="text-xs text-gray-400 mt-0.5">
+                                      {sale.payment_mode || "—"} • {sale.subscription_cycle} days cycle • Due: {nextRenewalDate}
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-xs text-gray-500">{new Date(sale.closed_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+                                  {sale.onboarded_date && (
+                                    <p className="text-[10px] text-gray-400">Onboarded: {new Date(sale.onboarded_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Sold/Renewed By */}
+                              <div className="flex items-center gap-4 mb-3 bg-slate-50 rounded-md px-3 py-2 border border-slate-100">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[10px] text-gray-400 uppercase font-bold">
+                                    {isRenewal ? "Renewed By:" : "Sold By:"}
+                                  </span>
+                                  <span className="text-xs font-semibold text-indigo-600">{closerName}</span>
+                                </div>
+                                <div className="flex items-center gap-2 border-l border-gray-200 pl-4">
+                                  <span className="text-[10px] text-gray-400 uppercase font-bold">Process Date:</span>
+                                  <span className="text-xs font-medium text-gray-600">
+                                    {new Date(sale.closed_at).toLocaleString('en-IN', {
+                                      month: 'long', day: 'numeric', year: 'numeric',
+                                      hour: '2-digit', minute: '2-digit', hour12: true
+                                    })}
+                                  </span>
+                                </div>
+                                {sale.associates_tl_name && (
+                                  <div className="flex items-center gap-2 border-l border-gray-200 pl-4">
+                                    <span className="text-[10px] text-gray-400 uppercase font-bold">Finance TL:</span>
+                                    <span className="text-xs font-semibold text-orange-600">{sale.associates_tl_name}</span>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Items breakdown */}
+                              {items.length > 0 && (
+                                <div className="flex flex-wrap gap-2">
+                                  {items.map((item, i) => (
+                                    <span key={i} className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold border ${item.type === 'Monthly' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-green-50 text-green-700 border-green-200'}`}>
+                                      {item.name}: ${item.value}
+                                      <span className="text-[8px] opacity-60">({item.type})</span>
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
