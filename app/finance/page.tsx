@@ -16,7 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner"; // or wherever your toast system comes from
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
-import { MoreVertical, Edit, RefreshCw  } from "lucide-react"; // or use any icon you like
+import { MoreVertical, Edit, RefreshCw } from "lucide-react"; // or use any icon you like
 
 import {
   BarChart,
@@ -35,6 +35,9 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from "@/components/ui/popover";
+import RenewalsList from "@/app/finance/_components/RenewalsList";
+import { EmailLogView } from "@/app/_components/EmailLogView";
+import { Mail } from "lucide-react";
 
 type FinanceStatus = "Paid" | "Unpaid" | "Paused" | "Closed" | "Got Placed"; // 🆕 added "Got Placed"
 
@@ -53,7 +56,7 @@ interface SalesClosure {
   leads?: { name: string, phone: string };
   oldest_sale_done_at?: string; // 🆕
   application_sale_value: number;
-  associates_tl_email ?: string;
+  associates_tl_email?: string;
 }
 
 
@@ -171,11 +174,11 @@ export default function FinancePage() {
   const [sales, setSales] = useState<SalesClosure[]>([]);
   const [allSales, setAllSales] = useState<SalesClosure[]>([]); // 🆕 every row – drives totals & charts
   const [actionSelections, setActionSelections] = useState<Record<string, string>>({});
-  const [activeTabView, setActiveTabView] = useState<"main" | "notOnboarded">("main");
+  const [activeTabView, setActiveTabView] = useState<"main" | "notOnboarded" | "renewals" | "email_logs">("main");
   const [notOnboardedClients, setNotOnboardedClients] = useState<any[]>([]);
   const [loadingNotOnboarded, setLoadingNotOnboarded] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
-const [tempReasonInput, setTempReasonInput] = useState("");
+  const [tempReasonInput, setTempReasonInput] = useState("");
 
   const [refreshing, setRefreshing] = useState(false);
 
@@ -187,21 +190,21 @@ const [tempReasonInput, setTempReasonInput] = useState("");
   const [sortField, setSortField] = useState<string | null>(null);
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
 
-const [unpaidApplications, setUnpaidApplications] = useState<SalesClosure[]>([]);
+  const [unpaidApplications, setUnpaidApplications] = useState<SalesClosure[]>([]);
 
   const [searchTerm, setSearchTerm] = useState("");
-  const [followUpFilter, setFollowUpFilter] = useState<"All dates" | "Today">("Today");
+  const [followUpFilter, setFollowUpFilter] = useState<"All dates" | "Today" | "Upcoming (7 Days)">("Today");
   const [showCloseDialog, setShowCloseDialog] = useState(false);
   const [closingNote, setClosingNote] = useState("");
-  
+
   const [showReasonDialog, setShowReasonDialog] = useState(false);
   // const [selectedFinanceStatus, setSelectedFinanceStatus] = useState<FinanceStatus | null>(null);
   const [reasonText, setReasonText] = useState("");
 
 
-const [editingLeadId, setEditingLeadId] = useState<string | null>(null);
-const [newOnboardDate, setNewOnboardDate] = useState<string>("");
-const [updatingDate, setUpdatingDate] = useState(false);
+  const [editingLeadId, setEditingLeadId] = useState<string | null>(null);
+  const [newOnboardDate, setNewOnboardDate] = useState<string>("");
+  const [updatingDate, setUpdatingDate] = useState(false);
 
   const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
   const [selectedFinanceStatus, setSelectedFinanceStatus] = useState<FinanceStatus | null>(null);
@@ -210,28 +213,60 @@ const [updatingDate, setUpdatingDate] = useState(false);
   const [activeTab, setActiveTab] = useState<"table" | "chart">("table");
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [tableYearFilter, setTableYearFilter] = useState<number | "all">("all");
-const [pendingPaidUpdates, setPendingPaidUpdates] = useState<Set<string>>(new Set());
+  const [pendingPaidUpdates, setPendingPaidUpdates] = useState<Set<string>>(new Set());
+  const [showTestEmailDialog, setShowTestEmailDialog] = useState(false);
+  const [testEmailInput, setTestEmailInput] = useState("");
+  const [sendingTest, setSendingTest] = useState(false);
 
   const [onboardingDate, setOnboardingDate] = useState<Date | null>(null);
 
   const [coursesValue, setCoursesValue] = useState('');
   const [badgeValue, setBadgeValue] = useState('');
   const [customValue, setCustomValue] = useState('');
- 
-
-const [tlActiveCounts, setTlActiveCounts] = useState<
-  { associates_tl_email: string | null; count: number }[]
->([]);
 
 
-const [pageSize, setPageSize] = useState<number | "all">(30);
-const [currentPage, setCurrentPage] = useState(1);
+  const [tlActiveCounts, setTlActiveCounts] = useState<
+    { associates_tl_email: string | null; count: number }[]
+  >([]);
+
+
+  const [pageSize, setPageSize] = useState<number | "all">(30);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const monthlyRevenues: { month: string; amount: number }[] = [];
 
   const [monthlyBreakdown, setMonthlyBreakdown] = useState<
     { month: string; inMonthRevenue: number; proratedRevenue: number }[]
   >([]);
+
+  const handleSendTestEmail = async () => {
+    if (!testEmailInput) {
+      toast.error("Please enter an email address");
+      return;
+    }
+
+    setSendingTest(true);
+    try {
+      const resp = await fetch("/api/admin/test-renewal-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: testEmailInput }),
+      });
+
+      const data = await resp.json();
+      if (data.success) {
+        toast.success("Test automated email sent successfully!");
+        setShowTestEmailDialog(false);
+        setTestEmailInput("");
+      } else {
+        toast.error(data.error || "Failed to send test email");
+      }
+    } catch (err) {
+      toast.error("An error occurred while sending test email");
+    } finally {
+      setSendingTest(false);
+    }
+  };
 
   useEffect(() => {
     fetchSalesData();
@@ -267,29 +302,29 @@ const [currentPage, setCurrentPage] = useState(1);
     setLoadingNotOnboarded(false);
   };
 
-//   const handleOpenNotOnboarded = async () => {
-//   setActiveTabView("notOnboarded");
-//   await fetchNotOnboardedClients();    // 🔥 Fetch only here
-// };
+  //   const handleOpenNotOnboarded = async () => {
+  //   setActiveTabView("notOnboarded");
+  //   await fetchNotOnboardedClients();    // 🔥 Fetch only here
+  // };
 
-async function loadRevenue() {
-  setRevenueLoading(true);
+  async function loadRevenue() {
+    setRevenueLoading(true);
 
-  const breakdown = generateMonthlyRevenue(allSales, selectedYear);
-  setMonthlyBreakdown(breakdown);
+    const breakdown = generateMonthlyRevenue(allSales, selectedYear);
+    setMonthlyBreakdown(breakdown);
 
-  setRevenueLoading(false);
-  setShowRevenueDialog(true);
-}
+    setRevenueLoading(false);
+    setShowRevenueDialog(true);
+  }
 
-const handleOpenNotOnboarded = async () => {
-  setLoadingNotOnboarded(true);
-  setActiveTabView("notOnboarded");
-  await fetchNotOnboardedClients();
-  setLoadingNotOnboarded(false);
-};
+  const handleOpenNotOnboarded = async () => {
+    setLoadingNotOnboarded(true);
+    setActiveTabView("notOnboarded");
+    await fetchNotOnboardedClients();
+    setLoadingNotOnboarded(false);
+  };
 
-    async function fetchSalesData() {
+  async function fetchSalesData() {
     const { data: rows, error } = await supabase
       .from("sales_closure")
       .select("*")
@@ -316,26 +351,26 @@ const handleOpenNotOnboarded = async () => {
         new Date(b.onboarded_date ?? "").getTime() -
         new Date(a.onboarded_date ?? "").getTime()
     );
-// -----------------------------
-// 🧠 Calculate TL-wise Active Paid Clients
-// -----------------------------
-const tlMap = new Map<string | null, number>();
+    // -----------------------------
+    // 🧠 Calculate TL-wise Active Paid Clients
+    // -----------------------------
+    const tlMap = new Map<string | null, number>();
 
-latestRows.forEach((row) => {
-  if (row.finance_status === "Paid") {
-    const tl = row.associates_tl_email || null;
-    tlMap.set(tl, (tlMap.get(tl) || 0) + 1);
-  }
-});
+    latestRows.forEach((row) => {
+      if (row.finance_status === "Paid") {
+        const tl = row.associates_tl_email || null;
+        tlMap.set(tl, (tlMap.get(tl) || 0) + 1);
+      }
+    });
 
-// Convert map → array for UI
-const tlArray = Array.from(tlMap.entries()).map(([email, count]) => ({
-  associates_tl_email: email,
-  count,
-}));
+    // Convert map → array for UI
+    const tlArray = Array.from(tlMap.entries()).map(([email, count]) => ({
+      associates_tl_email: email,
+      count,
+    }));
 
-// Store in state
-setTlActiveCounts(tlArray);
+    // Store in state
+    setTlActiveCounts(tlArray);
 
     // Step 1: Build oldest sale_done map
     const oldestSaleDateMap = new Map<string, string>();
@@ -417,7 +452,7 @@ setTlActiveCounts(tlArray);
   const [linkedinValue, setLinkedinValue] = useState("");
   const [githubValue, setGithubValue] = useState("");
 
- const handleFinanceStatusUpdate = async (saleId: string, newStatus: FinanceStatus) => {
+  const handleFinanceStatusUpdate = async (saleId: string, newStatus: FinanceStatus) => {
     const { error } = await supabase
       .from("sales_closure")
       .update({ finance_status: newStatus })
@@ -434,21 +469,21 @@ setTlActiveCounts(tlArray);
 
 
   useEffect(() => {
-  const validSubscriptionSaleValue = parseFloat(subscriptionSaleValue || "0");
-  const validResumeValue = parseFloat(resumeValue || "0");
-  const validPortfolioValue = parseFloat(portfolioValue || "0");
-  const validLinkedinValue = parseFloat(linkedinValue || "0");
-  const validGithubValue = parseFloat(githubValue || "0");
+    const validSubscriptionSaleValue = parseFloat(subscriptionSaleValue || "0");
+    const validResumeValue = parseFloat(resumeValue || "0");
+    const validPortfolioValue = parseFloat(portfolioValue || "0");
+    const validLinkedinValue = parseFloat(linkedinValue || "0");
+    const validGithubValue = parseFloat(githubValue || "0");
 
-  const total = validSubscriptionSaleValue + validResumeValue + validPortfolioValue + validLinkedinValue + validGithubValue;
-  setTotalSale(total); // Update total correctly
-}, [
-  subscriptionSaleValue,
-  resumeValue,
-  portfolioValue,
-  linkedinValue,
-  githubValue
-]);
+    const total = validSubscriptionSaleValue + validResumeValue + validPortfolioValue + validLinkedinValue + validGithubValue;
+    setTotalSale(total); // Update total correctly
+  }, [
+    subscriptionSaleValue,
+    resumeValue,
+    portfolioValue,
+    linkedinValue,
+    githubValue
+  ]);
 
 
 
@@ -526,70 +561,91 @@ setTlActiveCounts(tlArray);
   // });
 
   const filteredSales = useMemo(() => {
-  return sales
-    .filter((sale) => {
-      if (selectedTLFilter && sale.associates_tl_email !== selectedTLFilter) {
-        return false;
-      }
+    return sales
+      .filter((sale) => {
+        if (selectedTLFilter && sale.associates_tl_email !== selectedTLFilter) {
+          return false;
+        }
 
-      const matchesSearch =
-        sale.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        sale.lead_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (sale.leads?.name ?? "").toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (sale.leads?.phone ?? "").toLowerCase().includes(searchTerm.toLowerCase()) ||
-        sale.sale_value.toString().includes(searchTerm) ||
-        sale.subscription_cycle.toString().includes(searchTerm);
+        const matchesSearch =
+          sale.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          sale.lead_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (sale.leads?.name ?? "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (sale.leads?.phone ?? "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+          sale.sale_value.toString().includes(searchTerm) ||
+          sale.subscription_cycle.toString().includes(searchTerm);
 
-      const matchesStatus =
-        statusFilter === "All" || sale.finance_status === statusFilter;
+        const matchesStatus =
+          statusFilter === "All" || sale.finance_status === statusFilter;
 
-      if (followUpFilter === "Today") {
-        if (!sale.onboarded_date || !sale.subscription_cycle) return false;
+        if (followUpFilter === "Today") {
+          if (!sale.onboarded_date || !sale.subscription_cycle) return false;
 
-        const start = new Date(sale.onboarded_date);
-        start.setHours(0, 0, 0, 0);
+          const start = new Date(sale.onboarded_date);
+          start.setHours(0, 0, 0, 0);
 
-        const due = new Date(start);
-        due.setDate(start.getDate() + sale.subscription_cycle);
-        due.setHours(0, 0, 0, 0);
+          const due = new Date(start);
+          due.setDate(start.getDate() + sale.subscription_cycle);
+          due.setHours(0, 0, 0, 0);
 
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
 
-        const isDueTodayOrOverdue = due.getTime() <= today.getTime();
+          const isDueTodayOrOverdue = due.getTime() <= today.getTime();
 
-        return isDueTodayOrOverdue && matchesSearch && matchesStatus;
-      }
+          return isDueTodayOrOverdue && matchesSearch && matchesStatus;
+        }
 
-      return matchesSearch && matchesStatus;
-    })
-    .sort((a, b) => {
-      const dateA = new Date(a.onboarded_date || a.closed_at || "");
-      const dateB = new Date(b.onboarded_date || b.closed_at || "");
-      return dateB.getTime() - dateA.getTime();
-    });
-}, [
-  sales,
-  selectedTLFilter,
-  searchTerm,
-  statusFilter,
-  followUpFilter
-]);
+        if (followUpFilter === "Upcoming (7 Days)") {
+          if (!sale.onboarded_date || !sale.subscription_cycle) return false;
+
+          const start = new Date(sale.onboarded_date);
+          const due = new Date(start);
+          due.setDate(start.getDate() + sale.subscription_cycle);
+          due.setHours(0, 0, 0, 0);
+
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+
+          const sevenDaysFromNow = new Date();
+          sevenDaysFromNow.setDate(today.getDate() + 7);
+          sevenDaysFromNow.setHours(23, 59, 59, 999);
+
+          // Within next 7 days and NOT overdue
+          const isUpcoming = due.getTime() > today.getTime() && due.getTime() <= sevenDaysFromNow.getTime();
+
+          return isUpcoming && matchesSearch && matchesStatus;
+        }
+
+        return matchesSearch && matchesStatus;
+      })
+      .sort((a, b) => {
+        const dateA = new Date(a.onboarded_date || a.closed_at || "");
+        const dateB = new Date(b.onboarded_date || b.closed_at || "");
+        return dateB.getTime() - dateA.getTime();
+      });
+  }, [
+    sales,
+    selectedTLFilter,
+    searchTerm,
+    statusFilter,
+    followUpFilter
+  ]);
 
 
   const handleSearch = () => {
-  const filtered = allSales.filter((sale) => 
-    sale.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    sale.lead_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (sale.leads?.name ?? "").toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (sale.leads?.phone ?? "").toLowerCase().includes(searchTerm.toLowerCase())
-  );
+    const filtered = allSales.filter((sale) =>
+      sale.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      sale.lead_id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (sale.leads?.name ?? "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (sale.leads?.phone ?? "").toLowerCase().includes(searchTerm.toLowerCase())
+    );
 
-  setSales(filtered);
-  setCurrentPage(1); // reset pagination if needed
-};
+    setSales(filtered);
+    setCurrentPage(1); // reset pagination if needed
+  };
 
- 
+
   function handleSort(field: string) {
     if (sortField === field) {
       // Toggle sort direction
@@ -600,87 +656,87 @@ setTlActiveCounts(tlArray);
     }
   }
 
- const sortedSales = useMemo(() => {
-  return [...filteredSales].sort((a, b) => {
-    if (!sortField) return 0;
+  const sortedSales = useMemo(() => {
+    return [...filteredSales].sort((a, b) => {
+      if (!sortField) return 0;
 
-    if (sortField === "lead_id") {
-      const aNum = parseInt(a.lead_id.split("-")[1]);
-      const bNum = parseInt(b.lead_id.split("-")[1]);
-      return sortOrder === "asc" ? aNum - bNum : bNum - aNum;
-    }
+      if (sortField === "lead_id") {
+        const aNum = parseInt(a.lead_id.split("-")[1]);
+        const bNum = parseInt(b.lead_id.split("-")[1]);
+        return sortOrder === "asc" ? aNum - bNum : bNum - aNum;
+      }
 
-    if (sortField === "name") {
-      const nameA = (a.leads?.name ?? "").toLowerCase();
-      const nameB = (b.leads?.name ?? "").toLowerCase();
-      return sortOrder === "asc"
-        ? nameA.localeCompare(nameB)
-        : nameB.localeCompare(nameA);
-    }
+      if (sortField === "name") {
+        const nameA = (a.leads?.name ?? "").toLowerCase();
+        const nameB = (b.leads?.name ?? "").toLowerCase();
+        return sortOrder === "asc"
+          ? nameA.localeCompare(nameB)
+          : nameB.localeCompare(nameA);
+      }
 
-    if (sortField === "sale_value") {
-      return sortOrder === "asc"
-        ? a.sale_value - b.sale_value
-        : b.sale_value - a.sale_value;
-    }
+      if (sortField === "sale_value") {
+        return sortOrder === "asc"
+          ? a.sale_value - b.sale_value
+          : b.sale_value - a.sale_value;
+      }
 
-    if (sortField === "closed_at") {
-      const dateA = new Date(a.closed_at).getTime();
-      const dateB = new Date(b.closed_at).getTime();
-      return sortOrder === "asc" ? dateA - dateB : dateB - dateA;
-    }
+      if (sortField === "closed_at") {
+        const dateA = new Date(a.closed_at).getTime();
+        const dateB = new Date(b.closed_at).getTime();
+        return sortOrder === "asc" ? dateA - dateB : dateB - dateA;
+      }
 
-    if (sortField === "onboarded_date") {
-      const dateA = new Date(a.onboarded_date ?? "").getTime();
-      const dateB = new Date(b.onboarded_date ?? "").getTime();
-      return sortOrder === "asc" ? dateA - dateB : dateB - dateA;
-    }
+      if (sortField === "onboarded_date") {
+        const dateA = new Date(a.onboarded_date ?? "").getTime();
+        const dateB = new Date(b.onboarded_date ?? "").getTime();
+        return sortOrder === "asc" ? dateA - dateB : dateB - dateA;
+      }
 
-    if (sortField === "next_renewal_date") {
-      const aPaid = a.finance_status === "Paid";
-      const bPaid = b.finance_status === "Paid";
+      if (sortField === "next_renewal_date") {
+        const aPaid = a.finance_status === "Paid";
+        const bPaid = b.finance_status === "Paid";
 
-      if (aPaid && !bPaid) return -1;
-      if (!aPaid && bPaid) return 1;
+        if (aPaid && !bPaid) return -1;
+        if (!aPaid && bPaid) return 1;
 
-      const dateA = new Date(calculateNextRenewal(a.onboarded_date, a.subscription_cycle)).getTime();
-      const dateB = new Date(calculateNextRenewal(b.onboarded_date, b.subscription_cycle)).getTime();
+        const dateA = new Date(calculateNextRenewal(a.onboarded_date, a.subscription_cycle)).getTime();
+        const dateB = new Date(calculateNextRenewal(b.onboarded_date, b.subscription_cycle)).getTime();
 
-      return sortOrder === "asc" ? dateA - dateB : dateB - dateA;
-    }
+        return sortOrder === "asc" ? dateA - dateB : dateB - dateA;
+      }
 
-       if (sortField === "subscription_cycle") {
-      const aPaid = a.finance_status === "Paid";
-      const bPaid = b.finance_status === "Paid";
+      if (sortField === "subscription_cycle") {
+        const aPaid = a.finance_status === "Paid";
+        const bPaid = b.finance_status === "Paid";
 
-      if (aPaid && !bPaid) return -1;
-      if (!aPaid && bPaid) return 1;
+        if (aPaid && !bPaid) return -1;
+        if (!aPaid && bPaid) return 1;
 
-      const sub1 = a.subscription_cycle || 0;
-      const sub2 = b.subscription_cycle || 0;
-      return sortOrder === "asc" ? sub1 - sub2 : sub2 - sub1;
-    }
+        const sub1 = a.subscription_cycle || 0;
+        const sub2 = b.subscription_cycle || 0;
+        return sortOrder === "asc" ? sub1 - sub2 : sub2 - sub1;
+      }
 
-    if (sortField === "assigned_to") {
-      const aTL = (a.associates_tl_email ?? "").toLowerCase();
-      const bTL = (b.associates_tl_email ?? "").toLowerCase();
+      if (sortField === "assigned_to") {
+        const aTL = (a.associates_tl_email ?? "").toLowerCase();
+        const bTL = (b.associates_tl_email ?? "").toLowerCase();
 
-      return sortOrder === "asc"
-        ? aTL.localeCompare(bTL)
-        : bTL.localeCompare(aTL);
-    }
+        return sortOrder === "asc"
+          ? aTL.localeCompare(bTL)
+          : bTL.localeCompare(aTL);
+      }
 
-    return 0;
-  });
-}, [filteredSales, sortField, sortOrder]);
+      return 0;
+    });
+  }, [filteredSales, sortField, sortOrder]);
 
 
   const paginatedSales = sortedSales.slice(
-  (currentPage - 1) * (pageSize === "all" ? sortedSales.length : pageSize),
-  pageSize === "all" ? sortedSales.length : currentPage * (pageSize as number)
-);
+    (currentPage - 1) * (pageSize === "all" ? sortedSales.length : pageSize),
+    pageSize === "all" ? sortedSales.length : currentPage * (pageSize as number)
+  );
 
-const totalPages = pageSize === "all" ? 1 : Math.ceil(sortedSales.length / (pageSize as number));
+  const totalPages = pageSize === "all" ? 1 : Math.ceil(sortedSales.length / (pageSize as number));
 
 
 
@@ -767,40 +823,40 @@ const totalPages = pageSize === "all" ? 1 : Math.ceil(sortedSales.length / (page
   };
 
 
-const handleRefresh = async () => {
-  try {
-    setRefreshing(true);
+  const handleRefresh = async () => {
+    try {
+      setRefreshing(true);
 
-    // 🔁 Re-fetch main data
-    await fetchSalesData();
+      // 🔁 Re-fetch main data
+      await fetchSalesData();
 
-    // 🔁 Re-fetch not onboarded clients if that tab is active
-    if (activeTabView === "notOnboarded") {
-      await fetchNotOnboardedClients();
+      // 🔁 Re-fetch not onboarded clients if that tab is active
+      if (activeTabView === "notOnboarded") {
+        await fetchNotOnboardedClients();
+      }
+
+      // 🔁 Recompute monthly revenue breakdown (if sales exist)
+      if (allSales.length > 0) {
+        const breakdown = generateMonthlyRevenue(allSales, selectedYear);
+        setMonthlyBreakdown(breakdown);
+      }
+
+      // ✅ Reset search filters and states (optional)
+      setSearchTerm("");
+      setStatusFilter("All");
+      setFollowUpFilter("Today");
+
+      // ✅ Optional: Scroll to top of page after refresh
+      window.scrollTo({ top: 0, behavior: "smooth" });
+
+      toast.success("✅ Page refreshed successfully!");
+    } catch (err) {
+      console.error("Error refreshing data:", err);
+      toast.error("Failed to refresh data.");
+    } finally {
+      setRefreshing(false);
     }
-
-    // 🔁 Recompute monthly revenue breakdown (if sales exist)
-    if (allSales.length > 0) {
-      const breakdown = generateMonthlyRevenue(allSales, selectedYear);
-      setMonthlyBreakdown(breakdown);
-    }
-
-    // ✅ Reset search filters and states (optional)
-    setSearchTerm("");
-    setStatusFilter("All");
-    setFollowUpFilter("Today");
-
-    // ✅ Optional: Scroll to top of page after refresh
-    window.scrollTo({ top: 0, behavior: "smooth" });
-
-    toast.success("✅ Page refreshed successfully!");
-  } catch (err) {
-    console.error("Error refreshing data:", err);
-    toast.error("Failed to refresh data.");
-  } finally {
-    setRefreshing(false);
-  }
-};
+  };
 
 
   const handleDownloadCSV = () => {
@@ -911,59 +967,59 @@ const handleRefresh = async () => {
   }
 
   async function handleChangeOnboardDate(leadId: string) {
-  if (!newOnboardDate) {
-    toast.error("Please select a valid date.");
-    return;
-  }
-
-  try {
-    setUpdatingDate(true);
-
-    // Step 1: find latest record for this lead
-    const { data: latestRecord, error: fetchError } = await supabase
-      .from("sales_closure")
-      .select("id, lead_id, onboarded_date, closed_at")
-      .eq("lead_id", leadId)
-      .order("closed_at", { ascending: false })
-      .limit(1)
-      .single();
-
-    if (fetchError || !latestRecord) {
-      console.error("Error fetching latest record:", fetchError);
-      toast.error("Could not find the latest record for this client.");
-      setUpdatingDate(false);
+    if (!newOnboardDate) {
+      toast.error("Please select a valid date.");
       return;
     }
 
-    // Step 2: update onboarded_date
-    const { error: updateError } = await supabase
-      .from("sales_closure")
-      .update({ onboarded_date: newOnboardDate })
-      .eq("id", latestRecord.id);
+    try {
+      setUpdatingDate(true);
 
-    if (updateError) {
-      console.error("Error updating onboarded_date:", updateError);
-      toast.error("Failed to update onboarded date.");
-    } else {
-      toast.success("Onboarded date updated successfully!");
+      // Step 1: find latest record for this lead
+      const { data: latestRecord, error: fetchError } = await supabase
+        .from("sales_closure")
+        .select("id, lead_id, onboarded_date, closed_at")
+        .eq("lead_id", leadId)
+        .order("closed_at", { ascending: false })
+        .limit(1)
+        .single();
 
-      // Step 3: Update UI
-      setSales((prev) =>
-        prev.map((sale) =>
-          sale.lead_id === leadId
-            ? { ...sale, onboarded_date: newOnboardDate }
-            : sale
-        )
-      );
-      setEditingLeadId(null);
+      if (fetchError || !latestRecord) {
+        console.error("Error fetching latest record:", fetchError);
+        toast.error("Could not find the latest record for this client.");
+        setUpdatingDate(false);
+        return;
+      }
+
+      // Step 2: update onboarded_date
+      const { error: updateError } = await supabase
+        .from("sales_closure")
+        .update({ onboarded_date: newOnboardDate })
+        .eq("id", latestRecord.id);
+
+      if (updateError) {
+        console.error("Error updating onboarded_date:", updateError);
+        toast.error("Failed to update onboarded date.");
+      } else {
+        toast.success("Onboarded date updated successfully!");
+
+        // Step 3: Update UI
+        setSales((prev) =>
+          prev.map((sale) =>
+            sale.lead_id === leadId
+              ? { ...sale, onboarded_date: newOnboardDate }
+              : sale
+          )
+        );
+        setEditingLeadId(null);
+      }
+    } catch (err) {
+      console.error("Unexpected error:", err);
+      toast.error("Something went wrong. Try again.");
+    } finally {
+      setUpdatingDate(false);
     }
-  } catch (err) {
-    console.error("Unexpected error:", err);
-    toast.error("Something went wrong. Try again.");
-  } finally {
-    setUpdatingDate(false);
   }
-}
 
 
   function calculateNextRenewal(onboarded: string | undefined, cycle: number): string {
@@ -975,8 +1031,8 @@ const handleRefresh = async () => {
     return start.toLocaleDateString("en-GB"); // Format: dd/mm/yyyy
   }
 
-  
-const expiredCount = sales.filter((sale) => sale.finance_status === "Paid").length;
+
+  const expiredCount = sales.filter((sale) => sale.finance_status === "Paid").length;
 
   const totalAmount = (
     parseFloat(subscriptionSaleValue)
@@ -1004,29 +1060,29 @@ const expiredCount = sales.filter((sale) => sale.finance_status === "Paid").leng
   }
 
   const validResumeValue = parseFloat(resumeValue || "0");
-const validPortfolioValue = parseFloat(portfolioValue || "0");
-const validLinkedinValue = parseFloat(linkedinValue || "0");
-const validGithubValue = parseFloat(githubValue || "0");
-const validCoursesValue = parseFloat(coursesValue || "0");
-const validCustomValue = parseFloat(customValue || "0");
-const validBadgeValue = parseFloat(badgeValue || "0");
+  const validPortfolioValue = parseFloat(portfolioValue || "0");
+  const validLinkedinValue = parseFloat(linkedinValue || "0");
+  const validGithubValue = parseFloat(githubValue || "0");
+  const validCoursesValue = parseFloat(coursesValue || "0");
+  const validCustomValue = parseFloat(customValue || "0");
+  const validBadgeValue = parseFloat(badgeValue || "0");
 
-// Now you can safely add them together
-const subscription_puls_addons = adjustedTotalAmount + validResumeValue +
-  validPortfolioValue + validLinkedinValue + validGithubValue +
-  validCoursesValue + validCustomValue + validBadgeValue;
+  // Now you can safely add them together
+  const subscription_puls_addons = adjustedTotalAmount + validResumeValue +
+    validPortfolioValue + validLinkedinValue + validGithubValue +
+    validCoursesValue + validCustomValue + validBadgeValue;
 
-console.log("subscription_puls_addons", typeof subscription_puls_addons, subscription_puls_addons);
-console.log("adjustedTotalAmount", typeof adjustedTotalAmount, adjustedTotalAmount);
-console.log("resumeValue", typeof resumeValue, resumeValue);
-console.log("portfolioValue", typeof portfolioValue, portfolioValue);
-console.log("linkedinValue", typeof linkedinValue, linkedinValue);
-console.log("githubValue", typeof githubValue, githubValue);
-console.log("coursesValue", typeof coursesValue, coursesValue);
-console.log("customValue", typeof customValue, customValue);
-console.log("badgeValue", typeof badgeValue, badgeValue);
+  console.log("subscription_puls_addons", typeof subscription_puls_addons, subscription_puls_addons);
+  console.log("adjustedTotalAmount", typeof adjustedTotalAmount, adjustedTotalAmount);
+  console.log("resumeValue", typeof resumeValue, resumeValue);
+  console.log("portfolioValue", typeof portfolioValue, portfolioValue);
+  console.log("linkedinValue", typeof linkedinValue, linkedinValue);
+  console.log("githubValue", typeof githubValue, githubValue);
+  console.log("coursesValue", typeof coursesValue, coursesValue);
+  console.log("customValue", typeof customValue, customValue);
+  console.log("badgeValue", typeof badgeValue, badgeValue);
 
-const totalTLCount = tlActiveCounts.reduce((sum, tl) => sum + tl.count, 0);
+  const totalTLCount = tlActiveCounts.reduce((sum, tl) => sum + tl.count, 0);
 
   return (
     <ProtectedRoute allowedRoles={["Finance", "Super Admin"]}>
@@ -1035,46 +1091,46 @@ const totalTLCount = tlActiveCounts.reduce((sum, tl) => sum + tl.count, 0);
           <div className="flex justify-between items-center">
             <div>
               <div className="flex items-center gap-2">
-              <h1 className="text-3xl font-bold text-gray-900">Finance CRM</h1>
-               {/* 🔁 Refresh Button */}
-   <Button
-  variant="outline"
-  onClick={handleRefresh}
-  disabled={refreshing}
-  className="border border-gray-300 hover:bg-gray-100"
->
-  {refreshing ? (
-    <RefreshCw className="h-4 w-4 animate-spin text-blue-500" /> 
-  ) : (
-    <RefreshCw className="h-4 w-4 text-blue-700" />
-  )}
-    <span className="text-blue-700 font-medium">
-    {refreshing ? "Refreshing..." : "Refresh"}
-  </span>
-</Button>
+                <h1 className="text-3xl font-bold text-gray-900">Finance CRM</h1>
+                {/* 🔁 Refresh Button */}
+                <Button
+                  variant="outline"
+                  onClick={handleRefresh}
+                  disabled={refreshing}
+                  className="border border-gray-300 hover:bg-gray-100"
+                >
+                  {refreshing ? (
+                    <RefreshCw className="h-4 w-4 animate-spin text-blue-500" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4 text-blue-700" />
+                  )}
+                  <span className="text-blue-700 font-medium">
+                    {refreshing ? "Refreshing..." : "Refresh"}
+                  </span>
+                </Button>
 
 
-    </div>
+              </div>
               <p className="text-gray-600 mt-2">Track revenue and manage payments</p>
-           </div>
+            </div>
             {/* <Button onClick={() => setShowRevenueDialog(true)}>Revenue</Button> */}
             <div className="flex gap-2">
 
-  <Button
-    variant="outline"
-    className="bg-green-100 text-green-700 hover:bg-green-200"
-    onClick={() => window.open("/finance/addons", "_blank")}
-  >
-    Addons Details
-  </Button>
+              <Button
+                variant="outline"
+                className="bg-green-100 text-green-700 hover:bg-green-200"
+                onClick={() => window.open("/finance/addons", "_blank")}
+              >
+                Addons Details
+              </Button>
 
-               <Button
-    variant="outline"
-    className="bg-red-100 text-red-700 hover:bg-red-200"
-    onClick={() => window.open("/finance/UnpaidApplications", "_blank")}
-  >
-    Unpaid Applications
-  </Button>
+              <Button
+                variant="outline"
+                className="bg-red-100 text-red-700 hover:bg-red-200"
+                onClick={() => window.open("/finance/UnpaidApplications", "_blank")}
+              >
+                Unpaid Applications
+              </Button>
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -1084,8 +1140,8 @@ const totalTLCount = tlActiveCounts.reduce((sum, tl) => sum + tl.count, 0);
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem onClick={loadRevenue}>
-  Quick Revenue Analysis
-</DropdownMenuItem>
+                    Quick Revenue Analysis
+                  </DropdownMenuItem>
 
                   <DropdownMenuItem onClick={() => window.open("/finance/full-analysis", "_blank")}>
                     Complete Revenue Analysis
@@ -1157,99 +1213,99 @@ const totalTLCount = tlActiveCounts.reduce((sum, tl) => sum + tl.count, 0);
 
 
 
-      <div className="flex items-center justify-between mt-4">
-  <div className="flex items-center gap-3">
-   <Input
-  placeholder="Search by email, phone or lead_id"
-  value={searchStore}
-  onChange={(e) => setSearchStore(e.target.value)} // keep this to update the input value
-  onKeyDown={(e) => {
-    if (e.key === "Enter") {
-      setSearchTerm(searchStore); // call your search function
-    }
-  }}
-  className="max-w-md"
-/>
+          <div className="flex items-center justify-between mt-4">
+            <div className="flex items-center gap-3">
+              <Input
+                placeholder="Search by email, phone or lead_id"
+                value={searchStore}
+                onChange={(e) => setSearchStore(e.target.value)} // keep this to update the input value
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    setSearchTerm(searchStore); // call your search function
+                  }
+                }}
+                className="max-w-md"
+              />
 
 
-   
 
-    <div className="text-sm text-gray-500 flex items-center w-96">
-      Today total active clients:&nbsp;
-      <span className="text-md text-green-600 font-bold">{expiredCount}</span>
-    </div>
-  </div>
-{/* </div> */}
+
+              <div className="text-sm text-gray-500 flex items-center w-96">
+                Today total active clients:&nbsp;
+                <span className="text-md text-green-600 font-bold">{expiredCount}</span>
+              </div>
+            </div>
+            {/* </div> */}
 
             <div className="flex space-x-4 justify-end">
               <Select
-  value={String(pageSize)}
-  onValueChange={(v) => {
-    setPageSize(v === "all" ? "all" : Number(v));
-    setCurrentPage(1);
-  }}
->
-  <SelectTrigger className="w-32">
-    <SelectValue />
-  </SelectTrigger>
-  <SelectContent>
-    {[30, 50, 100, 150, 200, 500, 1000, 2000].map((size) => (
-      <SelectItem key={size} value={String(size)}>
-        {size}
-      </SelectItem>
-    ))}
-    <SelectItem value="all">All</SelectItem>
-  </SelectContent>
-</Select>
+                value={String(pageSize)}
+                onValueChange={(v) => {
+                  setPageSize(v === "all" ? "all" : Number(v));
+                  setCurrentPage(1);
+                }}
+              >
+                <SelectTrigger className="w-32">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {[30, 50, 100, 150, 200, 500, 1000, 2000].map((size) => (
+                    <SelectItem key={size} value={String(size)}>
+                      {size}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="all">All</SelectItem>
+                </SelectContent>
+              </Select>
 
 
-<div className="w-72">
-  <Select
-    value={selectedTLFilter ?? undefined}
-    onValueChange={(value) => {
-      if (value === "reset") {
-        setSelectedTLFilter(null);
-      } else {
-        setSelectedTLFilter(value);
-      }
-    }}
-  >
-    <SelectTrigger className="w-full">
-      <SelectValue placeholder="Today Active Count List" />
-    </SelectTrigger>
+              <div className="w-72">
+                <Select
+                  value={selectedTLFilter ?? undefined}
+                  onValueChange={(value) => {
+                    if (value === "reset") {
+                      setSelectedTLFilter(null);
+                    } else {
+                      setSelectedTLFilter(value);
+                    }
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Today Active Count List" />
+                  </SelectTrigger>
 
-    <SelectContent>
-      <div className="px-2 py-1 text-xs font-bold text-gray-500">
-        Today Active Count List
-      </div>
+                  <SelectContent>
+                    <div className="px-2 py-1 text-xs font-bold text-gray-500">
+                      Today Active Count List
+                    </div>
 
-      {tlActiveCounts
-        .slice()
-        .sort((a, b) => b.count - a.count)
-        .map((tl) => (
-          <SelectItem
-            key={tl.associates_tl_email || "unassigned"}
-            value={tl.associates_tl_email || "unassigned"}
-            className="flex justify-between"
-          >
-            <span>{tl.associates_tl_email || "Unassigned"}</span> &nbsp;:&nbsp;
-            <span className="font-semibold text-blue-600">
-              {tl.count}
-            </span>
-          </SelectItem>
-        ))}
+                    {tlActiveCounts
+                      .slice()
+                      .sort((a, b) => b.count - a.count)
+                      .map((tl) => (
+                        <SelectItem
+                          key={tl.associates_tl_email || "unassigned"}
+                          value={tl.associates_tl_email || "unassigned"}
+                          className="flex justify-between"
+                        >
+                          <span>{tl.associates_tl_email || "Unassigned"}</span> &nbsp;:&nbsp;
+                          <span className="font-semibold text-blue-600">
+                            {tl.count}
+                          </span>
+                        </SelectItem>
+                      ))}
 
-      <div className="px-3 py-2 border-t flex justify-between font-semibold">
-        <span>Total Clients</span>
-        <span className="text-green-600">{totalTLCount}</span>
-      </div>
+                    <div className="px-3 py-2 border-t flex justify-between font-semibold">
+                      <span>Total Clients</span>
+                      <span className="text-green-600">{totalTLCount}</span>
+                    </div>
 
-      <SelectItem value="reset" className="text-red-600 font-medium">
-        Reset Filter
-      </SelectItem>
-    </SelectContent>
-  </Select>
-</div>
+                    <SelectItem value="reset" className="text-red-600 font-medium">
+                      Reset Filter
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
 
               <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as FinanceStatus | "All")}>
@@ -1265,17 +1321,18 @@ const totalTLCount = tlActiveCounts.reduce((sum, tl) => sum + tl.count, 0);
                   <SelectItem value="Got Placed">Got Placed</SelectItem>
                 </SelectContent>
               </Select>
-              <Select value={followUpFilter} onValueChange={(value) => setFollowUpFilter(value as "All dates" | "Today")}>
+              <Select value={followUpFilter} onValueChange={(value) => setFollowUpFilter(value as "All dates" | "Today" | "Upcoming (7 Days)")}>
                 <SelectTrigger className="w-40">
                   <SelectValue placeholder="Follow Up" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="All dates">All dates</SelectItem>
                   <SelectItem value="Today">Today</SelectItem>
+                  <SelectItem value="Upcoming (7 Days)">Upcoming (7 Days)</SelectItem>
                 </SelectContent>
               </Select>
 
-              {activeTabView === "notOnboarded" ? (
+              {activeTabView !== "main" ? (
                 <Button
                   className="bg-gray-700 hover:bg-gray-600 text-white"
                   onClick={() => setActiveTabView("main")}
@@ -1283,20 +1340,34 @@ const totalTLCount = tlActiveCounts.reduce((sum, tl) => sum + tl.count, 0);
                   ← Back to All Clients
                 </Button>
               ) : (
-                // <Button
-                //   className="bg-orange-500 hover:bg-orange-400 text-white"
-                //   onClick={() => setActiveTabView("notOnboarded")}
-                // >
-                //   Not Onboarded Clients
-                // </Button>
+                <div className="flex gap-2">
+                  <Button
+                    className="bg-orange-500 hover:bg-orange-400 text-white"
+                    onClick={handleOpenNotOnboarded}
+                  >
+                    Not Onboarded Clients
+                  </Button>
+                  <Button
+                    className="bg-blue-600 hover:bg-blue-700 text-white gap-2"
+                    onClick={() => setActiveTabView("renewals")}
+                  >
+                    <RefreshCw className="w-4 h-4" /> Renewal Clients
+                  </Button>
+                  <Button
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2"
+                    onClick={() => setActiveTabView("email_logs")}
+                  >
+                    <Mail className="w-4 h-4" /> Email History
+                  </Button>
 
-                <Button
-  className="bg-orange-500 hover:bg-orange-400 text-white"
-  onClick={handleOpenNotOnboarded}
->
-  Not Onboarded Clients
-</Button>
-
+                  <Button
+                    variant="outline"
+                    className="border-indigo-600 text-indigo-600 hover:bg-indigo-50 gap-2"
+                    onClick={() => setShowTestEmailDialog(true)}
+                  >
+                    <RefreshCw className="w-4 h-4" /> Test Automated Email
+                  </Button>
+                </div>
               )}
 
             </div>
@@ -1339,19 +1410,19 @@ const totalTLCount = tlActiveCounts.reduce((sum, tl) => sum + tl.count, 0);
                         <TableCell>{index + 1}</TableCell>
                         <TableCell>{client.lead_id}</TableCell>
                         {/* <TableCell>{client.lead_name || "-"}</TableCell> */}
-                         <TableCell
-                            className="font-medium max-w-[150px] break-words whitespace-normal cursor-pointer text-blue-600 hover:underline"
-                            onClick={() => window.open(`/leads/${client.lead_id}`, "_blank")}
-                          >
-                            {client.lead_name || "-"}
-                          </TableCell>
+                        <TableCell
+                          className="font-medium max-w-[150px] break-words whitespace-normal cursor-pointer text-blue-600 hover:underline"
+                          onClick={() => window.open(`/leads/${client.lead_id}`, "_blank")}
+                        >
+                          {client.lead_name || "-"}
+                        </TableCell>
                         <TableCell>{client.email || "-"}</TableCell>
                         <TableCell>${client.sale_value}</TableCell>
                         <TableCell>{client.subscription_cycle} days</TableCell>
                         <TableCell>Finance Team A</TableCell>
                         <TableCell>Not Onboarded</TableCell>
                         <TableCell>{new Date(client.closed_at).toLocaleDateString()}</TableCell>
-                       
+
                       </TableRow>
                     ))
                   )}
@@ -1366,13 +1437,17 @@ const totalTLCount = tlActiveCounts.reduce((sum, tl) => sum + tl.count, 0);
                 </div>
               )}
             </div>
+          ) : activeTabView === "renewals" ? (
+            <RenewalsList />
+          ) : activeTabView === "email_logs" ? (
+            <EmailLogView />
           ) : (
             // 🔁 EXISTING MAIN TABLE STAYS HERE
 
 
 
             <div className="rounded-md border mt-4">
-            
+
 
               <Table>
                 <TableHeader>
@@ -1456,7 +1531,7 @@ const totalTLCount = tlActiveCounts.reduce((sum, tl) => sum + tl.count, 0);
                         </span>
                       </div>
                     </TableHead>
-  <TableHead
+                    <TableHead
                       className="cursor-pointer items-center gap-1"
                       onClick={() => handleSort("subscription_cycle")}
                     >
@@ -1481,32 +1556,30 @@ const totalTLCount = tlActiveCounts.reduce((sum, tl) => sum + tl.count, 0);
                       </div>
                     </TableHead>
                     {/* <TableHead>Subscription Cycle</TableHead> */}
-<TableHead
-  className="cursor-pointer items-center gap-1"
-  onClick={() => handleSort("assigned_to")}
->
-  <div className="flex flex-center gap-1">
-    Assigned To
-    <span
-      className={`text-xs leading-none ${
-        sortField === "assigned_to" && sortOrder === "desc"
-          ? "text-blue-600"
-          : "text-gray-400"
-      }`}
-    >
-      ▲
-    </span>
-    <span
-      className={`text-xs leading-none ${
-        sortField === "assigned_to" && sortOrder === "asc"
-          ? "text-blue-600"
-          : "text-gray-400"
-      }`}
-    >
-      ▼
-    </span>
-  </div>
-</TableHead>
+                    <TableHead
+                      className="cursor-pointer items-center gap-1"
+                      onClick={() => handleSort("assigned_to")}
+                    >
+                      <div className="flex flex-center gap-1">
+                        Assigned To
+                        <span
+                          className={`text-xs leading-none ${sortField === "assigned_to" && sortOrder === "desc"
+                            ? "text-blue-600"
+                            : "text-gray-400"
+                            }`}
+                        >
+                          ▲
+                        </span>
+                        <span
+                          className={`text-xs leading-none ${sortField === "assigned_to" && sortOrder === "asc"
+                            ? "text-blue-600"
+                            : "text-gray-400"
+                            }`}
+                        >
+                          ▼
+                        </span>
+                      </div>
+                    </TableHead>
                     {/* <TableHead>Stage</TableHead> */}
 
                     <TableHead
@@ -1558,8 +1631,8 @@ const totalTLCount = tlActiveCounts.reduce((sum, tl) => sum + tl.count, 0);
                         </span>
                       </div>
                     </TableHead>
-                    
- <TableHead
+
+                    <TableHead
                       className="cursor-pointer items-center gap-1"
                       onClick={() => handleSort("next_renewal_date")}
                     >
@@ -1569,7 +1642,7 @@ const totalTLCount = tlActiveCounts.reduce((sum, tl) => sum + tl.count, 0);
                           className={`text-xs leading-none ${sortField === "next_renewal_date" && sortOrder === "desc"
                             ? "text-blue-600" : "text-gray-400"}`}> ▲</span>
                         <span className={`text-xs leading-none ${sortField === "next_renewal_date" && sortOrder === "asc"
-                            ? "text-blue-600" : "text-gray-400" }`}> ▼</span>
+                          ? "text-blue-600" : "text-gray-400"}`}> ▼</span>
                       </div>
                     </TableHead>
 
@@ -1592,7 +1665,7 @@ const totalTLCount = tlActiveCounts.reduce((sum, tl) => sum + tl.count, 0);
                       return (
                         <TableRow key={sale.id}>
                           {/* <TableCell>{idx + 1}</TableCell> */}
-                              <TableCell>{idx + 1 + (currentPage - 1) * (pageSize === "all" ? sortedSales.length : pageSize)}</TableCell>
+                          <TableCell>{idx + 1 + (currentPage - 1) * (pageSize === "all" ? sortedSales.length : pageSize)}</TableCell>
 
 
                           <TableCell className="font-medium">{sale.lead_id}</TableCell>
@@ -1623,53 +1696,53 @@ const totalTLCount = tlActiveCounts.reduce((sum, tl) => sum + tl.count, 0);
                               : "-"}
                           </TableCell>
 
-                         <TableCell className="flex items-center gap-2">
-  {editingLeadId === sale.lead_id ? (
-    <div className="flex items-center gap-2">
-      <Input
-        type="date"
-        value={newOnboardDate}
-        onChange={(e) => setNewOnboardDate(e.target.value)}
-        className="w-40"
-      />
-      <Button
-        size="sm"
-        onClick={() => handleChangeOnboardDate(sale.lead_id)}
-        disabled={updatingDate || !newOnboardDate}
-        className="bg-blue-600 text-white hover:bg-blue-700"
-      >
-        {updatingDate ? "Updating..." : "Change"}
-      </Button>
-      <Button
-        size="sm"
-        variant="ghost"
-        onClick={() => setEditingLeadId(null)}
-      >
-        Cancel
-      </Button>
-    </div>
-  ) : (
-    <>
-      {sale.onboarded_date
-        ? new Date(sale.onboarded_date).toLocaleDateString("en-GB")
-        : "-"}
-      <button
-        onClick={() => {
-          setEditingLeadId(sale.lead_id);
-          setNewOnboardDate(
-            sale.onboarded_date
-              ? new Date(sale.onboarded_date).toISOString().slice(0, 10)
-              : ""
-          );
-        }}
-        className="text-gray-500 hover:text-blue-600"
-        title="Edit onboarded date"
-      >
-        <Edit className="w-4 h-4" />
-      </button>
-    </>
-  )}
-</TableCell>
+                          <TableCell className="flex items-center gap-2">
+                            {editingLeadId === sale.lead_id ? (
+                              <div className="flex items-center gap-2">
+                                <Input
+                                  type="date"
+                                  value={newOnboardDate}
+                                  onChange={(e) => setNewOnboardDate(e.target.value)}
+                                  className="w-40"
+                                />
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleChangeOnboardDate(sale.lead_id)}
+                                  disabled={updatingDate || !newOnboardDate}
+                                  className="bg-blue-600 text-white hover:bg-blue-700"
+                                >
+                                  {updatingDate ? "Updating..." : "Change"}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => setEditingLeadId(null)}
+                                >
+                                  Cancel
+                                </Button>
+                              </div>
+                            ) : (
+                              <>
+                                {sale.onboarded_date
+                                  ? new Date(sale.onboarded_date).toLocaleDateString("en-GB")
+                                  : "-"}
+                                <button
+                                  onClick={() => {
+                                    setEditingLeadId(sale.lead_id);
+                                    setNewOnboardDate(
+                                      sale.onboarded_date
+                                        ? new Date(sale.onboarded_date).toISOString().slice(0, 10)
+                                        : ""
+                                    );
+                                  }}
+                                  className="text-gray-500 hover:text-blue-600"
+                                  title="Edit onboarded date"
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </button>
+                              </>
+                            )}
+                          </TableCell>
 
 
 
@@ -1682,13 +1755,13 @@ const totalTLCount = tlActiveCounts.reduce((sum, tl) => sum + tl.count, 0);
                           </TableCell>
 
 
- <TableCell>
+                          <TableCell>
                             <Badge className={getStageColor(sale.finance_status)}>
                               {sale.finance_status}
                             </Badge>
                           </TableCell>
-                          
-                          
+
+
                           {/* Deadline — hide if finalized */}
                           <TableCell>
                             {forClosed
@@ -1698,16 +1771,16 @@ const totalTLCount = tlActiveCounts.reduce((sum, tl) => sum + tl.count, 0);
 
                           {/* Actions — disable if finalized */}
                           <TableCell>
-                           
+
                             <Select
                               value={actionSelections[sale.id] || ""}
                               onValueChange={(value) => {
                                 // setActionSelections((prev) => ({ ...prev, [sale.id]: value }));
-                                  const status = value as FinanceStatus;
+                                const status = value as FinanceStatus;
 
                                 if (value === "Paid") {
                                   // handlePaymentDialogOpen(sale.lead_id);  // Pass the selected sale's lead_id
-                                    window.open(`/finance/renewal/${sale.lead_id}`, "_blank");
+                                  window.open(`/finance/renewal/${sale.lead_id}`, "_blank");
 
                                 } else if (["Closed", "Paused", "Unpaid", "Got Placed"].includes(value)) {
                                   if (!window.confirm(`Are you sure you want to update status as ${value} ?`)) return;
@@ -1718,7 +1791,7 @@ const totalTLCount = tlActiveCounts.reduce((sum, tl) => sum + tl.count, 0);
                                   handleFinanceStatusUpdate(sale.id, status);
                                 }
                               }}
-                              // disabled={!!actionSelections[sale.id]}
+                            // disabled={!!actionSelections[sale.id]}
                             >
                               <SelectTrigger className="w-36">
                                 <SelectValue placeholder="Select Status" />
@@ -1770,23 +1843,23 @@ const totalTLCount = tlActiveCounts.reduce((sum, tl) => sum + tl.count, 0);
                 </TableBody>
               </Table>
               <div className="flex justify-between items-center mt-2">
-  <Button onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))} disabled={currentPage === 1}>
-    Prev
-  </Button>
-  <span>
-    Page {currentPage} of {totalPages}
-  </span>
-  <Button onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))} disabled={currentPage === totalPages}>
-    Next
-  </Button>
-</div>
+                <Button onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))} disabled={currentPage === 1}>
+                  Prev
+                </Button>
+                <span>
+                  Page {currentPage} of {totalPages}
+                </span>
+                <Button onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))} disabled={currentPage === totalPages}>
+                  Next
+                </Button>
+              </div>
 
 
             </div>
 
           )}
 
-{/* 
+          {/* 
           <Dialog
             open={showReasonDialog}
             onOpenChange={(open) => {
@@ -1885,108 +1958,108 @@ const totalTLCount = tlActiveCounts.reduce((sum, tl) => sum + tl.count, 0);
           </Dialog> */}
 
           <Dialog
-  open={showReasonDialog}
-  onOpenChange={(open) => {
-    if (!open) return; // prevent accidental close
-  }}
->
-  <DialogContent
-    hideCloseIcon
-    aria-describedby="reason-details-dialog-box"
-    className="sm:max-w-md"
-    onInteractOutside={(e) => e.preventDefault()} // disable outside click
-  >
-    <DialogHeader>
-      <DialogTitle>Reason for {selectedFinanceStatus}</DialogTitle>
-    </DialogHeader>
+            open={showReasonDialog}
+            onOpenChange={(open) => {
+              if (!open) return; // prevent accidental close
+            }}
+          >
+            <DialogContent
+              hideCloseIcon
+              aria-describedby="reason-details-dialog-box"
+              className="sm:max-w-md"
+              onInteractOutside={(e) => e.preventDefault()} // disable outside click
+            >
+              <DialogHeader>
+                <DialogTitle>Reason for {selectedFinanceStatus}</DialogTitle>
+              </DialogHeader>
 
-    {/* INPUT */}
-    <Textarea
-      placeholder={`Enter reason for ${selectedFinanceStatus}`}
-      value={tempReasonInput}
-      onChange={(e) => setTempReasonInput(e.target.value)}
-      className="min-h-[100px]"
-    />
+              {/* INPUT */}
+              <Textarea
+                placeholder={`Enter reason for ${selectedFinanceStatus}`}
+                value={tempReasonInput}
+                onChange={(e) => setTempReasonInput(e.target.value)}
+                className="min-h-[100px]"
+              />
 
-    <div className="flex justify-between gap-3 mt-4">
+              <div className="flex justify-between gap-3 mt-4">
 
-      {/* CANCEL */}
-      <Button
-        variant="ghost"
-        className="w-full bg-black text-white hover:bg-gray-800"
-        onClick={() => {
-          if (selectedSaleId) {
-            setActionSelections((prev) => ({
-              ...prev,
-              [selectedSaleId]: "",
-            }));
-          }
+                {/* CANCEL */}
+                <Button
+                  variant="ghost"
+                  className="w-full bg-black text-white hover:bg-gray-800"
+                  onClick={() => {
+                    if (selectedSaleId) {
+                      setActionSelections((prev) => ({
+                        ...prev,
+                        [selectedSaleId]: "",
+                      }));
+                    }
 
-          setShowReasonDialog(false);
-          setSelectedSaleId(null);
-          setSelectedFinanceStatus(null);
-          setTempReasonInput("");
-        }}
-      >
-        Cancel
-      </Button>
+                    setShowReasonDialog(false);
+                    setSelectedSaleId(null);
+                    setSelectedFinanceStatus(null);
+                    setTempReasonInput("");
+                  }}
+                >
+                  Cancel
+                </Button>
 
-      {/* SUBMIT */}
-      <Button
-        className="w-full bg-green-600 text-white hover:bg-green-700"
-        onClick={async () => {
-          const finalReason = tempReasonInput.trim();
+                {/* SUBMIT */}
+                <Button
+                  className="w-full bg-green-600 text-white hover:bg-green-700"
+                  onClick={async () => {
+                    const finalReason = tempReasonInput.trim();
 
-          if (!selectedSaleId || !selectedFinanceStatus || !finalReason) {
+                    if (!selectedSaleId || !selectedFinanceStatus || !finalReason) {
                       alert("Please provide a reason.");
                       return;
                     }
 
-          const { error } = await supabase
-            .from("sales_closure")
-            .update({
-              finance_status: selectedFinanceStatus,
-              reason_for_close: finalReason,
-            })
-            .eq("id", selectedSaleId);
+                    const { error } = await supabase
+                      .from("sales_closure")
+                      .update({
+                        finance_status: selectedFinanceStatus,
+                        reason_for_close: finalReason,
+                      })
+                      .eq("id", selectedSaleId);
 
-          if (error) {
-            console.error("Failed to update:", error);
-            alert("❌ Failed to save status.");
-            return;
-          }
+                    if (error) {
+                      console.error("Failed to update:", error);
+                      alert("❌ Failed to save status.");
+                      return;
+                    }
 
-          // Update UI
-          setSales((prev) =>
-            prev.map((s) =>
-              s.id === selectedSaleId
-                ? {
-                    ...s,
-                    finance_status: selectedFinanceStatus,
-                    reason_for_close: finalReason,
-                  }
-                : s
-            )
-          );
+                    // Update UI
+                    setSales((prev) =>
+                      prev.map((s) =>
+                        s.id === selectedSaleId
+                          ? {
+                            ...s,
+                            finance_status: selectedFinanceStatus,
+                            reason_for_close: finalReason,
+                          }
+                          : s
+                      )
+                    );
 
-          // Update dropdown to show correct status
-          setActionSelections((prev) => ({
-            ...prev,
-            [selectedSaleId]: selectedFinanceStatus,
-          }));
+                    // Update dropdown to show correct status
+                    setActionSelections((prev) => ({
+                      ...prev,
+                      [selectedSaleId]: selectedFinanceStatus,
+                    }));
 
-          // Reset
-          setShowReasonDialog(false);
-          setSelectedSaleId(null);
-          setSelectedFinanceStatus(null);
-          setTempReasonInput("");
-        }}
-      >
-        Submit
-      </Button>
-    </div>
-  </DialogContent>
-</Dialog>
+                    // Reset
+                    setShowReasonDialog(false);
+                    setSelectedSaleId(null);
+                    setSelectedFinanceStatus(null);
+                    setTempReasonInput("");
+                  }}
+                >
+                  Submit
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
 
 
           <Dialog open={showCloseDialog} onOpenChange={(open) => {
@@ -2184,6 +2257,40 @@ const totalTLCount = tlActiveCounts.reduce((sum, tl) => sum + tl.count, 0);
                   </div>
                 </div>
               )}
+            </DialogContent>
+          </Dialog>
+
+          {/* 🧪 Test Automated Email Dialog */}
+          <Dialog open={showTestEmailDialog} onOpenChange={setShowTestEmailDialog}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Test Automated Renewal Email</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <p className="text-sm text-muted-foreground font-medium">
+                  Send a sample renewal reminder email to verify the Microsoft Graph API integration.
+                </p>
+                <div className="space-y-2">
+                  <label htmlFor="test-email" className="text-sm font-medium">Recipient Email</label>
+                  <Input
+                    id="test-email"
+                    type="email"
+                    placeholder="Enter email address..."
+                    value={testEmailInput}
+                    onChange={(e) => setTestEmailInput(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-3 mt-4">
+                <Button variant="ghost" onClick={() => setShowTestEmailDialog(false)}>Cancel</Button>
+                <Button
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold"
+                  onClick={handleSendTestEmail}
+                  disabled={sendingTest}
+                >
+                  {sendingTest ? "Sending..." : "Send Test Email"}
+                </Button>
+              </div>
             </DialogContent>
           </Dialog>
 
