@@ -129,16 +129,7 @@ export default function FinanceAssociatesPage() {
   const [submittingNote, setSubmittingNote] = useState(false);
 
 
-  const fetchTLCounts = async () => {
-    const { data, error } = await supabase.rpc("get_tl_paid_counts");
 
-    if (error) {
-      console.error("Error loading TL counts:", error);
-      return;
-    }
-
-    setTlClientCounts(data as TLClientCount[]);
-  };
 
 
   const fetchSales = async () => {
@@ -386,7 +377,6 @@ export default function FinanceAssociatesPage() {
   useEffect(() => {
     if (user) {
       fetchSales();
-      fetchTLCounts();
     }
   }, [user]);
 
@@ -805,7 +795,7 @@ export default function FinanceAssociatesPage() {
       return;
     }
     if (zoomEmbedRef.current) {
-      zoomEmbedRef.current.makeCall(phone);
+      zoomEmbedRef.current.dial(phone);
     } else {
       alert("Zoom Phone dialer not initialized.");
     }
