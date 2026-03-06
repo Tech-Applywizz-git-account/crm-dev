@@ -177,7 +177,9 @@ export default function OnboardingForm() {
         setObDob(onboarding.date_of_birth || "");
         setObWhatsappNumber(onboarding.whatsapp_number || "");
         setObGithubUrl(onboarding.github_url || "");
-        setObVisaType(onboarding.visatypes || "");
+        const allowedVisaTypes = ["F1", "H1B", "Green Card", "Citizen", "H4EAD", "Other"];
+        const rawVisa = onboarding.visatypes || "";
+        setObVisaType(allowedVisaTypes.includes(rawVisa) ? rawVisa : rawVisa ? "Other" : "");
 
         // Additional fields - you need to add these state variables
         setObExperience(onboarding.experience || "0");
@@ -319,28 +321,27 @@ export default function OnboardingForm() {
 
     // 3️⃣ Strict Validation Checks (Toast for each)
     const requiredChecks = [
-      { val: payload.full_name, label: "Name" },
-      { val: payload.email, label: "Email" },
-      { val: payload.experience, label: "Years of Experience" },
-      { val: payload.applywizz_id, label: "APW ID" },
-      { val: payload.submitted_by, label: "Career Associate" },
-      { val: payload.gender, label: "Gender" },
-      { val: payload.state_of_residence, label: "State of Residence" },
-      { val: payload.zip_or_country, label: "Zip or Country" },
-      { val: payload.resume_s3_path, label: "Resume S3 Path" },
-      { val: payload.start_date, label: "Start Date" },
-      { val: payload.target_role, label: "Target Role" },
-      { val: payload.no_of_applications, label: "Number of Applications" },
-      { val: payload.add_ons_info && payload.add_ons_info.length > 0 ? true : null, label: "Services Opted" },
-      { val: payload.work_auth_details, label: "Work Auth" },
-      { val: payload.work_preferences, label: "Work Preference" },
-      { val: payload.exclude_companies, label: "Exclude Companies" },
+      { val: payload.full_name, msg: "Full Name is required before onboarding." },
+      { val: payload.email, msg: "Company Email is required before onboarding." },
+      { val: payload.experience, msg: "Years of Experience is required before onboarding." },
+      { val: payload.applywizz_id, msg: "ApplyWizz ID (Lead ID) is required before onboarding." },
+      { val: payload.submitted_by, msg: "Career Associate is required. Please log in again." },
+      { val: payload.gender, msg: "Gender is required before onboarding." },
+      { val: payload.state_of_residence, msg: "State of Residence is required before onboarding." },
+      { val: payload.zip_or_country, msg: "Zip or Country is required before onboarding." },
+      { val: payload.resume_s3_path, msg: "Resume is required before onboarding. Please upload a resume first." },
+      { val: payload.start_date, msg: "Onboarded Date (Start Date) is required before onboarding." },
+      { val: payload.target_role, msg: "Target Role / Job Role Preference is required before onboarding." },
+      { val: payload.no_of_applications, msg: "Number of Applications is required before onboarding." },
+      { val: payload.add_ons_info && payload.add_ons_info.length > 0 ? true : null, msg: "Services Opted (Add-Ons) is required. Please check the Sales Closure record." },
+      { val: payload.work_auth_details, msg: "Work Authorization Details is required before onboarding." },
+      { val: payload.work_preferences, msg: "Work Preference (Remote/Hybrid/On-site) is required before onboarding." },
+      { val: payload.exclude_companies, msg: "Exclude Companies is required before onboarding." },
     ];
 
     for (const check of requiredChecks) {
       if (!check.val || (typeof check.val === "string" && check.val.trim() === "")) {
-        const errorMsg = `${check.label} is required before onboarding.`;
-        throw new Error(errorMsg);
+        throw new Error(check.msg);
       }
     }
 

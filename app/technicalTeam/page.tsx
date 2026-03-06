@@ -3057,7 +3057,8 @@ export default function TechnicalTeamPage() {
     associates_tl_name: normEmpty(r.associate_tl_name) || "",
     associates_email: normEmpty(r.associate_email) || "",
     associates_name: normEmpty(r.associate_name) || "",
-    account_assigned_email: normEmpty(r.sale_done_by) || "",
+    account_assigned_name: user?.name || user?.email || "Technical",
+    account_assigned_email: user?.email || normEmpty(r.sale_done_by) || null,
     commitments: normEmpty(r.commitments) || null,
   });
 
@@ -3345,6 +3346,8 @@ export default function TechnicalTeamPage() {
       associates_email: r.associate_email ?? "",
       associates_name: r.associate_name ?? "",
       commitments: r.commitments ?? null,
+      account_assigned_name: user?.name || user?.email || "Technical",
+      account_assigned_email: user?.email || null,
     };
 
     return { lead_id, sale_value, subscription_cycle, email, record };
@@ -3421,7 +3424,7 @@ export default function TechnicalTeamPage() {
     }
   };
 
-  
+
 
   const fetchMyTasks = async () => {
     try {
@@ -3734,7 +3737,7 @@ export default function TechnicalTeamPage() {
       ? v.toLocaleString("en-IN", { maximumFractionDigits: 2 })
       : "-";
 
-  
+
 
 
   const fetchData = async () => {

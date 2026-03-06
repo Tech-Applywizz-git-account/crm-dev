@@ -1,7 +1,6 @@
-//app/sales/page.tsx
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { supabase } from '@/utils/supabase/client';
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
@@ -13,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { EditIcon, Eye, Search, ExternalLink, Bell, User, ChevronDown, ChevronRight, ChevronLeft, Star, Settings, Phone, Trash2, Plus, Download, Tag, Loader2, Calendar, BarChart, ListOrdered } from "lucide-react";
+import { EditIcon, Eye, Search, ExternalLink, Bell, User, ChevronDown, ChevronRight, ChevronLeft, Star, Settings, Phone, History as HistoryIcon, Trash2, Plus, Download, Tag, Loader2, Calendar, BarChart, ListOrdered, RefreshCw, Mail } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -78,6 +77,7 @@ interface Lead {
   call_history: CallHistory[];
   created_at: string | null;
   assigned_at: string | null;
+  updated_at?: string | null;
   source?: string;
 }
 
@@ -132,16 +132,308 @@ const getStageColor = (stage: SalesStage) => {
   }
 };
 
+// 🚀 Memoized Row Component to prevent full-table re-renders
+const LeadRow = React.memo(({
+  item,
+  idx,
+  userProfile,
+  handleStageUpdate,
+  handlePhoneClick,
+  isRightPanelCollapsed
+}: {
+  item: Lead,
+  idx: number,
+  userProfile: Profile | null,
+  handleStageUpdate: (id: string, stage: SalesStage) => void,
+  handlePhoneClick: (phone: string) => void,
+  isRightPanelCollapsed: boolean
+}) => {
+  const leadScore = item.current_stage === "sale done" ? 100 : Math.max(2, 26 - (idx * 3));
+
+  return (
+    <TableRow className="group hover:bg-[#f5faff] transition-colors border-b last:border-0 min-h-[56px]">
+      <TableCell className="px-4 py-3 align-top">
+        <input type="checkbox" className="rounded mt-1" />
+      </TableCell>
+      <TableCell className="py-3 align-top min-w-[220px]">
+        <div className="flex items-start gap-2">
+          <div className="flex items-center gap-1 opacity-40 group-hover:opacity-100 transition-opacity mt-1">
+            <Star className="w-4 h-4 text-gray-400 cursor-pointer hover:text-yellow-500" />
+            <div className="w-1.5 h-1.5 rounded-full bg-gray-300" />
+          </div>
+          <div className="flex flex-col">
+            <span
+              className="lead-name-link text-smooth hover:underline cursor-pointer text-[14px] font-semibold"
+              onClick={() => window.open(`/leads/${item.business_id}`, "_blank")}
+            >
+              {item.client_name}
+            </span>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded uppercase tracking-wider">
+                {item.business_id}
+              </span>
+              <span className="text-[10px] text-gray-500 font-medium tracking-tight">
+                {item.phone}
+              </span>
+            </div>
+          </div>
+        </div>
+      </TableCell>
+      <TableCell className="py-3 align-top">
+        {item.source ? (
+          <Badge variant="outline" className="text-[10px] uppercase font-semibold text-blue-600 bg-blue-50 border-blue-200 py-0 px-2 h-5">
+            {item.source}
+          </Badge>
+        ) : (
+          <span className="text-gray-300 text-xs">—</span>
+        )}
+      </TableCell>
+      <TableCell className="py-3 align-top font-bold text-slate-900 text-[13px] pl-6">
+        {leadScore}
+      </TableCell>
+      <TableCell className="py-3 align-top whitespace-nowrap">
+        <Select
+          value={item.current_stage}
+          onValueChange={(val: SalesStage) => handleStageUpdate(item.id, val)}
+        >
+          <SelectTrigger className="w-fit h-6 border-none bg-transparent hover:bg-gray-100/50 p-1 shadow-none transition-all focus:ring-0">
+            <div className="flex items-center gap-1.5">
+              <Badge className={cn("rounded-md px-2 py-0 h-5 text-[11px] font-medium border shadow-sm transition-all whitespace-nowrap", getStageColor(item.current_stage || "Prospect"))}>
+                {item.current_stage}
+              </Badge>
+            </div>
+          </SelectTrigger>
+          <SelectContent className="min-w-[160px]">
+            {salesStages
+              .filter((stage) => {
+                if (item.current_stage !== "Prospect" && stage === "Prospect") return false;
+                return true;
+              })
+              .map((stage) => (
+                <SelectItem key={stage} value={stage} className="cursor-pointer">
+                  <Badge className={cn("rounded-md px-2 py-0.5 text-[11px] font-medium border shadow-none whitespace-nowrap", getStageColor(stage))}>
+                    {stage}
+                  </Badge>
+                </SelectItem>
+              ))}
+          </SelectContent>
+        </Select>
+      </TableCell>
+      <TableCell className="py-3 align-top text-slate-700 font-medium whitespace-nowrap text-[13px]">
+        {item.assigned_to || "—"}
+      </TableCell>
+      <TableCell className="py-3 align-top text-gray-500 whitespace-nowrap text-[11px] pt-4">
+        {item.assigned_at ? dayjs(item.assigned_at).format("MM/DD/YY hh:mm A") : "—"}
+      </TableCell>
+      <TableCell className="py-3 align-top text-center w-28 pt-3">
+        <div className="flex items-center justify-center gap-2">
+          <div
+            title="Call Lead"
+            className="p-1.5 bg-blue-50 text-blue-600 rounded-md cursor-pointer hover:bg-blue-600 hover:text-white transition-all shadow-sm"
+            onClick={() => handlePhoneClick(item.phone)}
+          >
+            <Phone className="w-3.5 h-3.5" />
+          </div>
+          <div
+            title="Call History"
+            className="p-1.5 bg-indigo-50 text-indigo-600 rounded-md cursor-pointer hover:bg-indigo-600 hover:text-white transition-all shadow-sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenHistory(item);
+            }}
+          >
+            <HistoryIcon className="w-3.5 h-3.5" />
+          </div>
+          <div
+            title="View Details"
+            className="p-1.5 bg-gray-50 text-gray-600 rounded-md cursor-pointer hover:bg-gray-800 hover:text-white transition-all shadow-sm"
+            onClick={() => {
+              const win = window.open(`/leads/${item.business_id}`, "_blank");
+              win?.focus();
+            }}
+          >
+            <Eye className="w-3.5 h-3.5" />
+          </div>
+          {userProfile?.roles === "Admin" && (
+            <div
+              title="Delete"
+              className="p-1.5 bg-red-50 text-red-600 rounded-md cursor-pointer hover:bg-red-600 hover:text-white transition-all shadow-sm"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </div>
+          )}
+        </div>
+      </TableCell>
+    </TableRow>
+  );
+});
+
+// 🚀 Memoized Table Component
+const LeadsTable = React.memo(({
+  leads,
+  sortConfig,
+  handleSort,
+  handleStageUpdate,
+  handlePhoneClick,
+  userProfile,
+  page,
+  pageSize,
+  totalRecords,
+  setPage,
+  setPageSize,
+  isRightPanelCollapsed,
+  onOpenHistory
+}: {
+  leads: Lead[],
+  sortConfig: { key: keyof Lead | null, direction: "asc" | "desc" },
+  handleSort: (key: keyof Lead) => void,
+  handleStageUpdate: (id: string, stage: SalesStage) => void,
+  handlePhoneClick: (phone: string) => void,
+  userProfile: Profile | null,
+  page: number,
+  pageSize: number,
+  totalRecords: number,
+  setPage: React.Dispatch<React.SetStateAction<number>>,
+  setPageSize: React.Dispatch<React.SetStateAction<number>>,
+  isRightPanelCollapsed: boolean,
+  onOpenHistory: (lead: Lead) => void
+}) => {
+  return (
+    <div className="bg-white border rounded shadow-sm overflow-hidden flex flex-col min-h-[400px]">
+      <div className="overflow-x-auto">
+        <Table className="text-sm">
+          <TableHeader className="sales-table-header">
+            <TableRow className="hover:bg-transparent border-b">
+              <TableHead className="w-10 px-4 align-middle h-12">
+                <input type="checkbox" className="rounded" />
+              </TableHead>
+              <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider min-w-[220px] align-middle h-12">Lead Details & ID</TableHead>
+              <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider align-middle h-12">Source</TableHead>
+              <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider cursor-pointer whitespace-nowrap align-middle h-12" onClick={() => handleSort("business_id")}>
+                <div className="flex items-center gap-1">
+                  Lead Score {sortConfig.key === "business_id" && (sortConfig.direction === "asc" ? "↓" : "↑")}
+                </div>
+              </TableHead>
+              <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider w-[160px] align-middle h-12">Lead Stage</TableHead>
+              <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider align-middle h-12">Owner</TableHead>
+              <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider align-middle h-12">Modified On</TableHead>
+              <TableHead className="font-bold text-slate-700 text-center uppercase text-[11px] tracking-wider w-20 align-middle h-12">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {leads.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={7} className="h-32 text-center text-gray-400 italic">No leads matches your criteria.</TableCell>
+              </TableRow>
+            ) : (
+              leads.map((item, idx) => (
+                <LeadRow
+                  key={item.id}
+                  item={item}
+                  idx={idx}
+                  userProfile={userProfile}
+                  handleStageUpdate={handleStageUpdate}
+                  handlePhoneClick={handlePhoneClick}
+                  isRightPanelCollapsed={isRightPanelCollapsed}
+                  onOpenHistory={onOpenHistory}
+                />
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+
+      <div className="p-3 border-t bg-gray-50 flex items-center justify-between text-sm text-gray-500">
+        <div className="flex items-center gap-4">
+          <span>Page {page} of {Math.ceil(totalRecords / pageSize)}</span>
+          <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(1); }}>
+            <SelectTrigger className="h-7 w-20 text-xs border-gray-300">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {[30, 50, 100, 200, 500].map(v => <SelectItem key={v} value={String(v)}>{v}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex gap-1">
+          <Button variant="outline" size="sm" className="h-8 w-8 p-0" disabled={page === 1} onClick={() => setPage(p => p - 1)} suppressHydrationWarning><ChevronLeft className="w-4 h-4" /></Button>
+          <Button variant="outline" size="sm" className="h-8 w-8 p-0 text-white bg-[#00a1e1] border-[#00a1e1] hover:bg-[#0081b5]" suppressHydrationWarning>{page}</Button>
+          <Button variant="outline" size="sm" className="h-8 w-8 p-0" disabled={page === Math.ceil(totalRecords / pageSize)} onClick={() => setPage(p => p + 1)} suppressHydrationWarning><ChevronRight className="w-4 h-4" /></Button>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+// 🚀 Memoized Sidebar Component
+const RightActionPanel = React.memo(({
+  isCollapsed,
+  onAddLead,
+  userProfile
+}: {
+  isCollapsed: boolean,
+  onAddLead: () => void,
+  userProfile: Profile | null
+}) => {
+  if (isCollapsed) return null;
+  return (
+    <div className="w-80 bg-[#f1f4f9] border-l border-gray-200 overflow-y-auto px-5 py-6 space-y-6">
+      <div className="space-y-3">
+        <Button onClick={onAddLead} size="lg" className="w-full bg-[#ae1919] hover:bg-[#8e1414] text-white rounded-sm font-semibold text-base py-6 shadow-sm flex items-center gap-3">
+          <Plus className="w-5 h-5" /> Add New Lead
+        </Button>
+        <Button size="lg" className="w-full bg-[#ae1919] hover:bg-[#8e1414] text-white rounded-sm font-semibold text-base py-6 shadow-sm flex items-center gap-3">
+          <Download className="w-5 h-5" /> Import Leads
+        </Button>
+        <Button size="lg" className="w-full bg-[#ae1919] hover:bg-[#8e1414] text-white rounded-sm font-semibold text-base py-6 shadow-sm flex items-center gap-3">
+          <Tag className="w-5 h-5" /> Import Lead Tags
+        </Button>
+      </div>
+
+      <div className="bg-white border rounded shadow-sm overflow-hidden mt-8">
+        <div className="p-3 border-b flex justify-between items-center bg-gray-50/50">
+          <span className="font-semibold text-gray-700 text-sm">Quick Filters</span>
+          <Plus className="w-3.5 h-3.5 text-gray-400 cursor-pointer" />
+        </div>
+        <div className="divide-y text-sm">
+          {[
+            { icon: Star, label: "Starred Leads" },
+            { label: "Engaged Leads", secondary: true },
+            { label: "Leads who visited website in the last 7 days", secondary: true },
+            { label: "Leads with activity in last 7 days", secondary: true },
+            { label: "New Leads in last 7 days", secondary: true },
+          ].map((item, i) => (
+            <div key={i} className="px-4 py-3 hover:bg-gray-50 cursor-pointer text-[#00a1e1] flex items-center gap-2">
+              {item.icon && <item.icon className="w-4 h-4 text-yellow-500 fill-yellow-500" />}
+              <span className={cn(item.secondary && "text-[13px] leading-tight")}>{item.label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-3 mt-4">
+        <Button onClick={() => window.open("/sales/followups", "_blank")} variant="outline" className="w-full bg-white border-gray-300 text-gray-700 h-10 shadow-sm">
+          Open Follow Ups Grid
+        </Button>
+        <Button onClick={() => window.open("/SalesAddonsInfo", "_blank")} variant="outline" className="w-full bg-white border-gray-300 text-gray-700 h-10 shadow-sm">
+          View Portfolio/Resumes
+        </Button>
+      </div>
+    </div>
+  );
+});
 
 
 import SalesClosureDialog from "@/app/sales/_components/SalesClosureDialog";
 import ActivityView from "@/app/sales/_components/ActivityView";
 import CallStatsView from "@/app/sales/_components/CallStatsView";
+import RenewalsView from "@/app/sales/_components/RenewalsView";
+import { EmailLogView } from "@/app/_components/EmailLogView";
 import { ZoomPhoneEmbed } from "@/components/ZoomPhoneEmbed";
 
 export default function SalesPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [view, setView] = useState<"leads" | "activity" | "call_stats">("leads");
+  const [view, setView] = useState<"leads" | "activity" | "call_stats" | "renewals" | "email_logs">("leads");
   const [showSalesDialog, setShowSalesDialog] = useState(false);
   const [salesDialogMode, setSalesDialogMode] = useState<"all" | "first">("first"); // Default to 'first' for stage filter
 
@@ -158,7 +450,9 @@ export default function SalesPage() {
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
   const [followUpDialogOpen, setFollowUpDialogOpen] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
+  const [searchTerm, setSearchTerm] = useState(""); // Committed search (after debounce)
+  const [tempSearch, setTempSearch] = useState(""); // Immediate input state
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [sources, setSources] = useState<string[]>([]);
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [ownerFilter, setOwnerFilter] = useState<string>("all");
@@ -176,9 +470,7 @@ export default function SalesPage() {
   const [editingNote, setEditingNote] = useState(false);
   const [editedNote, setEditedNote] = useState("");
 
-  const [allLeads, setAllLeads] = useState<Lead[]>([]);
-  const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
-  const [kpiFilteredLeads, setKpiFilteredLeads] = useState<Lead[]>([]);
+  const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(true);
   const [userEmail, setUserEmail] = useState<string>("");
 
 
@@ -188,14 +480,14 @@ export default function SalesPage() {
 
   const zoomEmbedRef = useRef<ZoomPhoneEmbedHandle>(null);
 
-  const handlePhoneClick = async (phone: string) => {
+  const handlePhoneClick = useCallback(async (phone: string) => {
     if (!phone) return;
 
     // 1. Dial IMMEDIATELY so the user doesn't wait
     if (zoomEmbedRef.current) {
       zoomEmbedRef.current.dial(phone);
     } else {
-      window.location.href = `tel:${phone}`;
+      window.location.href = `tel:${phone} `;
     }
 
     // 2. Log to database in the background
@@ -214,7 +506,7 @@ export default function SalesPage() {
           assigned_to: userProfile?.full_name || "Unknown",
           current_stage: matchedLead?.current_stage || "Prospect",
           followup_date: now.toISOString().split("T")[0],
-          notes: `Outbound call by ${userProfile?.full_name || "Unknown"} to ${phone}`,
+          notes: `[Sales Call] Outbound call by ${userProfile?.full_name || "Unknown"} to ${phone}`,
           call_started_at: now.toISOString(),
         }]);
 
@@ -223,6 +515,40 @@ export default function SalesPage() {
     } catch (err) {
       console.error("Background call logging error:", err);
       // We don't alert the user here because the call is already dialing
+    }
+  }, [leads, userProfile]);
+
+  const handleOpenHistory = async (lead: Lead) => {
+    setSelectedLead(lead);
+    setIsChecking(true);
+    setHistoryDialogOpen(true);
+
+    try {
+      const { data, error } = await supabase
+        .from("call_history")
+        .select("*")
+        .eq("lead_id", lead.business_id)
+        .order("call_started_at", { ascending: false });
+
+      if (error) throw error;
+
+      // Update the selected lead with history
+      const updatedLead = {
+        ...lead, call_history: (data || []).map(item => ({
+          id: item.id,
+          date: item.call_started_at || item.followup_date,
+          stage: item.current_stage as SalesStage,
+          notes: item.notes,
+          duration: item.duration,
+          recording_url: item.recording_url,
+          assigned_to: item.assigned_to
+        }))
+      };
+      setSelectedLead(updatedLead);
+    } catch (err) {
+      console.error("Error fetching history:", err);
+    } finally {
+      setIsChecking(false);
     }
   };
 
@@ -402,86 +728,16 @@ export default function SalesPage() {
     console.log("Fetched profile:", profile);
 
     setUserProfile(profile);
-    fetchLeads(profile);   // pass profile here
-    fetchAllLeads(profile);    // FULL leads (KPI)
-
+    fetchLeads(profile);   // Fetch initial paginated leads
   };
 
 
-  const fetchAllLeads = async (profile: Profile) => {
-    let q = supabase
-      .from("leads")
-      .select(`
-      id, business_id, name, email, phone,
-      assigned_to, current_stage, status,
-      created_at, assigned_at
-    `)
-      .eq("status", "Assigned");
-
-    if (profile.roles === "Sales Associate") {
-      q = q.eq("assigned_to", profile.full_name);
-    }
-
-    const { data, error } = await q;
-
-    if (error) {
-      console.error("Error fetching all leads:", error);
-      return;
-    }
-
-    // ✅ FIX: Convert supabase rows → Lead type
-    const mapped = (data || []).map((row: any) => ({
-      id: row.id,
-      business_id: row.business_id,
-      client_name: row.name,         // ✔ map name → client_name
-      email: row.email,
-      phone: row.phone,
-      assigned_to: row.assigned_to,
-      current_stage: row.current_stage,
-      call_history: [],              // ✔ required by interface
-      created_at: row.created_at,
-      assigned_at: row.assigned_at
-    })) as Lead[];
-
-    setAllLeads(mapped);
-  };
-
-
-
-  useEffect(() => {
-    if (!allLeads) return;
-
-    const filtered = allLeads.filter((lead) => {
-      const matchesStage =
-        stageFilter === "all" || lead.current_stage === stageFilter;
-
-      const matchesDate =
-        !startDate || !endDate ||
-        (lead.assigned_at &&
-          dayjs(lead.assigned_at).isBetween(
-            dayjs(startDate).startOf("day"),
-            dayjs(endDate).endOf("day"),
-            null,
-            "[]"
-          ));
-
-      const matchesSearch =
-        !searchTerm.trim() ||
-        lead.business_id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        lead.client_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        lead.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        lead.phone?.toLowerCase().includes(searchTerm.toLowerCase());
-
-      return matchesStage && matchesDate && matchesSearch;
-    });
-
-    setKpiFilteredLeads(filtered);
-  }, [allLeads, stageFilter, startDate, endDate, searchTerm]);
+  // Removed fetchAllLeads and KPI useEffect as they were unused and resource-heavy
 
 
   useEffect(() => {
     if (userProfile) fetchLeads(userProfile);
-  }, [page, pageSize, sourceFilter, ownerFilter, stageFilter]);
+  }, [page, pageSize, sourceFilter, ownerFilter, stageFilter, debouncedSearchTerm]);
 
 
   const fetchLeads = async (profile: Profile) => {
@@ -508,6 +764,12 @@ export default function SalesPage() {
         countQuery = countQuery.eq("current_stage", stageFilter);
       }
 
+      if (debouncedSearchTerm.trim()) {
+        const term = debouncedSearchTerm.trim();
+        const bidPart = term.toUpperCase().startsWith("AWL-") ? `business_id.eq.${term}` : `business_id.ilike.%${term}%`;
+        countQuery = countQuery.or(`name.ilike.%${term}%,phone.ilike.%${term}%,${bidPart},email.ilike.%${term}%,assigned_to.ilike.%${term}%`);
+      }
+
       const { count } = await countQuery;
       setTotalRecords(count ?? 0);
 
@@ -518,10 +780,10 @@ export default function SalesPage() {
       let query = supabase
         .from("leads")
         .select(`
-    id, business_id, name, email, phone,
-    assigned_to, current_stage, status,
-    created_at, assigned_at, source
-  `)
+id, business_id, name, email, phone,
+  assigned_to, current_stage, status,
+  created_at, assigned_at, source
+    `)
         .eq("status", "Assigned")
         .order("assigned_at", { ascending: false })   // 👈 NEW SORT
         .range(from, to);
@@ -541,6 +803,12 @@ export default function SalesPage() {
 
       if (stageFilter !== "all") {
         query = query.eq("current_stage", stageFilter);
+      }
+
+      if (debouncedSearchTerm.trim()) {
+        const term = debouncedSearchTerm.trim();
+        const bidPart = term.toUpperCase().startsWith("AWL-") ? `business_id.eq.${term}` : `business_id.ilike.%${term}%`;
+        query = query.or(`name.ilike.%${term}%,phone.ilike.%${term}%,${bidPart},email.ilike.%${term}%,assigned_to.ilike.%${term}%`);
       }
 
       const { data, error } = await query;
@@ -577,14 +845,15 @@ export default function SalesPage() {
       return;
     }
     try {
+      const bidPart = term.toUpperCase().startsWith("AWL-") ? `business_id.eq.${term}` : `business_id.ilike.%${term}%`;
       const { data, error } = await supabase
         .from("leads")
         .select(`
-        id, business_id, name, email, phone,
-        assigned_to, assigned_to_email, current_stage,
-        status, created_at, assigned_at, source
-      `)
-        .or(`name.ilike.%${term}%,email.ilike.%${term}%,phone.ilike.%${term}%,business_id.ilike.%${term}%,source.ilike.%${term}%`)
+id, business_id, name, email, phone,
+  assigned_to, assigned_to_email, current_stage,
+  status, created_at, assigned_at, source
+    `)
+        .or(`name.ilike.%${term}%,email.ilike.%${term}%,phone.ilike.%${term}%,${bidPart},assigned_to.ilike.%${term}%,source.ilike.%${term}%`)
         .eq("status", "Assigned")
         .order("assigned_at", { ascending: false });
 
@@ -605,6 +874,7 @@ export default function SalesPage() {
         call_history: [],
         created_at: lead.created_at,
         assigned_at: lead.assigned_at,
+        updated_at: lead.updated_at,
         source: lead.source,
       }));
 
@@ -620,12 +890,14 @@ export default function SalesPage() {
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleSearchChange = (val: string) => {
-    setSearchTerm(val);
+    setTempSearch(val); // Update input field immediately without re-rendering the whole page content
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
 
     searchTimeoutRef.current = setTimeout(() => {
-      searchLeadsGlobally(val);
-    }, 400); // 400ms debounce
+      setSearchTerm(val);
+      setDebouncedSearchTerm(val);
+      // searchLeadsGlobally(val); // Removed as fetchLeads now handles searchTerm via useEffect
+    }, 400);
   };
 
 
@@ -778,24 +1050,26 @@ export default function SalesPage() {
   };
 
 
-  const filteredLeads = leads.filter((lead) => {
-    const matchesStage = stageFilter === "all" || lead.current_stage === stageFilter;
-    const matchesSource = sourceFilter === "all" || lead.source === sourceFilter;
+  const filteredLeads = useMemo(() => {
+    // Only proceed filtering if we have leads.
+    // Optimizing ISO string comparisons to avoid dayjs object creation in loop.
+    const startIso = startDate ? dayjs(startDate).startOf("day").toISOString() : null;
+    const endIso = endDate ? dayjs(endDate).endOf("day").toISOString() : null;
 
-    const matchesDate =
-      !startDate || !endDate ||
-      (lead.assigned_at &&
-        dayjs(lead.assigned_at).isBetween(
-          dayjs(startDate).startOf("day"),
-          dayjs(endDate).endOf("day"),
-          null,
-          "[]"
-        ));
+    return leads.filter((lead) => {
+      const matchesStage = stageFilter === "all" || lead.current_stage === stageFilter;
+      const matchesSource = sourceFilter === "all" || lead.source === sourceFilter;
 
-    return matchesStage && matchesDate;
-  });
+      let matchesDate = true;
+      if (startIso && endIso && lead.assigned_at) {
+        matchesDate = lead.assigned_at >= startIso && lead.assigned_at <= endIso;
+      }
 
-  const handleStageUpdate = async (leadId: string, newStage: SalesStage) => {
+      return matchesStage && matchesSource && matchesDate;
+    });
+  }, [leads, stageFilter, sourceFilter, startDate, endDate]);
+
+  const handleStageUpdate = useCallback(async (leadId: string, newStage: SalesStage) => {
     const lead = leads.find((l) => l.id === leadId);
     if (!lead) return;
 
@@ -812,9 +1086,22 @@ export default function SalesPage() {
     }
 
     if (newStage === "sale done") {
+      const updatedLead = { ...lead, current_stage: newStage };
+      await supabase.from("leads").update({ current_stage: newStage }).eq("id", leadId);
+
+      await supabase.from("call_history").insert([{
+        lead_id: lead.business_id,
+        email: lead.email,
+        phone: lead.phone,
+        assigned_to: userProfile?.full_name || "Unknown",
+        current_stage: newStage,
+        followup_date: todayLocalYMD(),
+        notes: `Stage changed to ${newStage}`
+      }]);
+
+      setLeads((prev) => prev.map((l) => (l.id === leadId ? updatedLead : l)));
 
       window.open(`/SaleUpdate/${lead.business_id}?mode=new`, "_blank");
-
       return;
     }
 
@@ -830,7 +1117,7 @@ export default function SalesPage() {
       lead_id: lead.business_id,
       email: lead.email,
       phone: lead.phone,
-      assigned_to: lead.assigned_to,
+      assigned_to: userProfile?.full_name || "Unknown",
       current_stage: newStage,
       // followup_date: new Date().toISOString().split("T")[0],
       followup_date: todayLocalYMD(),
@@ -839,7 +1126,7 @@ export default function SalesPage() {
     }]);
 
     setLeads((prev) => prev.map((l) => (l.id === leadId ? updatedLead : l)));
-  };
+  }, [leads, userProfile]); // Added userProfile to dependencies for handleStageUpdate
 
   const handleFollowUpSubmit = async () => {
     if (!selectedLead || !pendingStageUpdate) return;
@@ -848,7 +1135,7 @@ export default function SalesPage() {
       lead_id: selectedLead.business_id,
       email: selectedLead.email,
       phone: selectedLead.phone,
-      assigned_to: selectedLead.assigned_to,
+      assigned_to: userProfile?.full_name || "Unknown",
       current_stage: pendingStageUpdate.stage,
       followup_date: followUpData.follow_up_date,
       notes: followUpData.notes
@@ -914,39 +1201,7 @@ export default function SalesPage() {
   };
 
   const totalLeadsCount = filteredLeads.length;
-
-  const stageCounts = filteredLeads.reduce((acc, l) => {
-    acc[l.current_stage] = (acc[l.current_stage] || 0) as number + 1;
-    return acc;
-  }, {} as Record<SalesStage, number>);
-
-
-  const prospectCount = stageCounts["Prospect"] ?? 0;
-  const dnpCount = stageCounts["DNP"] ?? 0;
-  const convoDoneCount = stageCounts["Conversation Done"] ?? 0;
-  const targetCount = stageCounts["Target"] ?? 0;
-  const saleDoneCount = stageCounts["sale done"] ?? 0;
-
-  const kpiFilteredTotal = kpiFilteredLeads.length;
-  const kpiFilteredProspect = kpiFilteredLeads.filter(l => l.current_stage === "Prospect").length;
-  const kpiFilteredDnp = kpiFilteredLeads.filter(l => l.current_stage === "DNP").length;
-  const kpiFilteredConvo = kpiFilteredLeads.filter(l => l.current_stage === "Conversation Done").length;
-  const kpiFilteredTarget = kpiFilteredLeads.filter(l => l.current_stage === "Target").length;
-  const kpiFilteredSale = kpiFilteredLeads.filter(l => l.current_stage === "sale done").length;
-
-
-  const actualTotal = allLeads.length;
-  const actualProspect = allLeads.filter(l => l.current_stage === "Prospect").length;
-  const actualDnp = allLeads.filter(l => l.current_stage === "DNP").length;
-  const actualConvo = allLeads.filter(l => l.current_stage === "Conversation Done").length;
-  const actualTarget = allLeads.filter(l => l.current_stage === "Target").length;
-  const actualSale = allLeads.filter(l => l.current_stage === "sale done").length;
-
-
-  // If you still want an “Others” bucket using the same list:
-  const kpiOthersCount = kpiFilteredTotal - (kpiFilteredProspect + kpiFilteredDnp + kpiFilteredConvo + kpiFilteredTarget + + kpiFilteredSale);
-
-  const othersCount = totalLeadsCount - (prospectCount + dnpCount + convoDoneCount + targetCount + saleDoneCount);
+  // KPI Stats removed - redundant on this page and causing high CPU usage.
   const fetchCallHistory = async (leadId: string) => {
     const lead = leads.find((l) => l.id === leadId);
     if (!lead) return [];
@@ -1058,6 +1313,8 @@ export default function SalesPage() {
         invoice_url: "",
         no_of_job_applications: null,
         badge_value: saleData.badge_value ?? null,      // ✅ optional here
+        account_assigned_name: userProfile?.full_name || "Sales",
+        account_assigned_email: userEmail || null,
 
       });
       if (salesInsertError) throw salesInsertError;
@@ -1073,7 +1330,7 @@ export default function SalesPage() {
       alert("✅ Client onboarded successfully!");
     } catch (err: any) {
       console.error("❌ Error onboarding client:", err?.message || err);
-      alert(`Failed to onboard client: ${err?.message || "Unknown error"}`);
+      alert(`Failed to onboard client: ${err?.message || "Unknown error"} `);
     }
   }
 
@@ -1109,7 +1366,7 @@ export default function SalesPage() {
       for (const table of tables) {
         const { data: tableData, error } = await supabase.from(table).select("*");
         if (error) {
-          console.error(`Error fetching data from ${table}:`, error);
+          console.error(`Error fetching data from ${table}: `, error);
           continue;
         }
         data[table] = tableData;
@@ -1122,7 +1379,7 @@ export default function SalesPage() {
       for (const table in data) {
         if (data[table]) {
           const ws = XLSX.utils.json_to_sheet(data[table]);
-          // Excel sheet names cannot exceed 31 characters. 
+          // Excel sheet names cannot exceed 31 characters.
           // We trim from the left to keep the more descriptive right side.
           const sheetName = table.length > 31 ? table.slice(-31) : table;
           XLSX.utils.book_append_sheet(wb, ws, sheetName);
@@ -1148,32 +1405,35 @@ export default function SalesPage() {
     (saleData.base_value * cycleMultiplier(saleData.subscription_cycle)).toFixed(2)
   );
 
-  const sortedLeads = [...filteredLeads].sort((a, b) => {
+  const sortedLeads = useMemo(() => {
+    const leadsToSort = [...filteredLeads];
     const { key, direction } = sortConfig;
-    if (!key) return 0;
+    if (!key) return leadsToSort;
 
-    let aValue: any = a[key];
-    let bValue: any = b[key];
+    return leadsToSort.sort((a, b) => {
+      let aValue: any = a[key as keyof Lead];
+      let bValue: any = b[key as keyof Lead];
 
-    // 📅 Date fields
-    if (key === 'created_at' || key === 'assigned_at') {
-      const aTime = aValue ? new Date(aValue).getTime() : 0;
-      const bTime = bValue ? new Date(bValue).getTime() : 0;
-      return direction === 'asc' ? aTime - bTime : bTime - aTime;
-    }
+      // 📅 Date fields
+      if (key === 'created_at' || key === 'assigned_at') {
+        const aTime = aValue ? new Date(aValue).getTime() : 0;
+        const bTime = bValue ? new Date(bValue).getTime() : 0;
+        return direction === 'asc' ? aTime - bTime : bTime - aTime;
+      }
 
-    // 🔤 String fields
-    if (typeof aValue === 'string' && typeof bValue === 'string') {
+      // 🔤 String fields
+      if (typeof aValue === 'string' && typeof bValue === 'string') {
+        return direction === 'asc'
+          ? aValue.localeCompare(bValue)
+          : bValue.localeCompare(aValue);
+      }
+
+      // 🔢 Number fields fallback
       return direction === 'asc'
-        ? aValue.localeCompare(bValue)
-        : bValue.localeCompare(aValue);
-    }
-
-    // 🔢 Number fields fallback
-    return direction === 'asc'
-      ? (aValue || 0) - (bValue || 0)
-      : (bValue || 0) - (aValue || 0);
-  });
+        ? (aValue || 0) - (bValue || 0)
+        : (bValue || 0) - (aValue || 0);
+    });
+  }, [filteredLeads, sortConfig]);
 
   const fetchSalesClosureCount = async () => {
     const { count, error } = await supabase
@@ -1188,60 +1448,60 @@ export default function SalesPage() {
   return (
     <ProtectedRoute allowedRoles={["Sales", "Sales Associate", "Super Admin", "Admin"]}>
       <style jsx global>{`
-        .premium-font {
-          -webkit-font-smoothing: antialiased;
-          -moz-osx-font-smoothing: grayscale;
-        }
+  .premium - font {
+  -webkit - font - smoothing: antialiased;
+  -moz - osx - font - smoothing: grayscale;
+}
 
-        .text-brighter {
-          color: #0f172a !important; /* Slate 900 */
-        }
+        .text - brighter {
+  color: #0f172a!important; /* Slate 900 */
+}
 
-        .text-smooth {
-          letter-spacing: -0.01em;
-          line-height: 1.5;
-        }
+        .text - smooth {
+  letter - spacing: -0.01em;
+  line - height: 1.5;
+}
 
-        .sales-table-header {
-          background-color: #f8fafc !important; /* Slate 50 */
-          border-bottom: 2px solid #e2e8f0 !important;
-        }
+        .sales - table - header {
+  background - color: #f8fafc!important; /* Slate 50 */
+  border - bottom: 2px solid #e2e8f0!important;
+}
 
-        .lead-name-link {
-          color: #0284c7 !important; /* Sky 600 */
-          font-weight: 500 !important;
-          transition: all 0.2s ease;
-        }
-        
-        .lead-name-link:hover {
-          color: #0369a1 !important; /* Sky 700 */
-          text-decoration: underline;
-        }
+        .lead - name - link {
+  color: #0284c7!important; /* Sky 600 */
+  font - weight: 500!important;
+  transition: all 0.2s ease;
+}
+
+        .lead - name - link:hover {
+  color: #0369a1!important; /* Sky 700 */
+  text - decoration: underline;
+}
 
         /* Global Table Text Enhancements */
-        .premium-font table td {
-          color: #334155 !important; /* Slate 700 - Brighter than gray */
-          font-weight: 400;
-          -webkit-font-smoothing: antialiased;
-        }
+        .premium - font table td {
+  color: #334155!important; /* Slate 700 - Brighter than gray */
+  font - weight: 400;
+  -webkit - font - smoothing: antialiased;
+}
 
-        .premium-font table td:nth-child(3) {
-          color: #0f172a !important; /* Slate 900 - Brighter for score */
-          font-weight: 600 !important;
-        }
+        .premium - font table td: nth - child(3) {
+  color: #0f172a!important; /* Slate 900 - Brighter for score */
+  font - weight: 600!important;
+}
 
-        .premium-font table thead th {
-          color: #475569 !important; /* Slate 600 */
-          font-weight: 700 !important;
-          letter-spacing: 0.05em;
-        }
-      `}</style>
+        .premium - font table thead th {
+  color: #475569!important; /* Slate 600 */
+  font - weight: 700!important;
+  letter - spacing: 0.05em;
+}
+`}</style>
       <SidebarProvider className="premium-font">
         <div className="flex min-h-screen w-full bg-[#f1f4f9]">
           <AppSidebar />
           <div className="flex-1 flex flex-col min-h-screen overflow-hidden text-gray-800">
             <Header
-              searchTerm={searchTerm}
+              searchTerm={tempSearch}
               onSearchChange={handleSearchChange}
             >
               <div className="flex items-center gap-2 ml-4">
@@ -1258,6 +1518,14 @@ export default function SalesPage() {
                     <BarChart className="w-4 h-4 text-gray-400" /> <span className="hidden lg:inline">View Call Stats</span>
                   </Button>
                 )}
+
+                <Button variant="outline" size="sm" onClick={() => setView("renewals")} className="h-8 gap-2 border-orange-200 text-orange-600 font-medium bg-orange-50/50 hover:bg-orange-50">
+                  <RefreshCw className="w-4 h-4 text-orange-500" /> <span className="hidden lg:inline">Renewals</span>
+                </Button>
+
+                <Button variant="outline" size="sm" onClick={() => setView("email_logs")} className="h-8 gap-2 border-blue-200 text-blue-600 font-medium bg-blue-50/50 hover:bg-blue-50">
+                  <Mail className="w-4 h-4 text-blue-500" /> <span className="hidden lg:inline">Email History</span>
+                </Button>
               </div>
             </Header>
             <div className="flex flex-1 overflow-hidden">
@@ -1265,7 +1533,13 @@ export default function SalesPage() {
               <div className="flex-1 flex flex-col overflow-y-auto px-6 py-4">
                 <div className="flex items-center justify-between mb-6">
                   <div className="flex items-center gap-2">
-                    <h1 className="text-2xl font-semibold text-slate-800 tracking-tight">{view === "leads" ? "Manage Leads" : view === "call_stats" ? "Zoom Call Statistics" : "Activity History"}</h1>
+                    <h1 className="text-2xl font-semibold text-slate-800 tracking-tight">
+                      {view === "leads" ? "Manage Leads" :
+                        view === "call_stats" ? "Zoom Call Statistics" :
+                          view === "renewals" ? "Subscription Renewals" :
+                            view === "email_logs" ? "Communication History" :
+                              "Activity History"}
+                    </h1>
                     <div className="text-gray-400 cursor-pointer hover:text-gray-600">
                       <ExternalLink className="w-4 h-4" />
                     </div>
@@ -1287,34 +1561,45 @@ export default function SalesPage() {
                   <ActivityView userProfile={userProfile} onBack={() => setView("leads")} />
                 ) : view === "call_stats" ? (
                   <CallStatsView />
+                ) : view === "renewals" ? (
+                  <RenewalsView />
+                ) : view === "email_logs" ? (
+                  <EmailLogView filterEmail={userEmail} />
                 ) : (
                   <>
 
                     {/* Filter Section - LeadSquared Style */}
-                    <div className="bg-white border rounded shadow-sm mb-6">
-                      {/* Row 1: Search & Base Buttons */}
-                      {/* Row 1: Tags & Panel Toggle */}
-                      <div className="p-3 border-b flex items-center justify-between">
+                    <div className="bg-white border rounded shadow-sm mb-4">
+                      {/* Integrated Header and Tag Row */}
+                      <div className="px-4 py-2 border-b flex items-center justify-between bg-white">
                         <div className="flex items-center gap-3">
-                          <Button variant="outline" size="sm" className="h-8 gap-2 border-gray-300 font-normal">
-                            <Tag className="w-4 h-4 text-gray-500" /> Tags
+                          <Button variant="outline" size="sm" className="h-8 gap-2 border-gray-300 font-normal bg-white">
+                            <Tag className="w-3.5 h-3.5 text-gray-500" /> Tags
+                          </Button>
+                          <div className="h-4 w-px bg-gray-200 mx-1" />
+                          <Button
+                            variant="ghost"
+                            className="h-8 text-xs text-red-500 hover:text-red-600 p-0 px-2"
+                            onClick={() => { setStartDate(null); setEndDate(null); setStageFilter("all"); setSourceFilter("all"); setOwnerFilter("all"); }}
+                          >
+                            Reset Filters
                           </Button>
                         </div>
 
                         <div
-                          className="text-sm text-[#00a1e1] hover:underline cursor-pointer flex items-center gap-1 font-medium"
+                          className="text-xs text-[#00a1e1] hover:underline cursor-pointer flex items-center gap-1 font-medium"
                           onClick={() => setIsRightPanelCollapsed(!isRightPanelCollapsed)}
                         >
-                          {isRightPanelCollapsed ? "Expand Panel" : "Collapse Panel"} <ChevronRight className={cn("w-4 h-4 transition-transform", isRightPanelCollapsed && "rotate-180")} />
+                          {isRightPanelCollapsed ? "Expand Panel" : "Collapse Panel"} <ChevronRight className={cn("w-3.5 h-3.5 transition-transform", isRightPanelCollapsed && "rotate-180")} />
                         </div>
                       </div>
 
-                      {/* Row 2: Advanced Select Filters */}
-                      <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-x-8 gap-y-4 bg-[#f8f9fb]">
-                        <div className="space-y-1 flex-1">
-                          <Label className="text-xs text-gray-500 font-normal uppercase">Lead Stage</Label>
+                      {/* Balanced Filter Row */}
+                      <div className="p-3 flex flex-wrap items-center gap-x-8 gap-y-4 bg-[#f8f9fb]/50">
+                        <div className="flex flex-col gap-1.5 min-w-[160px]">
+                          <Label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider">Lead Stage</Label>
                           <Select value={stageFilter} onValueChange={setStageFilter}>
-                            <SelectTrigger className="h-8 text-xs border-gray-300 bg-white">
+                            <SelectTrigger className="h-8 text-xs border-gray-300 bg-white shadow-none">
                               <SelectValue placeholder="All" />
                             </SelectTrigger>
                             <SelectContent className="z-50">
@@ -1323,10 +1608,11 @@ export default function SalesPage() {
                             </SelectContent>
                           </Select>
                         </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs text-gray-500 font-normal uppercase">Lead Source</Label>
+
+                        <div className="flex flex-col gap-1.5 min-w-[160px]">
+                          <Label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider">Lead Source</Label>
                           <Select value={sourceFilter} onValueChange={setSourceFilter}>
-                            <SelectTrigger className="h-8 text-xs border-gray-300 bg-white">
+                            <SelectTrigger className="h-8 text-xs border-gray-300 bg-white shadow-none">
                               <SelectValue placeholder="All" />
                             </SelectTrigger>
                             <SelectContent className="z-50">
@@ -1337,10 +1623,10 @@ export default function SalesPage() {
                         </div>
 
                         {userProfile?.roles === "Admin" && (
-                          <div className="space-y-1">
-                            <Label className="text-xs text-gray-500 font-normal uppercase">Owner</Label>
+                          <div className="flex flex-col gap-1.5 min-w-[160px]">
+                            <Label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider">Owner</Label>
                             <Select value={ownerFilter} onValueChange={setOwnerFilter}>
-                              <SelectTrigger className="h-8 text-xs border-gray-300 bg-white">
+                              <SelectTrigger className="h-8 text-xs border-gray-300 bg-white shadow-none">
                                 <SelectValue placeholder="Any" />
                               </SelectTrigger>
                               <SelectContent>
@@ -1350,244 +1636,64 @@ export default function SalesPage() {
                             </Select>
                           </div>
                         )}
-                        <div className="space-y-1 lg:col-span-2">
-                          <Label className="text-xs text-gray-500 font-normal uppercase">Date Range</Label>
+
+                        <div className="flex flex-col gap-1.5 flex-1 min-w-[320px]">
+                          <Label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider">Date Filters</Label>
                           <div className="flex gap-2">
                             <Select defaultValue="last_activity">
-                              <SelectTrigger className="h-8 text-xs border-gray-300 bg-white flex-1">
-                                <SelectValue placeholder="Last Activity" />
+                              <SelectTrigger className="h-8 text-xs border-gray-300 bg-white shadow-none w-[110px] shrink-0">
+                                <SelectValue placeholder="Activity" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="last_activity">Last Activity</SelectItem>
-                                <SelectItem value="assigned_at">Assigned At</SelectItem>
-                                <SelectItem value="created_at">Created At</SelectItem>
+                                <SelectItem value="last_activity">Activity</SelectItem>
+                                <SelectItem value="assigned_at">Assigned</SelectItem>
+                                <SelectItem value="created_at">Created</SelectItem>
                               </SelectContent>
                             </Select>
-                            <div className="flex items-center gap-2 flex-1">
+                            <div className="flex items-center gap-1.5 flex-1">
                               <Input
                                 type="date"
                                 value={startDate || ""}
                                 onChange={(e) => setStartDate(e.target.value)}
-                                className="h-8 text-xs border-gray-300 bg-white"
+                                className="h-8 text-[11px] border-gray-300 bg-white px-2 shadow-none flex-1"
                               />
-                              <span className="text-gray-400">→</span>
+                              <span className="text-gray-400 text-xs text-center min-w-[8px]">→</span>
                               <Input
                                 type="date"
                                 value={endDate || ""}
                                 onChange={(e) => setEndDate(e.target.value)}
-                                className="h-8 text-xs border-gray-300 bg-white"
+                                className="h-8 text-[11px] border-gray-300 bg-white px-2 shadow-none flex-1"
                               />
                             </div>
                           </div>
                         </div>
-                        <div className="flex items-end mb-1">
-                          <Button
-                            variant="ghost"
-                            className="h-8 text-xs text-red-500 hover:text-red-600 p-0"
-                            onClick={() => { setStartDate(null); setEndDate(null); setStageFilter("all"); setSourceFilter("all"); setOwnerFilter("all"); }}
-                          >
-                            Reset Filters
-                          </Button>
-                        </div>
                       </div>
                     </div>
 
-                    {/* Leads Table */}
-                    <div className="bg-white border rounded shadow-sm overflow-hidden flex flex-col min-h-[400px]">
-                      <div className="overflow-x-auto">
-                        <Table className="text-sm">
-                          <TableHeader className="sales-table-header">
-                            <TableRow className="hover:bg-transparent">
-                              <TableHead className="w-10 px-4">
-                                <input type="checkbox" className="rounded" />
-                              </TableHead>
-                              <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider">Lead Name</TableHead>
-                              <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider cursor-pointer" onClick={() => handleSort("business_id")}>
-                                <div className="flex items-center gap-1">
-                                  Lead Score {sortConfig.key === "business_id" && (sortConfig.direction === "asc" ? "↓" : "↑")}
-                                </div>
-                              </TableHead>
-                              <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider w-[160px]">Lead Stage</TableHead>
-                              <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider">Owner</TableHead>
-                              <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider">Modified On</TableHead>
-                              <TableHead className="font-bold text-slate-700 text-center uppercase text-[11px] tracking-wider w-20">Actions</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {sortedLeads.length === 0 ? (
-                              <TableRow>
-                                <TableCell colSpan={7} className="h-32 text-center text-gray-400 italic">No leads matches your criteria.</TableCell>
-                              </TableRow>
-                            ) : (
-                              sortedLeads.map((item, idx) => {
-                                // Dummy Lead Score logic for demo
-                                const leadScore = item.current_stage === "sale done" ? 100 : Math.max(2, 26 - (idx * 3));
-
-                                return (
-                                  <TableRow key={item.id} className="group hover:bg-[#f5faff] transition-colors border-b last:border-0 h-12">
-                                    <TableCell className="px-4">
-                                      <input type="checkbox" className="rounded" />
-                                    </TableCell>
-                                    <TableCell>
-                                      <div className="flex items-center gap-2">
-                                        <div className="flex items-center gap-1 opacity-40 group-hover:opacity-100 transition-opacity">
-                                          <Star className="w-4 h-4 text-gray-400 cursor-pointer hover:text-yellow-500" />
-                                          <div className="w-1.5 h-1.5 rounded-full bg-gray-300" />
-                                        </div>
-                                        <span
-                                          className="lead-name-link text-smooth hover:underline cursor-pointer"
-                                          onClick={() => window.open(`/leads/${item.business_id}`, "_blank")}
-                                        >
-                                          {item.client_name}
-                                        </span>
-                                      </div>
-                                    </TableCell>
-                                    <TableCell className="font-medium text-gray-700 pl-8">
-                                      {leadScore}
-                                    </TableCell>
-                                    <TableCell className="whitespace-nowrap">
-                                      <Select
-                                        value={item.current_stage}
-                                        onValueChange={(val: SalesStage) => handleStageUpdate(item.id, val)}
-                                      >
-                                        <SelectTrigger className="w-fit h-7 border-none bg-transparent hover:bg-gray-100/50 p-1 shadow-none transition-all focus:ring-0">
-                                          <div className="flex items-center gap-1.5">
-                                            <Badge className={cn("rounded-md px-2.5 py-0.5 text-[12px] font-medium border shadow-sm transition-all whitespace-nowrap", getStageColor(item.current_stage || "Prospect"))}>
-                                              {item.current_stage}
-                                            </Badge>
-                                            <ChevronDown className="w-3 h-3 text-gray-400 group-hover:text-gray-600" />
-                                          </div>
-                                        </SelectTrigger>
-                                        <SelectContent className="min-w-[160px]">
-                                          {salesStages
-                                            .filter((stage) => {
-                                              if (item.current_stage !== "Prospect" && stage === "Prospect") return false;
-                                              return true;
-                                            })
-                                            .map((stage) => (
-                                              <SelectItem key={stage} value={stage} className="cursor-pointer">
-                                                <Badge className={cn("rounded-md px-2 py-0.5 text-[11px] font-medium border shadow-none whitespace-nowrap", getStageColor(stage))}>
-                                                  {stage}
-                                                </Badge>
-                                              </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                      </Select>
-                                    </TableCell>
-                                    <TableCell className="text-gray-600 whitespace-nowrap">
-                                      {item.assigned_to || "—"}
-                                    </TableCell>
-                                    <TableCell className="text-gray-500 whitespace-nowrap text-[12px]">
-                                      {item.assigned_at ? dayjs(item.assigned_at).format("MM/DD/YY hh:mm A") : "—"}
-                                    </TableCell>
-                                    <TableCell className="text-center w-28">
-                                      <div className="flex items-center justify-center gap-2">
-                                        <div
-                                          title="Call Lead"
-                                          className="p-1.5 bg-blue-50 text-blue-600 rounded-md cursor-pointer hover:bg-blue-600 hover:text-white transition-all shadow-sm"
-                                          onClick={() => handlePhoneClick(item.phone)}
-                                        >
-                                          <Phone className="w-3.5 h-3.5" />
-                                        </div>
-                                        <div
-                                          title="View Details"
-                                          className="p-1.5 bg-gray-50 text-gray-600 rounded-md cursor-pointer hover:bg-gray-800 hover:text-white transition-all shadow-sm"
-                                          onClick={() => {
-                                            const win = window.open(`/leads/${item.business_id}`, "_blank");
-                                            win?.focus();
-                                          }}
-                                        >
-                                          <Eye className="w-3.5 h-3.5" />
-                                        </div>
-                                        {userProfile?.roles === "Admin" && (
-                                          <div
-                                            title="Delete"
-                                            className="p-1.5 bg-red-50 text-red-600 rounded-md cursor-pointer hover:bg-red-600 hover:text-white transition-all shadow-sm"
-                                          >
-                                            <Trash2 className="w-3.5 h-3.5" />
-                                          </div>
-                                        )}
-                                      </div>
-                                    </TableCell>
-                                  </TableRow>
-                                );
-                              })
-                            )}
-                          </TableBody>
-                        </Table>
-                      </div>
-
-                      {/* Pagination Section */}
-                      <div className="p-3 border-t bg-gray-50 flex items-center justify-between text-sm text-gray-500">
-                        <div className="flex items-center gap-4">
-                          <span>Page {page} of {Math.ceil(totalRecords / pageSize)}</span>
-                          <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(1); }}>
-                            <SelectTrigger className="h-7 w-20 text-xs border-gray-300">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {[30, 50, 100, 200, 500].map(v => <SelectItem key={v} value={String(v)}>{v}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="flex gap-1">
-                          <Button variant="outline" size="sm" className="h-8 w-8 p-0" disabled={page === 1} onClick={() => setPage(p => p - 1)}><ChevronLeft className="w-4 h-4" /></Button>
-                          <Button variant="outline" size="sm" className="h-8 w-8 p-0 text-white bg-[#00a1e1] border-[#00a1e1] hover:bg-[#0081b5]">{page}</Button>
-                          <Button variant="outline" size="sm" className="h-8 w-8 p-0" disabled={page === Math.ceil(totalRecords / pageSize)} onClick={() => setPage(p => p + 1)}><ChevronRight className="w-4 h-4" /></Button>
-                        </div>
-                      </div>
-                    </div>
+                    <LeadsTable
+                      leads={sortedLeads}
+                      sortConfig={sortConfig}
+                      handleSort={handleSort}
+                      handleStageUpdate={handleStageUpdate}
+                      handlePhoneClick={handlePhoneClick}
+                      userProfile={userProfile}
+                      page={page}
+                      pageSize={pageSize}
+                      totalRecords={totalRecords}
+                      setPage={setPage}
+                      setPageSize={setPageSize}
+                      isRightPanelCollapsed={isRightPanelCollapsed}
+                      onOpenHistory={handleOpenHistory}
+                    />
                   </>
                 )}
               </div>
 
-              {/* Right Sidebar - Action Panel */}
-              {view === "leads" && !isRightPanelCollapsed && (
-                <div className="w-80 bg-[#f1f4f9] border-l border-gray-200 overflow-y-auto px-5 py-6 space-y-6">
-                  <div className="space-y-3">
-                    <Button onClick={() => setOnboardDialogOpen(true)} size="lg" className="w-full bg-[#ae1919] hover:bg-[#8e1414] text-white rounded-sm font-semibold text-base py-6 shadow-sm flex items-center gap-3">
-                      <Plus className="w-5 h-5" /> Add New Lead
-                    </Button>
-                    <Button size="lg" className="w-full bg-[#ae1919] hover:bg-[#8e1414] text-white rounded-sm font-semibold text-base py-6 shadow-sm flex items-center gap-3">
-                      <Download className="w-5 h-5" /> Import Leads
-                    </Button>
-                    <Button size="lg" className="w-full bg-[#ae1919] hover:bg-[#8e1414] text-white rounded-sm font-semibold text-base py-6 shadow-sm flex items-center gap-3">
-                      <Tag className="w-5 h-5" /> Import Lead Tags
-                    </Button>
-                  </div>
-
-                  {/* Quick Filters - LeadSquared Style */}
-                  <div className="bg-white border rounded shadow-sm overflow-hidden mt-8">
-                    <div className="p-3 border-b flex justify-between items-center bg-gray-50/50">
-                      <span className="font-semibold text-gray-700 text-sm">Quick Filters</span>
-                      <Plus className="w-3.5 h-3.5 text-gray-400 cursor-pointer" />
-                    </div>
-                    <div className="divide-y text-sm">
-                      {[
-                        { icon: Star, label: "Starred Leads" },
-                        { label: "Engaged Leads", secondary: true },
-                        { label: "Leads who visited website in the last 7 days", secondary: true },
-                        { label: "Leads with activity in last 7 days", secondary: true },
-                        { label: "New Leads in last 7 days", secondary: true },
-                      ].map((item, i) => (
-                        <div key={i} className="px-4 py-3 hover:bg-gray-50 cursor-pointer text-[#00a1e1] flex items-center gap-2">
-                          {item.icon && <item.icon className="w-4 h-4 text-yellow-500 fill-yellow-500" />}
-                          <span className={cn(item.secondary && "text-[13px] leading-tight")}>{item.label}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="space-y-3 mt-4">
-                    <Button onClick={() => window.open("/sales/followups", "_blank")} variant="outline" className="w-full bg-white border-gray-300 text-gray-700 h-10 shadow-sm">
-                      Open Follow Ups Grid
-                    </Button>
-                    <Button onClick={() => window.open("/SalesAddonsInfo", "_blank")} variant="outline" className="w-full bg-white border-gray-300 text-gray-700 h-10 shadow-sm">
-                      View Portfolio/Resumes
-                    </Button>
-                  </div>
-                </div>
-              )}
+              <RightActionPanel
+                isCollapsed={isRightPanelCollapsed || view !== "leads"}
+                onAddLead={() => setOnboardDialogOpen(true)}
+                userProfile={userProfile}
+              />
             </div>
           </div>
         </div>
@@ -1743,6 +1849,104 @@ export default function SalesPage() {
               {isSubmitting ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Submitting...</> : "Submit"}
             </Button>
 
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Shared Call History Dialog */}
+      <Dialog open={historyDialogOpen} onOpenChange={setHistoryDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <HistoryIcon className="w-5 h-5 text-indigo-500" />
+              Shared Interaction History — {selectedLead?.client_name}
+            </DialogTitle>
+            <DialogDescription>
+              Complete history of interactions from both Sales and Finance teams.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-4 max-h-[60vh] overflow-y-auto space-y-4 pr-2">
+            {isChecking ? (
+              <div className="flex justify-center p-8"><Loader2 className="animate-spin h-8 w-8 text-blue-500" /></div>
+            ) : selectedLead?.call_history && selectedLead.call_history.length > 0 ? (
+              selectedLead.call_history.map((call) => (
+                <div key={call.id} className="border rounded-lg p-4 bg-gray-50/50 shadow-sm transition-all hover:bg-gray-50">
+                  <div className="flex justify-between items-start mb-2">
+                    <div className="flex flex-col">
+                      <span className="font-semibold text-slate-900">{call.assigned_to || "System"}</span>
+                      <span className={cn(
+                        "text-[10px] uppercase font-bold px-1.5 py-0.5 rounded w-fit mt-0.5",
+                        call.notes.includes("[Finance") ? "text-orange-600 bg-orange-50" : "text-blue-600 bg-blue-50"
+                      )}>
+                        {call.notes.includes("[Finance") ? "Finance Team" : "Sales Team"}
+                      </span>
+                    </div>
+                    <span className="text-xs text-slate-500 font-medium">{dayjs(call.date).format("MMM DD, YYYY")}</span>
+                  </div>
+                  <div className="bg-white p-3 rounded border border-slate-100 shadow-inner">
+                    <p className="text-sm text-slate-700 whitespace-pre-wrap">{call.notes}</p>
+                    {call.stage && (
+                      <Badge variant="outline" className="mt-2 text-[9px] h-4 font-normal bg-slate-50">
+                        Stage: {call.stage}
+                      </Badge>
+                    )}
+                  </div>
+                  {call.duration && (
+                    <p className="text-[10px] text-slate-400 mt-2 flex items-center gap-1">
+                      <Phone className="w-3 h-3" /> Duration: {Math.floor(call.duration / 60)}m {call.duration % 60}s
+                    </p>
+                  )}
+                  {call.recording_url && (
+                    <a href={call.recording_url} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline mt-2 inline-block font-medium">
+                      Listen to Recording
+                    </a>
+                  )}
+                </div>
+              ))
+            ) : (
+              <div className="text-center py-12 bg-gray-50/50 rounded-xl border-2 border-dashed border-gray-200">
+                <HistoryIcon className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                <p className="text-slate-500 font-medium italic">No previous interactions found for this lead.</p>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={followUpDialogOpen} onOpenChange={handleFollowUpDialogClose}>
+        <DialogContent className="max-w-md" onPointerDownOutside={(e) => e.preventDefault()}>
+          <DialogHeader>
+            <DialogTitle>Schedule Follow-up</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-4">
+            <div className="space-y-2">
+              <Label>Follow-up Date</Label>
+              <Input
+                type="date"
+                value={followUpData.follow_up_date}
+                onChange={(e) => setFollowUpData({ ...followUpData, follow_up_date: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Notes</Label>
+              <Textarea
+                rows={4}
+                placeholder="Add notes about this stage change..."
+                value={followUpData.notes}
+                onChange={(e) => setFollowUpData({ ...followUpData, notes: e.target.value })}
+              />
+            </div>
+          </div>
+          <DialogFooter className="mt-6">
+            <Button variant="outline" onClick={() => handleFollowUpDialogClose(false)}>
+              Cancel
+            </Button>
+            <Button
+              className="bg-gray-900 text-white hover:bg-black"
+              onClick={handleFollowUpSubmit}
+              disabled={!followUpData.follow_up_date}
+            >
+              Save Follow-up
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -462,7 +462,7 @@
 //       const factor = subscriptionCycle / 30;
 
 
-     
+
 //       const payload: any = {
 //         lead_id: leadId as string,
 //         lead_name: clientName || null,
@@ -897,6 +897,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/utils/supabase/client";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { useAuth } from "@/components/providers/auth-provider";
 
 
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -1058,6 +1059,7 @@ interface EditSaleCloseFormProps {
 export default function EditSaleCloseForm({ leadId }: EditSaleCloseFormProps) {
   //   const { leadId } = useParams<{ leadId: string }>();
   const router = useRouter();
+  const { user } = useAuth();
 
 
   const [loading, setLoading] = useState(true);
@@ -1401,6 +1403,8 @@ export default function EditSaleCloseForm({ leadId }: EditSaleCloseFormProps) {
 
 
         closed_at: dateOnlyToIsoUTC(closedAtDate),
+        account_assigned_name: user?.name || user?.email || "Unknown",
+        account_assigned_email: user?.email || null,
       };
 
 

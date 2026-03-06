@@ -112,7 +112,7 @@
 //         router.push("/");
 //         break;
 //       case "Marketing":
-      
+
 //         router.push("/marketing");
 //         break;
 //         case "Marketing Associate":
@@ -526,7 +526,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const userData: User = {
         id: profile.user_id,
-        name: user.user_metadata?.full_name || "User",
+        name: profile.full_name || user.user_metadata?.full_name || "User",
         email: user.email!,
         role: convertRole(profile.roles),
       };
@@ -566,7 +566,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const userData: User = {
       id: profile.user_id,
-      name: authData.user.user_metadata?.full_name || "User",
+      name: profile.full_name || authData.user.user_metadata?.full_name || "User",
       email: authData.user.email!,
       role: convertRole(profile.roles),
     };
