@@ -29,6 +29,12 @@ async function processRenewals() {
     console.log(`[${new Date().toISOString()}] Starting Renewal Automation Scan...`);
 
     try {
+        // 0. CHECK GLOBAL SWITCH (from config/env)
+        if (!RENEWAL_CONFIG.enabled) {
+            console.log(`[${new Date().toISOString()}] Automation is DISABLED via config/env. Skipping.`);
+            return;
+        }
+
         // 1. Fetch only clients with Paid status that have an onboarded date
         const { data: activeSales, error } = await supabase
             .from('sales_closure')
@@ -154,6 +160,6 @@ if (process.env.NODE_ENV !== 'production') {
     processRenewals().catch(console.error);
 }
 
-// SCHEDULE (Phase 9)
-// Run every day at 8:00 AM
-cron.schedule('0 8 * * *', processRenewals);
+// Schedule (Phase 9)
+// Run every day at 8:00 PM IST
+cron.schedule('0 20 * * *', processRenewals);

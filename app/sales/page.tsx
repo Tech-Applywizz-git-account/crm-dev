@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { EditIcon, Eye, Search, ExternalLink, Bell, User, ChevronDown, ChevronRight, ChevronLeft, Star, Settings, Phone, History as HistoryIcon, Trash2, Plus, Download, Tag, Loader2, Calendar, BarChart, ListOrdered, RefreshCw, Mail } from "lucide-react";
+import { EditIcon, Eye, Search, ExternalLink, Bell, User, ChevronDown, ChevronRight, ChevronLeft, ChevronUp, Star, Settings, Phone, History as HistoryIcon, Trash2, Plus, Download, Tag, Loader2, Calendar, BarChart, ListOrdered, RefreshCw, Mail } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,6 +46,7 @@ interface CallHistory {
   notes: string;
   duration?: number;
   recording_url?: string;
+  assigned_to?: string;
 }
 
 type PRPaidFlag = "Paid" | "Not paid";
@@ -139,14 +140,16 @@ const LeadRow = React.memo(({
   userProfile,
   handleStageUpdate,
   handlePhoneClick,
-  isRightPanelCollapsed
+  isRightPanelCollapsed,
+  onOpenHistory
 }: {
   item: Lead,
   idx: number,
   userProfile: Profile | null,
   handleStageUpdate: (id: string, stage: SalesStage) => void,
   handlePhoneClick: (phone: string) => void,
-  isRightPanelCollapsed: boolean
+  isRightPanelCollapsed: boolean,
+  onOpenHistory: (lead: Lead) => void
 }) => {
   const leadScore = item.current_stage === "sale done" ? 100 : Math.max(2, 26 - (idx * 3));
 
@@ -223,7 +226,7 @@ const LeadRow = React.memo(({
         {item.assigned_to || "—"}
       </TableCell>
       <TableCell className="py-3 align-top text-gray-500 whitespace-nowrap text-[11px] pt-4">
-        {item.assigned_at ? dayjs(item.assigned_at).format("MM/DD/YY hh:mm A") : "—"}
+        {item.created_at ? dayjs(item.created_at).fromNow(true) : "—"}
       </TableCell>
       <TableCell className="py-3 align-top text-center w-28 pt-3">
         <div className="flex items-center justify-center gap-2">
@@ -316,7 +319,15 @@ const LeadsTable = React.memo(({
               </TableHead>
               <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider w-[160px] align-middle h-12">Lead Stage</TableHead>
               <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider align-middle h-12">Owner</TableHead>
-              <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider align-middle h-12">Modified On</TableHead>
+              <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider align-middle h-12 cursor-pointer group" onClick={() => handleSort("created_at")}>
+                <div className="flex items-center gap-1">
+                  Lead Age
+                  <div className="flex flex-col gap-0.5 ml-1">
+                    <ChevronUp className={cn("w-2.5 h-2.5", sortConfig.key === "created_at" && sortConfig.direction === "asc" ? "text-blue-600" : "text-gray-300")} />
+                    <ChevronDown className={cn("w-2.5 h-2.5", sortConfig.key === "created_at" && sortConfig.direction === "desc" ? "text-blue-600" : "text-gray-300")} />
+                  </div>
+                </div>
+              </TableHead>
               <TableHead className="font-bold text-slate-700 text-center uppercase text-[11px] tracking-wider w-20 align-middle h-12">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -477,6 +488,91 @@ export default function SalesPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(30); // default
   const [totalRecords, setTotalRecords] = useState(0);
+  const [stageCounts, setStageCounts] = useState<Record<string, number>>({});
+  const [showTemplateDialog, setShowTemplateDialog] = useState(false);
+  const [customTemplates, setCustomTemplates] = useState<any[]>([]);
+  const [editingTemplate, setEditingTemplate] = useState<any>(null);
+
+  useEffect(() => {
+    const fetchTemplates = async () => {
+      if (!userEmail) return;
+
+      // Fetch from Supabase
+      const { data, error } = await supabase
+        .from("custom_email_templates")
+        .select("*")
+        .or(`created_by_email.eq.${userEmail},is_global.eq.true`);
+
+      // Fallback logic
+      const saved = localStorage.getItem(`custom_email_templates_${userEmail}`);
+      const localTemplates = saved ? JSON.parse(saved) : [];
+
+      if (!error && data && data.length > 0) {
+        setCustomTemplates(data);
+        localStorage.setItem(`custom_email_templates_${userEmail}`, JSON.stringify(data));
+      } else {
+        setCustomTemplates(localTemplates);
+      }
+    };
+    fetchTemplates();
+  }, [userEmail]);
+
+  const saveCustomTemplate = async () => {
+    if (!userEmail) return;
+
+    const payload = {
+      ...editingTemplate,
+      created_by_email: userEmail,
+      created_by_name: userProfile?.full_name || userEmail,
+    };
+
+    const { error } = await supabase.from("custom_email_templates").upsert(payload);
+
+    // Always update localStorage as a backup
+    const newTemplatesList = editingTemplate.id
+      ? customTemplates.map(t => t.id === editingTemplate.id ? payload : t)
+      : [...customTemplates, { ...payload, id: editingTemplate.id || Math.random().toString(36).substr(2, 9) }];
+
+    setCustomTemplates(newTemplatesList);
+    localStorage.setItem(`custom_email_templates_${userEmail}`, JSON.stringify(newTemplatesList));
+
+    if (error) {
+      console.error("DB Save failed, but saved to local storage:", error.message);
+    } else {
+      const { data: refreshed } = await supabase
+        .from("custom_email_templates")
+        .select("*")
+        .or(`created_by_email.eq.${userEmail},is_global.eq.true`);
+      if (refreshed && refreshed.length > 0) {
+        setCustomTemplates(refreshed);
+        localStorage.setItem(`custom_email_templates_${userEmail}`, JSON.stringify(refreshed));
+      }
+    }
+
+    alert("Template saved successfully!");
+    setShowTemplateDialog(false);
+    setEditingTemplate(null);
+  };
+
+  const deleteCustomTemplate = async (templateId: string) => {
+    if (!userEmail || !confirm("Are you sure you want to delete this template?")) return;
+
+    const { error } = await supabase
+      .from("custom_email_templates")
+      .delete()
+      .eq("id", templateId);
+
+    if (error) {
+      console.error("DB delete failed, updating local state:", error.message);
+      const newTemplates = customTemplates.filter(t => t.id !== templateId);
+      setCustomTemplates(newTemplates);
+      localStorage.setItem(`custom_email_templates_${userEmail}`, JSON.stringify(newTemplates));
+    } else {
+      setCustomTemplates(prev => prev.filter(t => t.id !== templateId));
+    }
+
+    if (editingTemplate?.id === templateId) setEditingTemplate(null);
+  };
 
   const zoomEmbedRef = useRef<ZoomPhoneEmbedHandle>(null);
 
@@ -630,7 +726,8 @@ export default function SalesPage() {
 
   useEffect(() => {
     fetchSalesClosureCount();
-  }, []);
+    fetchStageCounts();
+  }, [userProfile]);
 
   useEffect(() => {
     const run = async () => {
@@ -1007,10 +1104,17 @@ id, business_id, name, email, phone,
   }>({ key: null, direction: 'asc' });
 
   const handleSort = (key: keyof Lead) => {
-    setSortConfig((prev) => ({
-      key,
-      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc',
-    }));
+    setSortConfig((prev) => {
+      if (prev.key !== key) {
+        // Default to desc for date fields to show latest first
+        const defaultDir = (key === "created_at" || key === "assigned_at") ? "desc" : "asc";
+        return { key, direction: defaultDir };
+      }
+      return {
+        key,
+        direction: prev.direction === "asc" ? "desc" : "asc",
+      };
+    });
   };
 
   const handleUpdateAssignedTo = async (leadId: string, selectedName: string, selectedEmail: string) => {
@@ -1443,6 +1547,46 @@ id, business_id, name, email, phone,
     if (!error) setSalesClosedTotal(count ?? 0);
   };
 
+  const fetchStageCounts = async () => {
+    if (!userProfile) return;
+
+    let query = supabase
+      .from("leads")
+      .select("current_stage", { count: "exact" })
+      .eq("status", "Assigned");
+
+    if (userProfile.roles === "Sales Associate") {
+      query = query.eq("assigned_to", userProfile.full_name);
+    }
+
+    const { data, error } = await supabase
+      .from("leads")
+      .select("current_stage")
+      .eq("status", "Assigned")
+      .filter("assigned_to", "eq", userProfile.roles === "Sales Associate" ? userProfile.full_name : "all");
+
+    // Better way: manual counts from fetching stages or individual counts
+    const counts: Record<string, number> = {};
+    let total = 0;
+    for (const stage of salesStages) {
+      let q = supabase
+        .from("leads")
+        .select("*", { count: "exact", head: true })
+        .eq("status", "Assigned")
+        .eq("current_stage", stage);
+
+      if (userProfile.roles === "Sales Associate") {
+        q = q.eq("assigned_to", userProfile.full_name);
+      }
+
+      const { count } = await q;
+      counts[stage] = count || 0;
+      total += (count || 0);
+    }
+    counts['total'] = total;
+    setStageCounts(counts);
+  };
+
 
 
   return (
@@ -1526,6 +1670,13 @@ id, business_id, name, email, phone,
                 <Button variant="outline" size="sm" onClick={() => setView("email_logs")} className="h-8 gap-2 border-blue-200 text-blue-600 font-medium bg-blue-50/50 hover:bg-blue-50">
                   <Mail className="w-4 h-4 text-blue-500" /> <span className="hidden lg:inline">Email History</span>
                 </Button>
+
+                <Button variant="outline" size="sm" onClick={() => {
+                  setEditingTemplate({ subject: "", body: "", is_global: false });
+                  setShowTemplateDialog(true);
+                }} className="h-8 gap-2 border-purple-200 text-purple-600 font-medium bg-purple-50/50 hover:bg-purple-50">
+                  <Plus className="w-4 h-4 text-purple-500" /> <span className="hidden lg:inline">Custom Template</span>
+                </Button>
               </div>
             </Header>
             <div className="flex flex-1 overflow-hidden">
@@ -1556,6 +1707,40 @@ id, business_id, name, email, phone,
                     </Button>
                   )}
                 </div>
+
+                {view === "leads" && (
+                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4 mb-6">
+                    <Card className="border-none shadow-sm bg-white hover:shadow-md transition-shadow cursor-pointer" onClick={() => setStageFilter("all")}>
+                      <CardHeader className="p-3 pb-0">
+                        <CardTitle className="text-[10px] uppercase font-bold text-gray-500 tracking-wider h-8 flex items-center">
+                          Total Leads
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="p-3 pt-1">
+                        <div className="text-xl font-bold text-slate-800">
+                          {stageCounts['total'] || 0}
+                        </div>
+                        <div className="w-full h-1 mt-2 rounded-full opacity-50 bg-slate-400" />
+                      </CardContent>
+                    </Card>
+
+                    {salesStages.map((stage) => (
+                      <Card key={stage} className="border-none shadow-sm bg-white hover:shadow-md transition-shadow cursor-pointer" onClick={() => setStageFilter(stage)}>
+                        <CardHeader className="p-3 pb-0">
+                          <CardTitle className="text-[10px] uppercase font-bold text-gray-500 tracking-wider h-8 flex items-center">
+                            {stage}
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="p-3 pt-1">
+                          <div className="text-xl font-bold text-slate-800">
+                            {stageCounts[stage] || 0}
+                          </div>
+                          <div className={cn("w-full h-1 mt-2 rounded-full opacity-50", getStageColor(stage).split(" ")[0])} />
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
 
                 {view === "activity" ? (
                   <ActivityView userProfile={userProfile} onBack={() => setView("leads")} />
@@ -1957,6 +2142,104 @@ id, business_id, name, email, phone,
         defaultMode={salesDialogMode}
       />
       <ZoomPhoneEmbed ref={zoomEmbedRef} callerEmail={userEmail} />
+
+      {/* Custom Email Template Dialog */}
+      <Dialog open={showTemplateDialog} onOpenChange={setShowTemplateDialog}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-purple-600">
+              <Mail className="w-5 h-5" />
+              {editingTemplate?.id ? "Edit Custom Template" : "Add New Custom Template"}
+            </DialogTitle>
+            <DialogDescription>
+              {userProfile?.roles?.includes("Admin") || userProfile?.roles?.includes("Super Admin")
+                ? "Draft a template for yourself or everyone."
+                : "Draft your personalized email template here."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-4">
+            <div className="space-y-2">
+              <Label>Template Name (e.g. Second Call)</Label>
+              <Input
+                placeholder="Enter template name..."
+                value={editingTemplate?.name || ""}
+                onChange={(e) => setEditingTemplate({ ...editingTemplate, name: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Email Subject</Label>
+              <Input
+                placeholder="Enter subject..."
+                value={editingTemplate?.subject || ""}
+                onChange={(e) => setEditingTemplate({ ...editingTemplate, subject: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Email Body</Label>
+              <Textarea
+                rows={10}
+                placeholder="Hi [Name], ..."
+                value={editingTemplate?.body || ""}
+                onChange={(e) => setEditingTemplate({ ...editingTemplate, body: e.target.value })}
+              />
+            </div>
+
+            {(userProfile?.roles?.includes("Admin") || userProfile?.roles?.includes("Super Admin")) && (
+              <div className="flex items-center space-x-2 border p-3 rounded bg-blue-50 border-blue-100">
+                <input
+                  type="checkbox"
+                  id="is_global_main"
+                  className="w-4 h-4"
+                  checked={editingTemplate?.is_global || false}
+                  onChange={(e) => setEditingTemplate({ ...editingTemplate, is_global: e.target.checked })}
+                />
+                <Label htmlFor="is_global_main" className="text-blue-700 font-semibold cursor-pointer">
+                  Make this template visible to ALL salespersons (Global)
+                </Label>
+              </div>
+            )}
+
+            {customTemplates.length > 0 && (
+              <div className="pt-4 border-t">
+                <Label className="text-xs text-gray-400 uppercase">Existing Templates</Label>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {customTemplates.map(t => (
+                    <div key={t.id} className="group relative">
+                      <button
+                        onClick={() => setEditingTemplate(t)}
+                        className={`px-3 py-1 text-xs border rounded-full transition-all pr-8 ${editingTemplate?.id === t.id ? 'bg-purple-100 border-purple-400 text-purple-700' : 'bg-white hover:bg-gray-50'}`}
+                      >
+                        {t.is_global ? "[G] " : ""}{t.name || t.subject.substring(0, 15)}
+                      </button>
+                      {(userProfile?.roles?.includes("Admin") || userProfile?.roles?.includes("Super Admin") || t.created_by_email === userEmail) && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); deleteCustomTemplate(t.id); }}
+                          className="absolute right-1 top-1/2 -translate-y-1/2 p-1 text-red-500 hover:bg-red-50 rounded-full transition-all"
+                          title="Delete Template"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter className="mt-6">
+            <Button variant="outline" onClick={() => { setShowTemplateDialog(false); setEditingTemplate(null); }}>
+              Cancel
+            </Button>
+            <Button
+              className="bg-purple-600 text-white hover:bg-purple-700"
+              onClick={saveCustomTemplate}
+              disabled={!editingTemplate?.name || !editingTemplate?.subject || !editingTemplate?.body}
+            >
+              Save Template
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </ProtectedRoute>
   );
 }

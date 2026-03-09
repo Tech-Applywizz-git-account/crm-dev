@@ -34,7 +34,8 @@ export function getRenewalStatus(milestoneDate: Date): 'upcoming' | 'due_today' 
  * Default configurations for reminders (configurable via env or DB in future)
  */
 export const RENEWAL_CONFIG = {
-    reminders: [7, 3, 1, 0], // Days before renewal to send automated emails
+    enabled: process.env.ENABLE_RENEWAL_EMAILS === 'true',
+    reminders: [5, 4, 3, 2, 1, 0], // Days before renewal to send automated emails daily
     follow_up_delay: 2,      // Days after missing renewal to create a task
     automated_sender: "support@applywizz.com",
 };
