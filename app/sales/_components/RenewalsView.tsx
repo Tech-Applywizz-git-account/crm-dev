@@ -22,6 +22,7 @@ interface RenewalRecord {
     expiry_date: dayjs.Dayjs;
     days_remaining: number;
     closed_by?: string;
+    account_assigned_name?: string;
 }
 
 export default function RenewalsView() {
@@ -63,7 +64,8 @@ export default function RenewalsView() {
                     finance_status: row.finance_status,
                     expiry_date: expiry,
                     days_remaining: daysRemaining,
-                    closed_by: row.closed_by,
+                    closed_by: row.closed_by || row.account_assigned_name,
+                    account_assigned_name: row.account_assigned_name,
                 };
             });
 

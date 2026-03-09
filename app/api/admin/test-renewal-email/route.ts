@@ -11,28 +11,35 @@ export async function POST(req: Request) {
             return NextResponse.json({ success: false, error: "Recipient email is required" }, { status: 400 });
         }
 
-        const templateId = 'renewal_reminder_early'; // Use a standard reminder template for testing
-        const template = RENEWAL_TEMPLATES.find(t => t.id === templateId);
+        const results = [];
+        const templateIds = ['renewal_reminder_early', 'renewal_reminder_today'];
 
-        if (!template) {
-            return NextResponse.json({ success: false, error: "Template not found" }, { status: 500 });
+        for (const templateId of templateIds) {
+            const template = RENEWAL_TEMPLATES.find(t => t.id === templateId);
+
+            if (!template) {
+                results.push({ id: templateId, status: 'error', message: 'Template not found' });
+                continue;
+            }
+
+            const body = fillTemplate(template.body, {
+                client_name: "Dinesh Test",
+                renewal_date: "10/03/2026"
+            });
+
+            const senderEmail = "support@applywizz.com";
+
+            await processEmailSending({
+                senderEmail,
+                recipientEmail: email,
+                subject: "[TEST - " + (templateId === 'renewal_reminder_today' ? 'URGENT' : 'EARLY') + "] " + template.subject,
+                body: body
+            });
+
+            results.push({ id: templateId, status: 'success' });
         }
 
-        const body = fillTemplate(template.body, {
-            client_name: "Test User",
-            renewal_date: "12/12/2026"
-        });
-
-        const senderEmail = "support@applywizz.com";
-
-        await processEmailSending({
-            senderEmail,
-            recipientEmail: email,
-            subject: "[TEST] " + template.subject,
-            body: body
-        });
-
-        return NextResponse.json({ success: true, message: "Test automated email sent successfully!" });
+        return NextResponse.json({ success: true, message: "Both test renewal emails sent successfully!", results });
 
     } catch (error: any) {
         console.error("Error sending test automated email:", error);

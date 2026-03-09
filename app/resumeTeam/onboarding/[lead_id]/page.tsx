@@ -253,20 +253,31 @@ export default function OnboardingForm() {
     const roleValue = (jobRoles[0] || fullOnboardingData?.role || "").trim();
 
     try {
-      const rolesRes = await fetch("https://dashboard.apply-wizz.com/api/all-job-roles/");
+      // Fetch from us-jobs-roles as per requirement
+      const rolesRes = await fetch("https://dashboard.apply-wizz.com/api/us-jobs-roles/");
       if (rolesRes.ok) {
         const rolesData = await rolesRes.json();
-        const rolesList = Array.isArray(rolesData) ? rolesData : (rolesData.data || []);
+        // Be more flexible with the structure: Array, .data, .roles, or .job_roles
+        const rolesList = Array.isArray(rolesData)
+          ? rolesData
+          : (rolesData.data || rolesData.roles || rolesData.job_roles || []);
+
         if (roleValue) {
           const matchedRole = rolesList.find((r: any) => {
             const nameToMatch = (typeof r === 'string' ? r : r?.name || "")?.trim();
+            // Exact case-sensitive match as required
             return nameToMatch === roleValue;
           });
           isNewDomain = !matchedRole;
         }
+      } else {
+        // If the roles API fails, we treat it as a new domain (safety fallback)
+        if (roleValue) isNewDomain = true;
       }
     } catch (err) {
       console.error("Role validation error:", err);
+      // If the roles API fails, we treat it as a new domain (safety fallback)
+      if (roleValue) isNewDomain = true;
     }
 
     // 2️⃣ Build Final API Payload
