@@ -77,7 +77,7 @@ async function processRenewals() {
 }
 
 async function sendAutomatedReminder(sale: any, milestone: Date, daysBefore: number) {
-    const templateId = daysBefore === 0 ? 'renewal_reminder_today' : 'renewal_reminder_early';
+    const templateId = daysBefore === 0 ? 'renewal_reminder_today' : `renewal_reminder_${daysBefore}`;
     const template = RENEWAL_TEMPLATES.find(t => t.id === templateId);
     if (!template) return;
 

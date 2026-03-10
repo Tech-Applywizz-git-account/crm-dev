@@ -639,7 +639,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         "admin", "marketing", "sales", "account-management", "finance", "finance-associates", "marketingAssociate",
         "technical", "technical-associate", "resume", "resume-associate", "onboard"
       ],
-      Marketing: ["marketing", "marketingAssociate", "onboard"],
+      Marketing: ["marketing", "marketingAssociate", "onboard", "sales"],
       Sales: ["sales", "Sales Associate", "onboard"],
       "Account Management": ["account-management", "onboard"],
       Finance: ["finance", "onboard"],                     // keep as-is unless you want Onboard here too

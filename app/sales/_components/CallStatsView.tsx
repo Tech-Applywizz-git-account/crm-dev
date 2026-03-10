@@ -59,7 +59,10 @@ export default function CallStatsView({ date = new Date().toISOString().split("T
         <div className="bg-white border rounded shadow-sm flex flex-col h-full overflow-hidden">
             <div className="p-4 border-b flex items-center justify-between bg-gray-50 flex-shrink-0">
                 <div className="flex items-center gap-4">
-                    <h2 className="text-lg font-bold text-gray-800">Zoom Call Statistics</h2>
+                    <div className="flex flex-col">
+                        <h2 className="text-lg font-bold text-gray-800">Zoom Call Statistics</h2>
+                        <span className="text-[10px] text-blue-600 font-semibold uppercase tracking-tight">Shift: 8:00 PM - 8:00 AM IST</span>
+                    </div>
 
                     <div className="flex items-center gap-2">
                         <Label htmlFor="date-picker" className="text-sm text-gray-500">Date:</Label>

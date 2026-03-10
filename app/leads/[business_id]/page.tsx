@@ -329,31 +329,161 @@ export default function LeadProfilePage() {
       id: "first_call",
       name: "First Call Template",
       subject: "Welcome to ApplyWizz - Great speaking with you!",
-      body: `Hi ${cleanLeadName(lead?.name || 'there')},\n\nIt was a pleasure speaking with you today about your career goals. I'm ${formatAssociateName(user?.email, user?.name)}, your dedicated sales associate at ApplyWizz.\n\nWe are excited to help you scale your job applications and land your dream role. I've attached some details discussed during our call for your reference.\n\nLooking forward to our next steps.\n\nBest regards,\n${formatAssociateName(user?.email, user?.name)}\nApplyWizz Team`
+      body: `Hi ${cleanLeadName(lead?.name || 'there')},
+
+It was a pleasure speaking with you today about your career goals. I'm ${formatAssociateName(user?.email, user?.name)}, your dedicated sales associate at ApplyWizz.
+
+We are excited to help you scale your job applications and land your dream role. I've attached some details discussed during our call for your reference.
+
+Looking forward to our next steps.
+
+Best regards,
+${formatAssociateName(user?.email, user?.name)}
+ApplyWizz Team`
     },
     {
-      id: "followup",
-      name: "Reminder / Follow-up",
-      subject: "Checking in - ApplyWizz Next Steps",
-      body: `Hi ${cleanLeadName(lead?.name || 'there')},\n\nI'm following up on our previous conversation regarding your enrollment. I wanted to see if you had any further questions or if you're ready to proceed with scaling your career journey.\n\nPlease let me know a convenient time to reconnect.\n\nBest regards,\n${formatAssociateName(user?.email, user?.name)}\nApplyWizz Team`
+      id: "dnp_after_1st",
+      name: "Email After First DNP",
+      subject: "Quick Follow-Up from ApplyWizz Regarding Your Job Search",
+      body: `Hi ${cleanLeadName(lead?.name || 'there')},
+
+This is a quick follow-up from ApplyWizz. Our team recently tried reaching out to discuss how ApplyWizz supports job seekers by managing and submitting job applications consistently on their behalf.
+
+Here are a few recent ApplyWizz outcomes:
+
+• One ApplyWizz client secured a job offer after our team managed their applications.
+View the case study here.
+
+• Another ApplyWizz client received 9 interview calls within 30 days after we started managing their applications.
+Check the case study here.
+
+If you'd like to learn how ApplyWizz can support your job search, please reply to this email or let us know a convenient time to connect.
+
+Best regards,
+Team ApplyWizz`
+    },
+    {
+      id: "followup_standard",
+      name: "Follow-up Template",
+      subject: "Quick Follow-Up from ApplyWizz Regarding Your Job Search",
+      body: `Hello ${cleanLeadName(lead?.name || 'there')},
+
+I trust you're having a productive week.
+
+I'm reaching out to follow up on my previous email. As a professional job application management service, ApplyWizz has a proven track record of helping job seekers secure interview calls more efficiently across various industries.
+
+Here are a few recent ApplyWizz outcomes:
+
+• One ApplyWizz client secured a job offer after our team managed their applications.
+View the case study here.
+
+• Another ApplyWizz client received 9 interview calls within 30 days after we started managing their applications.
+Check the case study here.
+
+If you're still exploring ways to optimize your job search and want to learn more about how ApplyWizz can support your career goals, please reply to this email or let us know a convenient time to connect.
+
+Best regards,
+Team ApplyWizz`
+    },
+    {
+      id: "followup_2days",
+      name: "2-Day Follow-Up",
+      subject: "A Quick Follow-Up from ApplyWizz",
+      body: `Hello ${cleanLeadName(lead?.name || 'there')},
+
+I'm checking in as I haven't heard back from you yet. I understand you're busy, but I wanted to ensure you didn't miss out on how ApplyWizz can help you land your next job faster.
+
+We specialize in managing the tedious part of the job search—sending consistent, high-quality applications on your behalf—so you can focus on acing your interviews.
+
+Here are a few recent ApplyWizz outcomes:
+
+• One ApplyWizz client secured a job offer after our team managed their applications.
+View the case study here.
+
+• Another ApplyWizz client received 9 interview calls within 30 days after we started managing their applications.
+Check the case study here.
+
+Please let me know if you're available for a brief 5-minute chat this week to discuss how we can support your search.
+
+Best regards,
+Team ApplyWizz`
+    },
+    {
+      id: "followup_final",
+      name: "Final Follow-up",
+      subject: "Final Follow-Up from ApplyWizz",
+      body: `Hello ${cleanLeadName(lead?.name || 'there')},
+
+I've tried reaching out a couple of times but haven't heard back. I'll assume that now might not be the right time for you to start with ApplyWizz.
+
+However, if your circumstances change and you'd like to automate your job application process and get more interview calls, please feel free to reach out anytime.
+
+Here are a few recent ApplyWizz outcomes:
+
+• One ApplyWizz client secured a job offer after our team managed their applications.
+View the case study here.
+
+• Another ApplyWizz client received 9 interview calls within 30 days after we started managing their applications.
+Check the case study here.
+
+Wishing you the best of luck with your job search and future career endeavors.
+
+Best regards,
+Team ApplyWizz`
     },
     {
       id: "payment_success",
       name: "Payment Success",
       subject: "Welcome Aboard! Payment Received - ApplyWizz",
-      body: `Hi ${cleanLeadName(lead?.name || 'there')},\n\nGreat news! We have successfully received your payment. Welcome to the ApplyWizz family!\n\nOur technical team has been notified and will reach out to you within the next 24 business hours to begin your profile optimization and official onboarding.\n\nWe're thrilled to have you with us.\n\nBest regards,\n${formatAssociateName(user?.email, user?.name)}\nApplyWizz Team`
+      body: `Hi ${cleanLeadName(lead?.name || 'there')},
+
+Great news! We have successfully received your payment. Welcome to the ApplyWizz family!
+
+Our technical team has been notified and will reach out to you within the next 24 business hours to begin your profile optimization and official onboarding.
+
+We're thrilled to have you with us.
+
+Best regards,
+${formatAssociateName(user?.email, user?.name)}
+ApplyWizz Team`
     },
     {
       id: "onboard",
       name: "Onboard Template",
       subject: `Onboarding: Getting Started with ApplyWizz - ${cleanLeadName(lead?.name || '')}`,
-      body: `Hi ${cleanLeadName(lead?.name || 'there')},\n\nWe're excited to begin your professional journey with ApplyWizz! To ensure we have all the correct information to optimize your career strategy, please complete your onboarding details using the link below:\n\n{{onboarding_link}}\n\nPLEASE NOTE: Please fill the onboarding form by using these details below:\n\n- Client Name: ${cleanLeadName(lead?.name || 'N/A')}\n- Lead ID: ${lead?.business_id || 'N/A'}\n- Email Address: ${lead?.email || 'N/A'}\n- Phone Number: ${lead?.phone || 'N/A'}\n- City: ${lead?.city || 'N/A'}\n\nOur team is standing by to assist you once these details are submitted.\n\nBest regards,\n${formatAssociateName(user?.email, user?.name)}\nApplyWizz Team`
+      body: `Hi ${cleanLeadName(lead?.name || 'there')},
+
+We're excited to begin your professional journey with ApplyWizz! To ensure we have all the correct information to optimize your career strategy, please complete your onboarding details using the link below:
+
+{{onboarding_link}}
+
+PLEASE NOTE: Please fill the onboarding form by using these details below:
+
+- Client Name: ${cleanLeadName(lead?.name || 'N/A')}
+- Lead ID: ${lead?.business_id || 'N/A'}
+- Email Address: ${lead?.email || 'N/A'}
+- Phone Number: ${lead?.phone || 'N/A'}
+- City: ${lead?.city || 'N/A'}
+
+Our team is standing by to assist you once these details are submitted.
+
+Best regards,
+${formatAssociateName(user?.email, user?.name)}
+ApplyWizz Team`
     },
     {
       id: "renewal_manual",
       name: "Manual Renewal Notification",
       subject: `Renewal Due for ${upcomingRenewalDate ? upcomingRenewalDate.toLocaleDateString() : 'your subscription'}`,
-      body: `Hi ${cleanLeadName(lead?.name || 'there')},\n\nI'm reaching out from the accounts team regarding your upcoming renewal. Your current subscription cycle is nearing its end on ${upcomingRenewalDate ? upcomingRenewalDate.toLocaleDateString() : 'soon'}.\n\nPlease let us know if you'd like to continue with your job application support for the next cycle.\n\nBest regards,\n${formatAssociateName(user?.email, user?.name)}\nApplyWizz Team`
+      body: `Hi ${cleanLeadName(lead?.name || 'there')},
+
+I'm reaching out from the accounts team regarding your upcoming renewal. Your current subscription cycle is nearing its end on ${upcomingRenewalDate ? upcomingRenewalDate.toLocaleDateString() : 'soon'}.
+
+Please let us know if you'd like to continue with your job application support for the next cycle.
+
+Best regards,
+${formatAssociateName(user?.email, user?.name)}
+ApplyWizz Team`
     },
     ...customTemplates.map(ct => ({
       id: ct.id,
@@ -962,8 +1092,8 @@ export default function LeadProfilePage() {
       setOnboarding(coRow as ClientOnboardingDetails);
     }
 
-    // 📧 Fetch Email History from Graph Sent Table
-    const sentRes = await fetch(`/api/email/sent?email=${user?.email}`);
+    // 📧 Fetch Email History from Graph Sent Table (Filtered by Client Email)
+    const sentRes = await fetch(`/api/email/sent?client_email=${leadRow.email}`);
     const sentData = await sentRes.json();
     setEmails(sentData.emails || []);
 
@@ -1519,8 +1649,27 @@ export default function LeadProfilePage() {
                                     <Badge variant="outline" className={`mt-1 self-end text-[9px] h-4 ${mail.status === 'sent' ? 'text-green-600 bg-green-50' : 'text-red-600 bg-red-50'}`}>{mail.status}</Badge>
                                   </div>
                                 </div>
-                                <div className="text-sm text-gray-600 whitespace-pre-wrap leading-relaxed bg-white p-4 rounded-md border border-gray-100">
-                                  {mail.body}
+                                <div className="space-y-1.5 min-h-[300px]">
+                                  <span className="text-[10px] uppercase font-bold text-gray-400 block tracking-wider mb-2">Message Content</span>
+                                  <div className="bg-white border border-gray-100 rounded-lg overflow-hidden shadow-inner">
+                                    <iframe
+                                      title={`Email ${mail.id}`}
+                                      className="w-full h-[400px] border-none"
+                                      srcDoc={`
+                                        <html>
+                                          <head>
+                                            <style>
+                                              body { font-family: 'Inter', sans-serif; margin: 0; padding: 20px; }
+                                              * { box-sizing: border-box; }
+                                            </style>
+                                          </head>
+                                          <body>
+                                            ${mail.body}
+                                          </body>
+                                        </html>
+                                      `}
+                                    />
+                                  </div>
                                 </div>
                               </AccordionContent>
                             </AccordionItem>

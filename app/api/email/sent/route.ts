@@ -5,14 +5,11 @@ import { getSentEmails } from "@/lib/microsoft/dbService";
 export async function GET(req: Request) {
     try {
         const { searchParams } = new URL(req.url);
-        const email = searchParams.get("email");
+        const salespersonEmail = searchParams.get("email");
+        const clientEmail = searchParams.get("client_email");
         const page = parseInt(searchParams.get("page") || "0");
 
-        if (!email) {
-            return NextResponse.json({ error: "Email parameter is required" }, { status: 400 });
-        }
-
-        const { emails, total } = await getSentEmails(email, page);
+        const { emails, total } = await getSentEmails(salespersonEmail || undefined, page, 50, clientEmail || undefined);
 
         return NextResponse.json({
             emails,

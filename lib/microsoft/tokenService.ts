@@ -5,20 +5,26 @@ interface TokenCache {
     expiresAt: number;
 }
 
-let cachedToken: TokenCache | null = null;
+let cachedTokens: Record<string, TokenCache> = {};
 
-export async function getMicrosoftGraphToken(): Promise<string> {
-    const tenantId = process.env.MICROSOFT_TENANT_ID;
-    const clientId = process.env.MICROSOFT_CLIENT_ID;
-    const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
+export async function getMicrosoftGraphToken(prefix: string = "MICROSOFT"): Promise<string> {
+    const tenantId = process.env[`${prefix}_TENANT_ID`];
+    const clientId = process.env[`${prefix}_CLIENT_ID`];
+    const clientSecret = process.env[`${prefix}_CLIENT_SECRET`];
+
+    console.log(`[TokenService] Requesting token for prefix: ${prefix} (Found Tenant: ${!!tenantId})`);
 
     if (!tenantId || !clientId || !clientSecret) {
-        throw new Error("Missing Microsoft Graph credentials in environment variables.");
+        // Fallback to standard MICROSOFT if TEAMS is missing
+        if (prefix === "TEAMS_MICROSOFT") {
+            return getMicrosoftGraphToken("MICROSOFT");
+        }
+        throw new Error(`Missing Microsoft Graph credentials for ${prefix} in environment variables.`);
     }
 
     // Use cached token if valid (buffer of 60 seconds)
-    if (cachedToken && cachedToken.expiresAt > Date.now() + 60000) {
-        return cachedToken.accessToken;
+    if (cachedTokens[prefix] && cachedTokens[prefix].expiresAt > Date.now() + 60000) {
+        return cachedTokens[prefix].accessToken;
     }
 
     const url = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
@@ -39,13 +45,13 @@ export async function getMicrosoftGraphToken(): Promise<string> {
 
     if (!response.ok) {
         const errorBody = await response.text();
-        console.error("Microsoft Token Error:", errorBody);
-        throw new Error(`Failed to fetch Microsoft Graph token: ${response.statusText}`);
+        console.error(`Microsoft Token Error (${prefix}):`, errorBody);
+        throw new Error(`Failed to fetch Microsoft Graph token for ${prefix}: ${response.statusText}`);
     }
 
     const data = await response.json();
 
-    cachedToken = {
+    cachedTokens[prefix] = {
         accessToken: data.access_token,
         expiresAt: Date.now() + data.expires_in * 1000,
     };
