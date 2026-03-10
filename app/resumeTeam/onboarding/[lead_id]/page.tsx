@@ -254,7 +254,7 @@ export default function OnboardingForm() {
 
     try {
       // Fetch from us-jobs-roles as per requirement
-      const rolesRes = await fetch("https://dashboard.apply-wizz.com/api/us-jobs-roles/");
+      const rolesRes = await fetch("https://dashboard.apply-wizz.com/api/all-job-roles");
       if (rolesRes.ok) {
         const rolesData = await rolesRes.json();
         // Be more flexible with the structure: Array, .data, .roles, or .job_roles
