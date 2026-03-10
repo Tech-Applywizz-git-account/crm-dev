@@ -20,6 +20,7 @@ import {
     ChevronLeft,
     ChevronRight,
     Eye,
+    User,
     RefreshCw
 } from "lucide-react";
 import {
@@ -47,15 +48,29 @@ interface EmailRecord {
     sent_at: string;
 }
 
-export function EmailLogView({ filterEmail }: { filterEmail?: string }) {
+export function EmailLogView({ filterEmail, clientEmailFilter }: { filterEmail?: string, clientEmailFilter?: string }) {
     const [emails, setEmails] = useState<EmailRecord[]>([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState("");
     const [typeFilter, setTypeFilter] = useState("all"); // all, manual, auto
+    const [ownerFilter, setOwnerFilter] = useState("all");
     const [page, setPage] = useState(0);
     const [total, setTotal] = useState(0);
     const [selectedEmail, setSelectedEmail] = useState<EmailRecord | null>(null);
+    const [salesUsers, setSalesUsers] = useState<{ full_name: string; user_email: string }[]>([]);
     const limit = 10;
+
+    // Fetch team members for admin filter
+    useEffect(() => {
+        const fetchTeam = async () => {
+            const { data } = await supabase
+                .from("profiles")
+                .select("full_name, user_email")
+                .in("roles", ["Sales", "Sales Associate", "Sale Associate", "Admin", "Super Admin"]);
+            setSalesUsers(data || []);
+        };
+        fetchTeam();
+    }, []);
 
     const fetchEmails = useCallback(async () => {
         setLoading(true);
@@ -64,11 +79,20 @@ export function EmailLogView({ filterEmail }: { filterEmail?: string }) {
                 .from("crm_sent_emails")
                 .select("*", { count: "exact" });
 
-            if (filterEmail) {
-                // If it's a salesperson view, show their emails OR automated ones
-                // But the user said "show to respective sales person and finance associate"
-                // Usually they want to see what they sent + auto ones.
+            if (clientEmailFilter) {
+                query = query.eq("client_email", clientEmailFilter);
+            } else if (filterEmail) {
+                // Determine if user is Admin or Sales Associate based on whether we want to restrict them
+                // Assuming filterEmail is passed as the current user's email
+                // If the user IS an admin (we should ideally pass role, but we can check if filterEmail matches what we want to restrict)
+
+                // Logic: If filterEmail is provided, we restrict to that email unless it's a known admin email
+                // Simpler: Just rely on the prop. In SalesPage we pass the user's email.
                 query = query.or(`salesperson_email.eq.${filterEmail},salesperson_email.eq.support@applywizz.com`);
+            }
+
+            if (ownerFilter !== "all" && !clientEmailFilter) {
+                query = query.eq("salesperson_email", ownerFilter);
             }
 
             if (search) {
@@ -94,7 +118,7 @@ export function EmailLogView({ filterEmail }: { filterEmail?: string }) {
             setLoading(true); // Wait, should be false
             setLoading(false);
         }
-    }, [filterEmail, page, search, typeFilter]);
+    }, [filterEmail, clientEmailFilter, ownerFilter, page, search, typeFilter]);
 
     useEffect(() => {
         fetchEmails();
@@ -149,6 +173,21 @@ export function EmailLogView({ filterEmail }: { filterEmail?: string }) {
                             <SelectItem value="auto">Automated Only</SelectItem>
                         </SelectContent>
                     </Select>
+
+                    {!clientEmailFilter && !filterEmail && (
+                        <Select value={ownerFilter} onValueChange={(v) => { setOwnerFilter(v); setPage(0); }}>
+                            <SelectTrigger className="w-[180px] h-9 text-sm text-[#00a1e1] border-[#00a1e1]/30 bg-blue-50/30">
+                                <User className="w-3 h-3 mr-2" />
+                                <SelectValue placeholder="Team View" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Entire Team</SelectItem>
+                                {salesUsers.map(u => (
+                                    <SelectItem key={u.user_email} value={u.user_email}>{u.full_name}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    )}
 
                     <Button variant="outline" size="sm" className="h-9" onClick={fetchEmails}>
                         <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -265,9 +304,25 @@ export function EmailLogView({ filterEmail }: { filterEmail?: string }) {
                             </div>
 
                             <div className="space-y-1.5">
-                                <span className="text-[10px] uppercase font-bold text-gray-400 block tracking-wider">Message Body</span>
-                                <div className="p-6 bg-white border border-gray-200 rounded-lg text-sm text-gray-700 whitespace-pre-wrap leading-relaxed max-h-[400px] overflow-y-auto shadow-inner">
-                                    {selectedEmail.body}
+                                <span className="text-[10px] uppercase font-bold text-gray-400 block tracking-wider">Message Content</span>
+                                <div className="p-0 bg-white border border-gray-200 rounded-lg overflow-hidden shadow-inner min-h-[400px]">
+                                    <iframe
+                                        title="Email Content"
+                                        className="w-full h-[450px] border-none"
+                                        srcDoc={`
+                                            <html>
+                                                <head>
+                                                    <style>
+                                                        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; }
+                                                        * { box-sizing: border-box; }
+                                                    </style>
+                                                </head>
+                                                <body>
+                                                    ${selectedEmail.body}
+                                                </body>
+                                            </html>
+                                        `}
+                                    />
                                 </div>
                             </div>
 

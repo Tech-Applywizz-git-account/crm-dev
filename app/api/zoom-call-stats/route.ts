@@ -78,9 +78,15 @@ export async function GET(request: NextRequest) {
 
         const accessToken = await getZoomAccessToken();
 
-        // Convert the requested date (treated as IST) to exact UTC boundaries for the Zoom API
-        const fromDate = new Date(dateStr + "T00:00:00+05:30").toISOString().replace(/\.\d{3}Z$/, "Z");
-        const toDate = new Date(dateStr + "T23:59:59+05:30").toISOString().replace(/\.\d{3}Z$/, "Z");
+        // Convert the requested date (starting 8:00 PM IST) to the next day 8:00 AM IST
+        // This targets the specific "Night Shift" window for that date.
+        const fromDate = new Date(dateStr + "T20:00:00+05:30").toISOString().replace(/\.\d{3}Z$/, "Z");
+
+        // Calculate the next day for the 8:00 AM cutoff
+        const nextDay = new Date(dateStr);
+        nextDay.setDate(nextDay.getDate() + 1);
+        const nextDayStr = nextDay.toISOString().split('T')[0];
+        const toDate = new Date(nextDayStr + "T08:00:00+05:30").toISOString().replace(/\.\d{3}Z$/, "Z");
 
         // Fetch call logs for the specific date using the exact IST bounds
         const callLogsUrl = "https://api.zoom.us/v2/phone/call_history?from=" + fromDate + "&to=" + toDate + "&page_size=300&type=all";

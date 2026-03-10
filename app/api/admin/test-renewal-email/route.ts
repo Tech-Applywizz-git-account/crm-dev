@@ -1,7 +1,7 @@
-// app/api/admin/test-renewal-email/route.ts
 import { NextResponse } from 'next/server';
 import { processEmailSending } from '@/lib/microsoft/emailService';
 import { RENEWAL_TEMPLATES, fillTemplate } from '@/lib/email-templates';
+import { sendTeamsNotification } from '@/lib/microsoft/teamsService';
 
 export async function POST(req: Request) {
     try {
@@ -12,7 +12,13 @@ export async function POST(req: Request) {
         }
 
         const results = [];
-        const templateIds = ['renewal_reminder_early', 'renewal_reminder_today'];
+        const templateIds = [
+            'renewal_reminder_5',
+            'renewal_reminder_4',
+            'renewal_reminder_3',
+            'renewal_reminder_2',
+            'renewal_reminder_today'
+        ];
 
         for (const templateId of templateIds) {
             const template = RENEWAL_TEMPLATES.find(t => t.id === templateId);

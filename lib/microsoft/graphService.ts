@@ -1,24 +1,32 @@
 // lib/microsoft/graphService.ts
 import { getMicrosoftGraphToken } from "./tokenService";
 
+interface Attachment {
+    name: string;
+    content: string; // Base64
+    contentType: string;
+}
+
 interface EmailParams {
     senderEmail: string;
     recipientEmail: string;
     subject: string;
     body: string;
+    attachments?: Attachment[];
 }
 
 export async function sendGraphEmail({
     senderEmail,
     recipientEmail,
     subject,
-    body
+    body,
+    attachments
 }: EmailParams) {
     const token = await getMicrosoftGraphToken();
 
     const url = `https://graph.microsoft.com/v1.0/users/${senderEmail}/sendMail`;
 
-    const payload = {
+    const payload: any = {
         message: {
             subject: subject,
             body: {
@@ -32,6 +40,12 @@ export async function sendGraphEmail({
                     },
                 },
             ],
+            attachments: attachments?.map(att => ({
+                "@odata.type": "#microsoft.graph.fileAttachment",
+                name: att.name,
+                contentBytes: att.content,
+                contentType: att.contentType
+            }))
         },
         saveToSentItems: true,
     };
