@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { supabase } from "@/utils/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, RefreshCw, ExternalLink, ArrowLeft, Star, Share2, Mail, Phone, MapPin, Plus, ChevronDown, MoreHorizontal, Send, FileText, CheckCircle2, Bell, Clock } from "lucide-react";
+import { Loader2, RefreshCw, ExternalLink, ArrowLeft, Star, Share2, Mail, Phone, MapPin, Plus, ChevronDown, MoreHorizontal, Send, FileText, CheckCircle2, Bell, Clock, Trash2 } from "lucide-react";
 import { useAuth } from "@/components/providers/auth-provider";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
@@ -18,6 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 
 interface Lead {
   id: string;
@@ -146,6 +147,7 @@ export default function LeadProfilePage() {
   const [jobRoleCSV, setJobRoleCSV] = useState("");
   const [locCSV, setLocCSV] = useState("");
   const [savingOnboarding, setSavingOnboarding] = useState(false);
+  const [showOnboardDialog, setShowOnboardDialog] = useState(false);
 
   const [isEditAddons, setIsEditAddons] = useState(false);
   const [saleForm, setSaleForm] = useState<any | null>(null);
@@ -156,9 +158,109 @@ export default function LeadProfilePage() {
   const [emailBody, setEmailBody] = useState("");
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emails, setEmails] = useState<any[]>([]);
+  const [showTemplateDialog, setShowTemplateDialog] = useState(false);
+  const [customTemplates, setCustomTemplates] = useState<any[]>([]);
+  const [editingTemplate, setEditingTemplate] = useState<any>(null);
+  const [userProfile, setUserProfile] = useState<any>(null);
 
-  // ------------------ RENEWAL AUTOMATION ------------------
-  // Added for Phase 6
+  useEffect(() => {
+    const fetchProfileAndTemplates = async () => {
+      if (!user?.id) return;
+
+      // 1. Fetch Profile for Role
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("full_name, roles")
+        .eq("auth_id", user.id)
+        .single();
+      setUserProfile(profile);
+
+      // 2. Fetch Templates (Personal + Global)
+      const { data: templates, error } = await supabase
+        .from("custom_email_templates")
+        .select("*")
+        .or(`created_by_email.eq.${user.email},is_global.eq.true`);
+
+      // Fallback logic: If DB error or no templates found in DB, check localStorage
+      const saved = localStorage.getItem(`custom_email_templates_${user.email}`);
+      const localTemplates = saved ? JSON.parse(saved) : [];
+
+      if (!error && templates && templates.length > 0) {
+        setCustomTemplates(templates);
+        // Sync local storage with DB truths
+        localStorage.setItem(`custom_email_templates_${user.email}`, JSON.stringify(templates));
+      } else {
+        setCustomTemplates(localTemplates);
+      }
+    };
+
+    fetchProfileAndTemplates();
+  }, [user]);
+
+  const saveCustomTemplate = async () => {
+    if (!user?.email) return;
+
+    const payload = {
+      ...editingTemplate,
+      created_by_email: user.email,
+      created_by_name: userProfile?.full_name || user.email,
+    };
+
+    const { error } = await supabase.from("custom_email_templates").upsert(payload);
+
+    // Always update localStorage as a backup
+    const newTemplatesList = editingTemplate.id
+      ? customTemplates.map(t => t.id === editingTemplate.id ? payload : t)
+      : [...customTemplates, { ...payload, id: editingTemplate.id || Math.random().toString(36).substr(2, 9) }];
+
+    setCustomTemplates(newTemplatesList);
+    localStorage.setItem(`custom_email_templates_${user.email}`, JSON.stringify(newTemplatesList));
+
+    if (error) {
+      console.error("DB Save failed, but saved to local storage:", error.message);
+    } else {
+      // Refresh state from DB to get actual IDs if they were generated
+      const { data: refreshed } = await supabase
+        .from("custom_email_templates")
+        .select("*")
+        .or(`created_by_email.eq.${user.email},is_global.eq.true`);
+      if (refreshed && refreshed.length > 0) {
+        setCustomTemplates(refreshed);
+        localStorage.setItem(`custom_email_templates_${user.email}`, JSON.stringify(refreshed));
+      }
+    }
+
+    alert("Template saved successfully!");
+    setShowTemplateDialog(false);
+    setEditingTemplate(null);
+  };
+
+  const deleteCustomTemplate = async (templateId: string) => {
+    if (!user?.email || !confirm("Are you sure you want to delete this template?")) return;
+
+    const { error } = await supabase
+      .from("custom_email_templates")
+      .delete()
+      .eq("id", templateId);
+
+    if (error) {
+      console.error("DB delete failed, updating local state:", error.message);
+      const newTemplates = customTemplates.filter(t => t.id !== templateId);
+      setCustomTemplates(newTemplates);
+      localStorage.setItem(`custom_email_templates_${user.email}`, JSON.stringify(newTemplates));
+    } else {
+      setCustomTemplates(prev => prev.filter(t => t.id !== templateId));
+    }
+
+    if (editingTemplate?.id === templateId) setEditingTemplate(null);
+  };
+
+  const cleanLeadName = (name: string) => {
+    if (!name) return "";
+    // Remove stars and common emoji characters usually used as tags
+    return name.replace(/[⭐*🌟✨]/g, '').trim();
+  };
+
   const upcomingRenewalDate = useMemo(() => {
     if (!saleHistory.length) return null;
     const latest = saleHistory[0];
@@ -172,6 +274,45 @@ export default function LeadProfilePage() {
   const [followUpData, setFollowUpData] = useState({ date: "", notes: "" });
   const [pendingStageUpdate, setPendingStageUpdate] = useState<{ stage: string; callId?: number } | null>(null);
   const [savingFollowUp, setSavingFollowUp] = useState(false);
+
+  const wrapInProfessionalLayout = (content: string, subjectLine: string) => {
+    // Helper to find and wrap links
+    const linkRegex = /(https?:\/\/[^\s]+)/g;
+    const processLine = (txt: string) => {
+      return txt.replace(linkRegex, (url) => {
+        return `<a href="${url}" target="_blank" style="color: #2563eb; text-decoration: underline; font-weight: 600;">${url}</a>`;
+      });
+    };
+
+    const lines = content.split('\n').filter(l => l.trim() !== '' || content.split('\n').indexOf(l) > 0);
+    const htmlContent = lines.map(line => {
+      const formattedLine = processLine(line);
+      if (line.startsWith('- ') || line.startsWith('• ')) {
+        return `<li style="margin-bottom: 7px; color: #0f172a;">${formattedLine.substring(2)}</li>`;
+      }
+      return `<p style="margin-bottom: 15px; margin-top: 0; font-size: 15px;">${formattedLine}</p>`;
+    }).join('');
+
+    // Wrap list items in <ul>
+    const finalizedContent = htmlContent.replace(/(<li.*<\/li>)/g, '<ul style="padding-left: 20px; margin-bottom: 20px; list-style-type: disc;">$1</ul>').replace(/<\/ul><ul.*?>/g, '');
+
+    return `
+<div style="background-color: #f1f5f9; padding: 20px 10px; min-height: 100%;">
+  <div style="font-family: 'Segoe UI', Arial, sans-serif; color: #334155; line-height: 1.6; max-width: 700px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; background-color: #ffffff; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);">
+      <div style="background-color: #2563eb; padding: 30px 20px; text-align: center;">
+          <h2 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.01em;">${subjectLine}</h2>
+      </div>
+      <div style="padding: 45px 40px; background-color: #ffffff;">
+          ${finalizedContent}
+      </div>
+      <div style="background-color: #f8fafc; padding: 25px; text-align: center; font-size: 11px; color: #94a3b8; border-top: 1px solid #f1f5f9;">
+          <p style="margin: 0; font-weight: 600;">&copy; ${new Date().getFullYear()} ApplyWizz Official Communication</p>
+          <p style="margin: 8px 0 0 0;">Confidential | Authorized Personnel Only</p>
+      </div>
+  </div>
+</div>
+    `;
+  };
 
   const formatAssociateName = (email?: string, metaName?: string) => {
     if (metaName) return metaName;
@@ -188,35 +329,186 @@ export default function LeadProfilePage() {
       id: "first_call",
       name: "First Call Template",
       subject: "Welcome to ApplyWizz - Great speaking with you!",
-      body: `Hi ${lead?.name || 'there'},\n\nIt was a pleasure speaking with you today about your career goals. I'm ${formatAssociateName(user?.email, user?.name)}, your dedicated sales associate at ApplyWizz.\n\nWe are excited to help you scale your job applications and land your dream role. I've attached some details discussed during our call for your reference.\n\nLooking forward to our next steps.\n\nBest regards,\n${formatAssociateName(user?.email, user?.name)}\nApplyWizz Team`
+      body: `Hi ${cleanLeadName(lead?.name || 'there')},
+
+It was a pleasure speaking with you today about your career goals. I'm ${formatAssociateName(user?.email, user?.name)}, your dedicated sales associate at ApplyWizz.
+
+We are excited to help you scale your job applications and land your dream role. I've attached some details discussed during our call for your reference.
+
+Looking forward to our next steps.
+
+Best regards,
+${formatAssociateName(user?.email, user?.name)}
+ApplyWizz Team`
     },
     {
-      id: "followup",
-      name: "Reminder / Follow-up",
-      subject: "Checking in - ApplyWizz Next Steps",
-      body: `Hi ${lead?.name || 'there'},\n\nI'm following up on our previous conversation regarding your enrollment. I wanted to see if you had any further questions or if you're ready to proceed with scaling your career journey.\n\nPlease let me know a convenient time to reconnect.\n\nBest regards,\n${formatAssociateName(user?.email, user?.name)}\nApplyWizz Team`
+      id: "dnp_after_1st",
+      name: "Email After First DNP",
+      subject: "Quick Follow-Up from ApplyWizz Regarding Your Job Search",
+      body: `Hi ${cleanLeadName(lead?.name || 'there')},
+
+This is a quick follow-up from ApplyWizz. Our team recently tried reaching out to discuss how ApplyWizz supports job seekers by managing and submitting job applications consistently on their behalf.
+
+Here are a few recent ApplyWizz outcomes:
+
+• One ApplyWizz client secured a job offer after our team managed their applications.
+View the case study here.
+
+• Another ApplyWizz client received 9 interview calls within 30 days after we started managing their applications.
+Check the case study here.
+
+If you'd like to learn how ApplyWizz can support your job search, please reply to this email or let us know a convenient time to connect.
+
+Best regards,
+Team ApplyWizz`
+    },
+    {
+      id: "followup_standard",
+      name: "Follow-up Template",
+      subject: "Quick Follow-Up from ApplyWizz Regarding Your Job Search",
+      body: `Hello ${cleanLeadName(lead?.name || 'there')},
+
+I trust you're having a productive week.
+
+I'm reaching out to follow up on my previous email. As a professional job application management service, ApplyWizz has a proven track record of helping job seekers secure interview calls more efficiently across various industries.
+
+Here are a few recent ApplyWizz outcomes:
+
+• One ApplyWizz client secured a job offer after our team managed their applications.
+View the case study here.
+
+• Another ApplyWizz client received 9 interview calls within 30 days after we started managing their applications.
+Check the case study here.
+
+If you're still exploring ways to optimize your job search and want to learn more about how ApplyWizz can support your career goals, please reply to this email or let us know a convenient time to connect.
+
+Best regards,
+Team ApplyWizz`
+    },
+    {
+      id: "followup_2days",
+      name: "2-Day Follow-Up",
+      subject: "A Quick Follow-Up from ApplyWizz",
+      body: `Hello ${cleanLeadName(lead?.name || 'there')},
+
+I'm checking in as I haven't heard back from you yet. I understand you're busy, but I wanted to ensure you didn't miss out on how ApplyWizz can help you land your next job faster.
+
+We specialize in managing the tedious part of the job search—sending consistent, high-quality applications on your behalf—so you can focus on acing your interviews.
+
+Here are a few recent ApplyWizz outcomes:
+
+• One ApplyWizz client secured a job offer after our team managed their applications.
+View the case study here.
+
+• Another ApplyWizz client received 9 interview calls within 30 days after we started managing their applications.
+Check the case study here.
+
+Please let me know if you're available for a brief 5-minute chat this week to discuss how we can support your search.
+
+Best regards,
+Team ApplyWizz`
+    },
+    {
+      id: "followup_final",
+      name: "Final Follow-up",
+      subject: "Final Follow-Up from ApplyWizz",
+      body: `Hello ${cleanLeadName(lead?.name || 'there')},
+
+I've tried reaching out a couple of times but haven't heard back. I'll assume that now might not be the right time for you to start with ApplyWizz.
+
+However, if your circumstances change and you'd like to automate your job application process and get more interview calls, please feel free to reach out anytime.
+
+Here are a few recent ApplyWizz outcomes:
+
+• One ApplyWizz client secured a job offer after our team managed their applications.
+View the case study here.
+
+• Another ApplyWizz client received 9 interview calls within 30 days after we started managing their applications.
+Check the case study here.
+
+Wishing you the best of luck with your job search and future career endeavors.
+
+Best regards,
+Team ApplyWizz`
     },
     {
       id: "payment_success",
       name: "Payment Success",
       subject: "Welcome Aboard! Payment Received - ApplyWizz",
-      body: `Hi ${lead?.name || 'there'},\n\nGreat news! We have successfully received your payment. Welcome to the ApplyWizz family!\n\nOur technical team has been notified and will reach out to you within the next 24 business hours to begin your profile optimization and official onboarding.\n\nWe're thrilled to have you with us.\n\nBest regards,\n${formatAssociateName(user?.email, user?.name)}\nApplyWizz Team`
+      body: `Hi ${cleanLeadName(lead?.name || 'there')},
+
+Great news! We have successfully received your payment. Welcome to the ApplyWizz family!
+
+Our technical team has been notified and will reach out to you within the next 24 business hours to begin your profile optimization and official onboarding.
+
+We're thrilled to have you with us.
+
+Best regards,
+${formatAssociateName(user?.email, user?.name)}
+ApplyWizz Team`
+    },
+    {
+      id: "onboard",
+      name: "Onboard Template",
+      subject: `Onboarding: Getting Started with ApplyWizz - ${cleanLeadName(lead?.name || '')}`,
+      body: `Hi ${cleanLeadName(lead?.name || 'there')},
+
+We're excited to begin your professional journey with ApplyWizz! To ensure we have all the correct information to optimize your career strategy, please complete your onboarding details using the link below:
+
+{{onboarding_link}}
+
+PLEASE NOTE: Please fill the onboarding form by using these details below:
+
+- Client Name: ${cleanLeadName(lead?.name || 'N/A')}
+- Lead ID: ${lead?.business_id || 'N/A'}
+- Email Address: ${lead?.email || 'N/A'}
+- Phone Number: ${lead?.phone || 'N/A'}
+- City: ${lead?.city || 'N/A'}
+
+Our team is standing by to assist you once these details are submitted.
+
+Best regards,
+${formatAssociateName(user?.email, user?.name)}
+ApplyWizz Team`
     },
     {
       id: "renewal_manual",
       name: "Manual Renewal Notification",
       subject: `Renewal Due for ${upcomingRenewalDate ? upcomingRenewalDate.toLocaleDateString() : 'your subscription'}`,
-      body: `Hi ${lead?.name || 'there'},\n\nI'm reaching out from the accounts team regarding your upcoming renewal. Your current subscription cycle is nearing its end on ${upcomingRenewalDate ? upcomingRenewalDate.toLocaleDateString() : 'soon'}.\n\nPlease let us know if you'd like to continue with your job application support for the next cycle.\n\nBest regards,\n${formatAssociateName(user?.email, user?.name)}\nApplyWizz Team`
+      body: `Hi ${cleanLeadName(lead?.name || 'there')},
+
+I'm reaching out from the accounts team regarding your upcoming renewal. Your current subscription cycle is nearing its end on ${upcomingRenewalDate ? upcomingRenewalDate.toLocaleDateString() : 'soon'}.
+
+Please let us know if you'd like to continue with your job application support for the next cycle.
+
+Best regards,
+${formatAssociateName(user?.email, user?.name)}
+ApplyWizz Team`
     },
-    {
-      id: "custom",
-      name: "Custom Template",
-      subject: "",
-      body: `Hi ${lead?.name || 'there'},\n\n`
+    ...customTemplates.map(ct => ({
+      id: ct.id,
+      name: ct.is_global ? `[Global] ${ct.name || ct.subject.substring(0, 15)}` : (ct.name || ct.subject.substring(0, 20)),
+      subject: ct.subject,
+      body: ct.body,
+      isCustom: true
+    }))
+  ], [lead, user, customTemplates, upcomingRenewalDate]);
+
+  const handleOnboardSelect = (link: string) => {
+    const t = EMAIL_TEMPLATES.find(x => x.id === "onboard");
+    if (t) {
+      setSelectedTemplate("onboard");
+      setEmailSubject(t.subject);
+      setEmailBody(t.body.replace("{{onboarding_link}}", link));
+      setShowOnboardDialog(false);
     }
-  ], [lead, user]);
+  };
 
   const handleTemplateSelect = (id: string) => {
+    if (id === "onboard") {
+      setShowOnboardDialog(true);
+      return;
+    }
     const t = EMAIL_TEMPLATES.find(x => x.id === id);
     if (t) {
       setSelectedTemplate(id);
@@ -230,6 +522,9 @@ export default function LeadProfilePage() {
     setSendingEmail(true);
 
     try {
+      // 0. WRAP IN PROFESSIONAL HTML LAYOUT
+      const officialHtmlBody = wrapInProfessionalLayout(emailBody, emailSubject);
+
       // 1. Physically send the email via Graph API proxy
       const mailRes = await fetch("/api/email/send", {
         method: "POST",
@@ -237,7 +532,7 @@ export default function LeadProfilePage() {
         body: JSON.stringify({
           recipientEmail: lead.email,
           subject: emailSubject,
-          body: emailBody,
+          body: officialHtmlBody,
           senderEmail: user.email,
         })
       });
@@ -797,8 +1092,8 @@ export default function LeadProfilePage() {
       setOnboarding(coRow as ClientOnboardingDetails);
     }
 
-    // 📧 Fetch Email History from Graph Sent Table
-    const sentRes = await fetch(`/api/email/sent?email=${user?.email}`);
+    // 📧 Fetch Email History from Graph Sent Table (Filtered by Client Email)
+    const sentRes = await fetch(`/api/email/sent?client_email=${leadRow.email}`);
     const sentData = await sentRes.json();
     setEmails(sentData.emails || []);
 
@@ -1354,8 +1649,27 @@ export default function LeadProfilePage() {
                                     <Badge variant="outline" className={`mt-1 self-end text-[9px] h-4 ${mail.status === 'sent' ? 'text-green-600 bg-green-50' : 'text-red-600 bg-red-50'}`}>{mail.status}</Badge>
                                   </div>
                                 </div>
-                                <div className="text-sm text-gray-600 whitespace-pre-wrap leading-relaxed bg-white p-4 rounded-md border border-gray-100">
-                                  {mail.body}
+                                <div className="space-y-1.5 min-h-[300px]">
+                                  <span className="text-[10px] uppercase font-bold text-gray-400 block tracking-wider mb-2">Message Content</span>
+                                  <div className="bg-white border border-gray-100 rounded-lg overflow-hidden shadow-inner">
+                                    <iframe
+                                      title={`Email ${mail.id}`}
+                                      className="w-full h-[400px] border-none"
+                                      srcDoc={`
+                                        <html>
+                                          <head>
+                                            <style>
+                                              body { font-family: 'Inter', sans-serif; margin: 0; padding: 20px; }
+                                              * { box-sizing: border-box; }
+                                            </style>
+                                          </head>
+                                          <body>
+                                            ${mail.body}
+                                          </body>
+                                        </html>
+                                      `}
+                                    />
+                                  </div>
                                 </div>
                               </AccordionContent>
                             </AccordionItem>
@@ -1572,7 +1886,7 @@ export default function LeadProfilePage() {
                                         <span className="text-[10px] font-bold text-indigo-600">
                                           {idx === 0 ? "Sold by" : "Renewed by"}:{" "}
                                           {idx === 0
-                                            ? (sale.closed_by || "Unknown")
+                                            ? (sale.closed_by || sale.account_assigned_name || "Unknown")
                                             : (sale.associates_tl_name || sale.account_assigned_name || "Unknown")}
                                         </span>
                                       </div>
@@ -1912,7 +2226,7 @@ export default function LeadProfilePage() {
 
         {/* Send Email Modal */}
         {isEmailModalOpen && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
             <div className="bg-white rounded-lg shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col border border-gray-100 scale-in-center">
               <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-gray-50/30">
                 <div className="flex items-center gap-3">
@@ -1944,17 +2258,36 @@ export default function LeadProfilePage() {
                   <Label className="text-xs font-bold text-gray-700">Select Template</Label>
                   <div className="flex flex-wrap gap-2">
                     {EMAIL_TEMPLATES.map(t => (
-                      <button
-                        key={t.id}
-                        onClick={() => handleTemplateSelect(t.id)}
-                        className={`px-4 py-2 rounded-full text-xs font-semibold transition-all border ${selectedTemplate === t.id
-                          ? "bg-blue-600 text-white border-blue-600 shadow-lg shadow-blue-200"
-                          : "bg-white text-gray-600 border-gray-200 hover:border-blue-400 hover:text-blue-600"
-                          }`}
-                      >
-                        {t.name}
-                      </button>
+                      <div key={t.id} className="relative group">
+                        <button
+                          onClick={() => handleTemplateSelect(t.id)}
+                          className={`px-4 py-2 rounded-full text-xs font-semibold transition-all border ${selectedTemplate === t.id
+                            ? "bg-blue-600 text-white border-blue-600 shadow-lg shadow-blue-200"
+                            : "bg-white text-gray-600 border-gray-200 hover:border-blue-400 hover:text-blue-600"
+                            } ${t.isCustom ? "pr-8" : ""}`}
+                        >
+                          {t.name}
+                        </button>
+                        {t.isCustom && (userProfile?.roles?.includes("Admin") || userProfile?.roles?.includes("Super Admin") || customTemplates.find(ct => ct.id === t.id)?.created_by_email === user?.email) && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); deleteCustomTemplate(t.id); }}
+                            className={`absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full transition-all ${selectedTemplate === t.id ? "text-blue-100 hover:text-white" : "text-gray-400 hover:text-red-500"}`}
+                            title="Delete Template"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
                     ))}
+                    <button
+                      onClick={() => {
+                        setEditingTemplate({ subject: "", body: "", is_global: false });
+                        setShowTemplateDialog(true);
+                      }}
+                      className="px-4 py-2 rounded-full text-xs font-semibold transition-all border border-purple-200 text-purple-600 bg-purple-50 hover:bg-purple-100"
+                    >
+                      <Plus className="w-3 h-3 inline mr-1" /> Add New Template
+                    </button>
                   </div>
                 </div>
 
@@ -2042,6 +2375,137 @@ export default function LeadProfilePage() {
             </div>
           </div>
         )}
+
+        {/* Onboarding Type Selection Dialog */}
+        <Dialog open={showOnboardDialog} onOpenChange={setShowOnboardDialog}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-blue-600">
+                <FileText className="w-5 h-5" /> Select Onboarding Type
+              </DialogTitle>
+              <DialogDescription>
+                Choose which onboarding platform link to include for <strong>{lead?.name}</strong>.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid grid-cols-1 gap-3 py-4">
+              <Button
+                onClick={() => handleOnboardSelect("https://applywizz-onboarding-form.vercel.app/")}
+                className="w-full h-14 text-base font-semibold bg-blue-600 hover:bg-blue-700 flex flex-col items-center justify-center gap-0.5"
+              >
+                <span>Apps + Add-ons</span>
+                <span className="text-[10px] opacity-80 font-normal underline">applywizz-onboarding-form.vercel.app</span>
+              </Button>
+              <Button
+                onClick={() => handleOnboardSelect("https://applywizz-onboarding-addons.vercel.app/")}
+                className="w-full h-14 text-base font-semibold bg-orange-600 hover:bg-orange-700 flex flex-col items-center justify-center gap-0.5"
+              >
+                <span>Add-ons</span>
+                <span className="text-[10px] opacity-80 font-normal underline">applywizz-onboarding-addons.vercel.app</span>
+              </Button>
+            </div>
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => setShowOnboardDialog(false)}>Cancel</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Custom Email Template Dialog */}
+        <Dialog open={showTemplateDialog} onOpenChange={setShowTemplateDialog}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-purple-600">
+                <Mail className="w-5 h-5" />
+                {editingTemplate?.id ? "Edit Custom Template" : "Add New Custom Template"}
+              </DialogTitle>
+              <DialogDescription>
+                {userProfile?.roles?.includes("Admin") || userProfile?.roles?.includes("Super Admin")
+                  ? "Draft a template for yourself or everyone."
+                  : "Draft your personalized email template here."}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 pt-4">
+              <div className="space-y-2">
+                <Label>Template Name (e.g. LinkedIn Followup)</Label>
+                <Input
+                  placeholder="Enter template name..."
+                  value={editingTemplate?.name || ""}
+                  onChange={(e) => setEditingTemplate({ ...editingTemplate, name: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Email Subject</Label>
+                <Input
+                  placeholder="Enter subject..."
+                  value={editingTemplate?.subject || ""}
+                  onChange={(e) => setEditingTemplate({ ...editingTemplate, subject: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Email Body</Label>
+                <Textarea
+                  rows={10}
+                  placeholder="Hi [Name], ..."
+                  value={editingTemplate?.body || ""}
+                  onChange={(e) => setEditingTemplate({ ...editingTemplate, body: e.target.value })}
+                />
+              </div>
+
+              {(userProfile?.roles?.includes("Admin") || userProfile?.roles?.includes("Super Admin")) && (
+                <div className="flex items-center space-x-2 border p-3 rounded bg-blue-50 border-blue-100">
+                  <input
+                    type="checkbox"
+                    id="is_global"
+                    className="w-4 h-4"
+                    checked={editingTemplate?.is_global || false}
+                    onChange={(e) => setEditingTemplate({ ...editingTemplate, is_global: e.target.checked })}
+                  />
+                  <Label htmlFor="is_global" className="text-blue-700 font-semibold cursor-pointer">
+                    Make this template visible to ALL salespersons (Global)
+                  </Label>
+                </div>
+              )}
+
+              {customTemplates.length > 0 && (
+                <div className="pt-4 border-t">
+                  <Label className="text-xs text-gray-400 uppercase">Existing Templates</Label>
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {customTemplates.map(t => (
+                      <div key={t.id} className="group relative">
+                        <button
+                          onClick={() => setEditingTemplate(t)}
+                          className={`px-3 py-1 text-xs border rounded-full transition-all pr-8 ${editingTemplate?.id === t.id ? 'bg-purple-100 border-purple-400 text-purple-700' : 'bg-white hover:bg-gray-50'}`}
+                        >
+                          {t.is_global ? "[G] " : ""}{t.name || t.subject.substring(0, 15)}
+                        </button>
+                        {(userProfile?.roles?.includes("Admin") || userProfile?.roles?.includes("Super Admin") || t.created_by_email === user?.email) && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); deleteCustomTemplate(t.id); }}
+                            className="absolute right-1 top-1/2 -translate-y-1/2 p-1 text-red-500 hover:bg-red-50 rounded-full transition-all"
+                            title="Delete Template"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            <DialogFooter className="mt-6">
+              <Button variant="outline" onClick={() => { setShowTemplateDialog(false); setEditingTemplate(null); }}>
+                Cancel
+              </Button>
+              <Button
+                className="bg-purple-600 text-white hover:bg-purple-700"
+                onClick={saveCustomTemplate}
+                disabled={!editingTemplate?.name || !editingTemplate?.subject || !editingTemplate?.body}
+              >
+                Save Template
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </DashboardLayout>
   );

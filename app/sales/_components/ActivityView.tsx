@@ -153,21 +153,41 @@ export default function ActivityView({ userProfile, onBack }: { userProfile?: an
         try {
             setLoading(true)
             const now = dayjs()
-            let startOfRange = now.startOf("month")
-            let endOfRange = now.endOf("day")
+            let startOfRange = now.hour(20).minute(0).second(0)
+            let endOfRange = now.add(1, 'day').hour(8).minute(0).second(0)
 
-            if (dateRange === "today") startOfRange = now.startOf("day")
-            else if (dateRange === "week") startOfRange = now.startOf("week")
-            else if (dateRange === "all") startOfRange = now.subtract(10, "year")
-            else if (dateRange === "custom") {
-                startOfRange = dayjs(customStart).startOf("day")
-                endOfRange = dayjs(customEnd).endOf("day")
+            if (dateRange === "today") {
+                // If it's currently during a shift (before 8 AM), show the shift that started yesterday
+                // If it's before 8 PM today, show the shift that started yesterday as well (last completed/current)
+                const currentHour = now.hour();
+                const shiftDate = currentHour < 20 ? now.subtract(1, 'day') : now;
+                startOfRange = shiftDate.hour(20).minute(0).second(0)
+                endOfRange = shiftDate.add(1, 'day').hour(8).minute(0).second(0)
+            } else if (dateRange === "week") {
+                startOfRange = now.startOf("week").hour(20).minute(0).second(0)
+                endOfRange = now.endOf("week").add(1, 'day').hour(8).minute(0).second(0)
+            } else if (dateRange === "month") {
+                startOfRange = now.startOf("month").hour(20).minute(0).second(0)
+                endOfRange = now.endOf("month").add(1, 'day').hour(8).minute(0).second(0)
+            } else if (dateRange === "all") {
+                startOfRange = now.subtract(10, 'year')
+                endOfRange = now.add(1, 'year')
+            } else if (dateRange === "custom") {
+                startOfRange = dayjs(customStart).hour(20).minute(0).second(0)
+                endOfRange = dayjs(customEnd).add(1, 'day').hour(8).minute(0).second(0)
             }
 
             const startISO = startOfRange.toISOString()
             const endISO = endOfRange.toISOString()
-            const startYMD = startOfRange.format("YYYY-MM-DD")
-            const endYMD = endOfRange.format("YYYY-MM-DD")
+
+            // Helper to determine if a timestamp belongs to a specific shift date, and if it's within 8PM-8AM mapping
+            const getShiftDate = (ts: any) => {
+                const d = dayjs(ts);
+                const h = d.hour();
+                if (h < 8) return d.subtract(1, 'day').format('YYYY-MM-DD');
+                if (h >= 20) return d.format('YYYY-MM-DD');
+                return null; // Ignore data between 8AM and 8PM
+            };
 
             // 1. Fetch Assignments (Ownership) - NO DATE FILTER FOR BASE OWNERSHIP
             let assignmentsQuery = supabase.from("leads").select("business_id, assigned_to, assigned_at, current_stage, name")
@@ -178,23 +198,25 @@ export default function ActivityView({ userProfile, onBack }: { userProfile?: an
             if (assignErr) throw assignErr;
             const myLeadIds = allAssignedLeads?.map(l => l.business_id) || []
 
-            // 2. Fetch Sales Closures (MATCH BY LEAD IDS for individuals, or ALL for team)
+            // 2. Fetch Sales Closures
             let salesQuery = supabase.from("sales_closure").select("*")
             if (selectedSalesPerson !== "all") {
                 if (myLeadIds.length > 0) {
                     salesQuery = salesQuery.in("lead_id", myLeadIds)
                 } else {
-                    // Force zero results if no leads are assigned to this person
                     salesQuery = salesQuery.eq("lead_id", "NON_EXISTENT_ID")
                 }
             }
             if (dateRange !== "all") {
-                salesQuery = salesQuery.gte("closed_at", startYMD).lte("closed_at", endYMD)
+                // Use ISO for precise 8PM-8AM filtering
+                salesQuery = salesQuery.gte("closed_at", startISO).lte("closed_at", endISO)
             }
-            const { data: salesData, error: salesErr } = await salesQuery
+            const { data: rawSales, error: salesErr } = await salesQuery
             if (salesErr) throw salesErr;
+            // Filter out sales that happen between 8 AM and 8 PM
+            const salesData = (rawSales || []).filter(s => getShiftDate(s.closed_at) !== null);
 
-            // 3. Fetch calls (Activity in the selected period)
+            // 3. Fetch calls
             let callsQuery = supabase.from("call_history").select("*")
             if (selectedSalesPerson !== "all") {
                 callsQuery = callsQuery.eq("assigned_to", selectedSalesPerson)
@@ -202,8 +224,10 @@ export default function ActivityView({ userProfile, onBack }: { userProfile?: an
             if (dateRange !== "all") {
                 callsQuery = callsQuery.gte("call_started_at", startISO).lte("call_started_at", endISO)
             }
-            const { data: callsData, error: callsErr } = await callsQuery
+            const { data: rawCalls, error: callsErr } = await callsQuery
             if (callsErr) throw callsErr;
+            // Filter out calls that happen between 8 AM and 8 PM
+            const callsData = (rawCalls || []).filter(c => getShiftDate(c.call_started_at) !== null);
 
             // If this request is stale (a newer one has started), stop here
             if (reqId && reqId !== lastRequestRef.current) return;
@@ -215,8 +239,10 @@ export default function ActivityView({ userProfile, onBack }: { userProfile?: an
             // - Closed a sale for
             const periodLeads = (allAssignedLeads || []).filter(l => {
                 if (dateRange === "all") return true;
-                const assignedAt = dayjs(l.assigned_at);
-                return assignedAt.isAfter(startOfRange) && assignedAt.isBefore(endOfRange);
+                const shiftDate = getShiftDate(l.assigned_at);
+                if (!shiftDate) return false;
+                const d = dayjs(l.assigned_at);
+                return d.isAfter(startOfRange) && d.isBefore(endOfRange);
             });
 
             const touchedLeadIds = new Set([
@@ -363,8 +389,8 @@ export default function ActivityView({ userProfile, onBack }: { userProfile?: an
             const last14Days = Array.from({ length: 14 }).map((_, i) => dayjs().subtract(i, "day").format("YYYY-MM-DD")).reverse()
             setDailyActivity(last14Days.map(date => ({
                 date: dayjs(date).format("MMM DD"),
-                calls: callsData?.filter(c => dayjs(c.call_started_at).format("YYYY-MM-DD") === date).length || 0,
-                assignments: leadsData?.filter(l => dayjs(l.assigned_at).format("YYYY-MM-DD") === date).length || 0
+                calls: callsData?.filter(c => getShiftDate(c.call_started_at) === date).length || 0,
+                assignments: leadsData?.filter(l => getShiftDate(l.assigned_at) === date).length || 0
             })))
 
             setRecentActivities([
@@ -460,14 +486,14 @@ export default function ActivityView({ userProfile, onBack }: { userProfile?: an
                                 type="date"
                                 value={customStart}
                                 onChange={(e) => setCustomStart(e.target.value)}
-                                className="w-[130px] h-9 text-xs"
+                                className="w-[160px] h-9 text-xs px-2"
                             />
-                            <span className="text-gray-400">to</span>
+                            <span className="text-gray-400 font-medium">to</span>
                             <Input
                                 type="date"
                                 value={customEnd}
                                 onChange={(e) => setCustomEnd(e.target.value)}
-                                className="w-[130px] h-9 text-xs"
+                                className="w-[160px] h-9 text-xs px-2"
                             />
                         </div>
                     )}

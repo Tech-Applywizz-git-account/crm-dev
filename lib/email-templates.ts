@@ -10,63 +10,79 @@ export interface EmailTemplate {
 
 export const RENEWAL_TEMPLATES: EmailTemplate[] = [
     {
-        id: 'renewal_reminder_early',
-        name: 'Upcoming Renewal (Early)',
+        id: 'renewal_reminder_5',
+        name: 'Upcoming Renewal (5 Days)',
         category: 'automated',
-        subject: 'Renewal Notice: Your ApplyWizz Subscription for {{client_name}}',
+        subject: 'Your ApplyWizz Subscription Will Be Expiring in 5 Days',
         body: `
-            <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; line-height: 1.6; max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden;">
-                <div style="background-color: #2563eb; padding: 20px; text-align: center;">
-                    <h1 style="color: #ffffff; margin: 0; font-size: 24px;">Subscription Renewal</h1>
-                </div>
-                <div style="padding: 30px;">
-                    <p>Dear <strong>{{client_name}}</strong>,</p>
-                    <p>We hope you are enjoying your experience with <strong>ApplyWizz</strong>. We are writing to remind you that your current subscription cycle is approaching its end.</p>
-                    
-                    <div style="background-color: #f8fafc; border-left: 4px solid #2563eb; padding: 15px; margin: 20px 0;">
-                        <p style="margin: 0;"><strong>Renewal Date:</strong> {{renewal_date}}</p>
-                    </div>
-
-                    <p>To ensure uninterrupted service and continued support for your job application journey, please ensure your renewal payment is processed by the due date.</p>
-                    
-                    <p>If you have already processed your payment, please disregard this message. For any assistance, feel free to contact our support team.</p>
-                    
-                    <p style="margin-top: 30px;">Best Regards,<br><strong>The ApplyWizz Finance Team</strong></p>
-                </div>
-                <div style="background-color: #f1f5f9; padding: 15px; text-align: center; font-size: 12px; color: #64748b;">
-                    <p style="margin: 0;">&copy; ${new Date().getFullYear()} ApplyWizz. All rights reserved.</p>
-                    <p style="margin: 5px 0 0 0;">This is an automated administrative notification.</p>
-                </div>
-            </div>
+            <p style="margin-bottom: 15px; margin-top: 0;">Hello {{client_name}},</p>
+            <p style="margin-bottom: 15px; margin-top: 0;">We hope your job search journey with ApplyWizz has been progressing well.</p>
+            <p style="margin-bottom: 15px; margin-top: 0;">This is a quick reminder that your ApplyWizz subscription will be expiring in 5 days. Our team has been consistently managing and submitting applications on your behalf to help you stay active in the job market.</p>
+            <p style="margin-bottom: 15px; margin-top: 0;">To ensure that your job applications continue without interruption, we recommend renewing your subscription before the expiry date.</p>
+            <p style="margin-bottom: 15px; margin-top: 0;">If you have any questions or need assistance with the renewal process, please feel free to reach out to us.</p>
+            <p style="margin-bottom: 0; margin-top: 0;">Best regards,</p>
+            <p style="margin-bottom: 0; margin-top: 0;">Team ApplyWizz</p>
+        `,
+    },
+    {
+        id: 'renewal_reminder_4',
+        name: 'Upcoming Renewal (4 Days)',
+        category: 'automated',
+        subject: 'Your ApplyWizz Subscription Will Be Expiring in 4 Days',
+        body: `
+            <p style="margin-bottom: 15px; margin-top: 0;">Hello {{client_name}},</p>
+            <p style="margin-bottom: 15px; margin-top: 0;">We hope everything is going well with your job search.</p>
+            <p style="margin-bottom: 15px; margin-top: 0;">This is a friendly reminder that your ApplyWizz subscription will be expiring in 4 days. Our team has been consistently managing your job applications to help you stay active in the job market.</p>
+            <p style="margin-bottom: 15px; margin-top: 0;">To ensure there is no interruption in this process, we recommend renewing your subscription before the expiry date.</p>
+            <p style="margin-bottom: 15px; margin-top: 0;">If you need any assistance with the renewal, please feel free to reach out.</p>
+            <p style="margin-bottom: 0; margin-top: 0;">Best regards,</p>
+            <p style="margin-bottom: 0; margin-top: 0;">Team ApplyWizz</p>
+        `,
+    },
+    {
+        id: 'renewal_reminder_3',
+        name: 'Upcoming Renewal (3 Days)',
+        category: 'automated',
+        subject: 'Your ApplyWizz Subscription Will Be Expiring in 3 Days',
+        body: `
+            <p style="margin-bottom: 15px; margin-top: 0;">Hello {{client_name}},</p>
+            <p style="margin-bottom: 15px; margin-top: 0;">We hope your job search is progressing smoothly.</p>
+            <p style="margin-bottom: 15px; margin-top: 0;">This is a reminder that your ApplyWizz subscription will be expiring in 3 days. Our team has been supporting your job search by consistently managing and submitting your applications.</p>
+            <p style="margin-bottom: 15px; margin-top: 0;">To continue this support without interruption, we recommend renewing your subscription before it expires.</p>
+            <p style="margin-bottom: 15px; margin-top: 0;">Please let us know if you need any assistance with the renewal process.</p>
+            <p style="margin-bottom: 0; margin-top: 0;">Best regards,</p>
+            <p style="margin-bottom: 0; margin-top: 0;">Team ApplyWizz</p>
+        `,
+    },
+    {
+        id: 'renewal_reminder_2',
+        name: 'Upcoming Renewal (2 Days)',
+        category: 'automated',
+        subject: 'Your ApplyWizz Subscription Will Be Expiring in 2 Days',
+        body: `
+            <p style="margin-bottom: 15px; margin-top: 0;">Hello {{client_name}},</p>
+            <p style="margin-bottom: 15px; margin-top: 0;">We wanted to inform you that your ApplyWizz subscription will be expiring in 2 days.</p>
+            <p style="margin-bottom: 15px; margin-top: 0;">To ensure your job application process continues smoothly and without any pause, we recommend renewing your subscription at the earliest.</p>
+            <p style="margin-bottom: 15px; margin-top: 0;">If you require any help with the renewal process, please feel free to contact us.</p>
+            <p style="margin-bottom: 0; margin-top: 0;">Best regards,</p>
+            <p style="margin-bottom: 0; margin-top: 0;">Team ApplyWizz</p>
         `,
     },
     {
         id: 'renewal_reminder_today',
         name: 'Renewal Due Today',
         category: 'automated',
-        subject: 'Urgent: Your ApplyWizz Subscription Renews Today',
+        subject: 'Your ApplyWizz Subscription Will Be Expiring today',
         body: `
-            <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; line-height: 1.6; max-width: 600px; margin: 0 auto; border: 1px solid #fee2e2; border-radius: 8px; overflow: hidden;">
-                <div style="background-color: #dc2626; padding: 20px; text-align: center;">
-                    <h1 style="color: #ffffff; margin: 0; font-size: 24px;">Final Renewal Notice</h1>
-                </div>
-                <div style="padding: 30px;">
-                    <p>Dear <strong>{{client_name}}</strong>,</p>
-                    <p>This is a final reminder that your <strong>ApplyWizz</strong> subscription is due for renewal today, <strong>{{renewal_date}}</strong>.</p>
-                    
-                    <div style="background-color: #fef2f2; border: 1px solid #fee2e2; padding: 20px; border-radius: 6px; text-align: center; margin: 20px 0;">
-                        <p style="margin: 0; color: #b91c1c; font-weight: bold; font-size: 18px;">Action Required Today</p>
-                        <p style="margin: 10px 0 0 0; font-size: 14px;">To avoid any service interruption, please process your renewal immediately.</p>
-                    </div>
-
-                    <p>Processing your renewal ensures that your active job applications and platform access remain active without downtime.</p>
-                    
-                    <p style="margin-top: 30px;">Sincerely,<br><strong>ApplyWizz Billing Department</strong></p>
-                </div>
-                <div style="background-color: #f1f5f9; padding: 15px; text-align: center; font-size: 12px; color: #64748b;">
-                    <p style="margin: 0;">&copy; ${new Date().getFullYear()} ApplyWizz. All rights reserved.</p>
-                </div>
-            </div>
+            <p style="margin-bottom: 15px; margin-top: 0;">Hello {{client_name}},</p>
+            <p style="margin-bottom: 15px; margin-top: 0;">We hope your job search journey with ApplyWizz has been progressing well.</p>
+            <p style="margin-bottom: 15px; margin-top: 0;">This is a final reminder that your ApplyWizz subscription expires today.</p>
+            <p style="margin-bottom: 15px; margin-top: 0;">Over the days, our team has been consistently managing and submitting job applications on your behalf to help keep your job search active and moving forward.</p>
+            <p style="margin-bottom: 15px; margin-top: 0;">Once the subscription expires, the job application process managed by the ApplyWizz team will stop, which means your job search activity through our platform will pause. When the process pauses, the momentum built through consistent applications may reset, and restarting later often means beginning the process again.</p>
+            <p style="margin-bottom: 15px; margin-top: 0;">To avoid interruption in your job search progress, we recommend renewing your subscription today so our team can continue managing your job applications without any pause.</p>
+            <p style="margin-bottom: 15px; margin-top: 0;">If you need assistance with the renewal process, please feel free to reply to this email and our team will be happy to help.</p>
+            <p style="margin-bottom: 0; margin-top: 0;">Best regards,</p>
+            <p style="margin-bottom: 0; margin-top: 0;">Team ApplyWizz</p>
         `,
     },
     {

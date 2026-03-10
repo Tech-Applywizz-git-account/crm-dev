@@ -48,11 +48,18 @@ export async function markEmailAsFailed(id: string, errorMessage: string) {
     if (error) throw error;
 }
 
-export async function getSentEmails(email: string, page: number = 0, limit: number = 50) {
-    const { data, error, count } = await supabaseAdmin
+export async function getSentEmails(email?: string, page: number = 0, limit: number = 50, clientEmail?: string) {
+    let query = supabaseAdmin
         .from("crm_sent_emails")
-        .select("*", { count: "exact" })
-        .eq("salesperson_email", email)
+        .select("*", { count: "exact" });
+
+    if (clientEmail) {
+        query = query.eq("client_email", clientEmail);
+    } else if (email) {
+        query = query.eq("salesperson_email", email);
+    }
+
+    const { data, error, count } = await query
         .order("created_at", { ascending: false })
         .range(page * limit, (page + 1) * limit - 1);
 

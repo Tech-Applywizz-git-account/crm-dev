@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { EditIcon, Eye, Search, ExternalLink, Bell, User, ChevronDown, ChevronRight, ChevronLeft, Star, Settings, Phone, History as HistoryIcon, Trash2, Plus, Download, Tag, Loader2, Calendar, BarChart, ListOrdered, RefreshCw, Mail } from "lucide-react";
+import { EditIcon, Eye, Search, ExternalLink, Bell, User, ChevronDown, ChevronRight, ChevronLeft, ChevronUp, Star, Settings, Phone, History as HistoryIcon, Trash2, Plus, Download, Tag, Loader2, Calendar, BarChart, ListOrdered, RefreshCw, Mail, Send } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,6 +39,58 @@ dayjs.extend(isBetween);
 
 type SalesStage = "Prospect" | "DNP" | "Out of TG" | "Not Interested" | "Conversation Done" | "sale done" | "Target";
 
+const cleanLeadName = (name: string) => {
+  if (!name) return "";
+  return name.replace(/[⭐*🌟✨]/g, '').trim();
+};
+
+const formatAssociateName = (email?: string, name?: string) => {
+  if (name) return name;
+  if (!email) return "Associate Name";
+  return email
+    .split("@")[0]
+    .split(/[\._]/)
+    .map(s => s.charAt(0).toUpperCase() + s.slice(1))
+    .join(" ");
+};
+
+const wrapInProfessionalLayout = (content: string, subjectLine: string) => {
+  const linkRegex = /(https?:\/\/[^\s]+)/g;
+  const processLine = (txt: string) => {
+    return txt.replace(linkRegex, (url) => {
+      return `<a href="${url}" target="_blank" style="color: #2563eb; text-decoration: underline; font-weight: 600;">${url}</a>`;
+    });
+  };
+
+  const lines = content.split('\n').filter(l => l.trim() !== '' || content.split('\n').indexOf(l) > 0);
+  const htmlContent = lines.map(line => {
+    const formattedLine = processLine(line);
+    if (line.startsWith('- ') || line.startsWith('• ')) {
+      return `<li style="margin-bottom: 7px; color: #0f172a;">${formattedLine.substring(2)}</li>`;
+    }
+    return `<p style="margin-bottom: 15px; margin-top: 0; font-size: 15px;">${formattedLine}</p>`;
+  }).join('');
+
+  const finalizedContent = htmlContent.replace(/(<li.*<\/li>)/g, '<ul style="padding-left: 20px; margin-bottom: 20px; list-style-type: disc;">$1</ul>').replace(/<\/ul><ul.*?>/g, '');
+
+  return `
+<div style="background-color: #f1f5f9; padding: 20px 10px; min-height: 100%;">
+  <div style="font-family: 'Segoe UI', Arial, sans-serif; color: #334155; line-height: 1.6; max-width: 700px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; background-color: #ffffff; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);">
+      <div style="background-color: #2563eb; padding: 30px 20px; text-align: center;">
+          <h2 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.01em;">${subjectLine}</h2>
+      </div>
+      <div style="padding: 45px 40px; background-color: #ffffff;">
+          ${finalizedContent}
+      </div>
+      <div style="background-color: #f8fafc; padding: 25px; text-align: center; font-size: 11px; color: #94a3b8; border-top: 1px solid #f1f5f9;">
+          <p style="margin: 0; font-weight: 600;">&copy; ${new Date().getFullYear()} ApplyWizz Official Communication</p>
+          <p style="margin: 8px 0 0 0;">Confidential | Authorized Personnel Only</p>
+      </div>
+  </div>
+</div>
+  `;
+};
+
 interface CallHistory {
   id: string;          // ← add id to update precisely
   date: string;        // followup_date (YYYY-MM-DD)
@@ -46,6 +98,7 @@ interface CallHistory {
   notes: string;
   duration?: number;
   recording_url?: string;
+  assigned_to?: string;
 }
 
 type PRPaidFlag = "Paid" | "Not paid";
@@ -139,14 +192,17 @@ const LeadRow = React.memo(({
   userProfile,
   handleStageUpdate,
   handlePhoneClick,
-  isRightPanelCollapsed
+  isRightPanelCollapsed,
+  onOpenHistory
 }: {
   item: Lead,
   idx: number,
   userProfile: Profile | null,
   handleStageUpdate: (id: string, stage: SalesStage) => void,
   handlePhoneClick: (phone: string) => void,
-  isRightPanelCollapsed: boolean
+  isRightPanelCollapsed: boolean,
+  onOpenHistory: (lead: Lead) => void,
+  onOpenMail: (lead: Lead) => void
 }) => {
   const leadScore = item.current_stage === "sale done" ? 100 : Math.max(2, 26 - (idx * 3));
 
@@ -223,7 +279,7 @@ const LeadRow = React.memo(({
         {item.assigned_to || "—"}
       </TableCell>
       <TableCell className="py-3 align-top text-gray-500 whitespace-nowrap text-[11px] pt-4">
-        {item.assigned_at ? dayjs(item.assigned_at).format("MM/DD/YY hh:mm A") : "—"}
+        {item.created_at ? dayjs(item.created_at).fromNow(true) : "—"}
       </TableCell>
       <TableCell className="py-3 align-top text-center w-28 pt-3">
         <div className="flex items-center justify-center gap-2">
@@ -233,6 +289,16 @@ const LeadRow = React.memo(({
             onClick={() => handlePhoneClick(item.phone)}
           >
             <Phone className="w-3.5 h-3.5" />
+          </div>
+          <div
+            title="Send Email"
+            className="p-1.5 bg-blue-50 text-blue-600 rounded-md cursor-pointer hover:bg-blue-600 hover:text-white transition-all shadow-sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenMail(item);
+            }}
+          >
+            <Mail className="w-3.5 h-3.5" />
           </div>
           <div
             title="Call History"
@@ -282,7 +348,8 @@ const LeadsTable = React.memo(({
   setPage,
   setPageSize,
   isRightPanelCollapsed,
-  onOpenHistory
+  onOpenHistory,
+  onOpenMail
 }: {
   leads: Lead[],
   sortConfig: { key: keyof Lead | null, direction: "asc" | "desc" },
@@ -296,7 +363,8 @@ const LeadsTable = React.memo(({
   setPage: React.Dispatch<React.SetStateAction<number>>,
   setPageSize: React.Dispatch<React.SetStateAction<number>>,
   isRightPanelCollapsed: boolean,
-  onOpenHistory: (lead: Lead) => void
+  onOpenHistory: (lead: Lead) => void,
+  onOpenMail: (lead: Lead) => void
 }) => {
   return (
     <div className="bg-white border rounded shadow-sm overflow-hidden flex flex-col min-h-[400px]">
@@ -316,7 +384,15 @@ const LeadsTable = React.memo(({
               </TableHead>
               <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider w-[160px] align-middle h-12">Lead Stage</TableHead>
               <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider align-middle h-12">Owner</TableHead>
-              <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider align-middle h-12">Modified On</TableHead>
+              <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider align-middle h-12 cursor-pointer group" onClick={() => handleSort("created_at")}>
+                <div className="flex items-center gap-1">
+                  Lead Age
+                  <div className="flex flex-col gap-0.5 ml-1">
+                    <ChevronUp className={cn("w-2.5 h-2.5", sortConfig.key === "created_at" && sortConfig.direction === "asc" ? "text-blue-600" : "text-gray-300")} />
+                    <ChevronDown className={cn("w-2.5 h-2.5", sortConfig.key === "created_at" && sortConfig.direction === "desc" ? "text-blue-600" : "text-gray-300")} />
+                  </div>
+                </div>
+              </TableHead>
               <TableHead className="font-bold text-slate-700 text-center uppercase text-[11px] tracking-wider w-20 align-middle h-12">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -336,6 +412,7 @@ const LeadsTable = React.memo(({
                   handlePhoneClick={handlePhoneClick}
                   isRightPanelCollapsed={isRightPanelCollapsed}
                   onOpenHistory={onOpenHistory}
+                  onOpenMail={onOpenMail}
                 />
               ))
             )}
@@ -432,13 +509,216 @@ import { EmailLogView } from "@/app/_components/EmailLogView";
 import { ZoomPhoneEmbed } from "@/components/ZoomPhoneEmbed";
 
 export default function SalesPage() {
+  const [userEmail, setUserEmail] = useState<string>("");
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [userProfile, setUserProfile] = useState<Profile | null>(null);
+  const [customTemplates, setCustomTemplates] = useState<any[]>([]);
+
+  const cleanLeadName = (name: string) => {
+    if (!name) return "";
+    return name.replace(/[⭐*🌟✨]/g, '').trim();
+  };
+
+  const formatAssociateName = (email?: string, name?: string) => {
+    if (name) return name;
+    if (!email) return "Associate Name";
+    return email
+      .split("@")[0]
+      .split(/[\._]/)
+      .map(s => s.charAt(0).toUpperCase() + s.slice(1))
+      .join(" ");
+  };
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [view, setView] = useState<"leads" | "activity" | "call_stats" | "renewals" | "email_logs">("leads");
   const [showSalesDialog, setShowSalesDialog] = useState(false);
-  const [salesDialogMode, setSalesDialogMode] = useState<"all" | "first">("first"); // Default to 'first' for stage filter
+  const [salesDialogMode, setSalesDialogMode] = useState<"new" | "edit">("new");
 
-  const [leads, setLeads] = useState<Lead[]>([]);
-  const [userProfile, setUserProfile] = useState<Profile | null>(null);
+  // —— Email States ——
+  const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
+  const [selectedLeadForEmail, setSelectedLeadForEmail] = useState<Lead | null>(null);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
+  const [emailSubject, setEmailSubject] = useState("");
+  const [emailBody, setEmailBody] = useState("");
+  const [sendingEmail, setSendingEmail] = useState(false);
+
+  const EMAIL_TEMPLATES = useMemo(() => [
+    {
+      id: "first_call",
+      name: "First Call Template",
+      subject: "Welcome to ApplyWizz - Great speaking with you!",
+      body: `Hi ${cleanLeadName(selectedLeadForEmail?.client_name || 'there')},
+
+It was a pleasure speaking with you today about your career goals. I'm ${formatAssociateName(userEmail, userProfile?.full_name)}, your dedicated sales associate at ApplyWizz.
+
+We are excited to help you scale your job applications and land your dream role. I've attached some details discussed during our call for your reference.
+
+Looking forward to our next steps.
+
+Best regards,
+${formatAssociateName(userEmail, userProfile?.full_name)}
+ApplyWizz Team`
+    },
+    {
+      id: "dnp_after_1st",
+      name: "Email After First DNP",
+      subject: "Quick Follow-Up from ApplyWizz Regarding Your Job Search",
+      body: `Hi ${cleanLeadName(selectedLeadForEmail?.client_name || 'there')},
+
+This is a quick follow-up from ApplyWizz. Our team recently tried reaching out to discuss how ApplyWizz supports job seekers by managing and submitting job applications consistently on their behalf.
+
+Here are a few recent ApplyWizz outcomes:
+
+• One ApplyWizz client secured a job offer after our team managed their applications.
+View the case study here.
+
+• Another ApplyWizz client received 9 interview calls within 30 days after we started managing their applications.
+Check the case study here.
+
+If you'd like to learn how ApplyWizz can support your job search, please reply to this email or let us know a convenient time to connect.
+
+Best regards,
+Team ApplyWizz`
+    },
+    {
+      id: "followup_standard",
+      name: "Follow-up Template",
+      subject: "Quick Follow-Up from ApplyWizz Regarding Your Job Search",
+      body: `Hello ${cleanLeadName(selectedLeadForEmail?.client_name || 'there')},
+
+I trust you're having a productive week.
+
+I'm reaching out to follow up on my previous email. As a professional job application management service, ApplyWizz has a proven track record of helping job seekers secure interview calls more efficiently across various industries.
+
+Here are a few recent ApplyWizz outcomes:
+
+• One ApplyWizz client secured a job offer after our team managed their applications.
+View the case study here.
+
+• Another ApplyWizz client received 9 interview calls within 30 days after we started managing their applications.
+Check the case study here.
+
+If you're still exploring ways to optimize your job search and want to learn more about how ApplyWizz can support your career goals, please reply to this email or let us know a convenient time to connect.
+
+Best regards,
+Team ApplyWizz`
+    },
+    {
+      id: "followup_2days",
+      name: "2-Day Follow-Up",
+      subject: "A Quick Follow-Up from ApplyWizz",
+      body: `Hello ${cleanLeadName(selectedLeadForEmail?.client_name || 'there')},
+
+I'm checking in as I haven't heard back from you yet. I understand you're busy, but I wanted to ensure you didn't miss out on how ApplyWizz can help you land your next job faster.
+
+We specialize in managing the tedious part of the job search—sending consistent, high-quality applications on your behalf—so you can focus on acing your interviews.
+
+Here are a few recent ApplyWizz outcomes:
+
+• One ApplyWizz client secured a job offer after our team managed their applications.
+View the case study here.
+
+• Another ApplyWizz client received 9 interview calls within 30 days after we started managing their applications.
+Check the case study here.
+
+Please let me know if you're available for a brief 5-minute chat this week to discuss how we can support your search.
+
+Best regards,
+Team ApplyWizz`
+    },
+    {
+      id: "followup_final",
+      name: "Final Follow-up",
+      subject: "Final Follow-Up from ApplyWizz",
+      body: `Hello ${cleanLeadName(selectedLeadForEmail?.client_name || 'there')},
+
+I've tried reaching out a couple of times but haven't heard back. I'll assume that now might not be the right time for you to start with ApplyWizz.
+
+However, if your circumstances change and you'd like to automate your job application process and get more interview calls, please feel free to reach out anytime.
+
+Here are a few recent ApplyWizz outcomes:
+
+• One ApplyWizz client secured a job offer after our team managed their applications.
+View the case study here.
+
+• Another ApplyWizz client received 9 interview calls within 30 days after we started managing their applications.
+Check the case study here.
+
+Wishing you the best of luck with your job search and future career endeavors.
+
+Best regards,
+Team ApplyWizz`
+    },
+    ...customTemplates.map(ct => ({
+      id: ct.id,
+      name: ct.is_global ? `[Global] ${ct.name || ct.subject.substring(0, 15)}` : (ct.name || ct.subject.substring(0, 20)),
+      subject: ct.subject,
+      body: ct.body,
+      isCustom: true
+    }))
+  ], [selectedLeadForEmail, userEmail, userProfile, customTemplates]);
+
+  const handleOpenMail = (lead: Lead) => {
+    setSelectedLeadForEmail(lead);
+    setIsEmailModalOpen(true);
+    // Reset selection
+    setSelectedTemplateId("");
+    setEmailSubject("");
+    setEmailBody("");
+  };
+
+  const handleTemplateSelect = (id: string) => {
+    const t = EMAIL_TEMPLATES.find(x => x.id === id);
+    if (t) {
+      setSelectedTemplateId(id);
+      setEmailSubject(t.subject);
+      setEmailBody(t.body);
+    }
+  };
+
+  const handleSendMail = async () => {
+    if (!selectedLeadForEmail || !userEmail) return;
+    setSendingEmail(true);
+
+    try {
+      const officialHtmlBody = wrapInProfessionalLayout(emailBody, emailSubject);
+
+      const mailRes = await fetch("/api/email/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          recipientEmail: selectedLeadForEmail.email,
+          subject: emailSubject,
+          body: officialHtmlBody,
+          senderEmail: userEmail,
+        })
+      });
+
+      const mailData = await mailRes.json();
+      if (!mailData.success) throw new Error(mailData.error || "Graph API error.");
+
+      // Log it
+      await supabase.from("call_history").insert([{
+        lead_id: selectedLeadForEmail.business_id,
+        email: selectedLeadForEmail.email,
+        phone: selectedLeadForEmail.phone,
+        assigned_to: userProfile?.full_name || userEmail,
+        current_stage: selectedLeadForEmail.current_stage || "Prospect",
+        followup_date: todayLocalYMD(),
+        call_started_at: new Date().toISOString(),
+        notes: `Email Sent: ${emailSubject}`
+      }]);
+
+      setIsEmailModalOpen(false);
+      alert(`Email sent successfully to ${selectedLeadForEmail.client_name}`);
+    } catch (err: any) {
+      console.error(err);
+      alert("Failed to send email: " + err.message);
+    } finally {
+      setSendingEmail(false);
+    }
+  };
+
   const [salesClosedTotal, setSalesClosedTotal] = useState(0);
 
   const [salesUsers, setSalesUsers] = useState<{ full_name: string; user_email: string }[]>([]);
@@ -471,12 +751,95 @@ export default function SalesPage() {
   const [editedNote, setEditedNote] = useState("");
 
   const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(true);
-  const [userEmail, setUserEmail] = useState<string>("");
 
 
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(30); // default
   const [totalRecords, setTotalRecords] = useState(0);
+  const [stageCounts, setStageCounts] = useState<Record<string, number>>({});
+  const [showTemplateDialog, setShowTemplateDialog] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState<any>(null);
+
+  useEffect(() => {
+    const fetchTemplates = async () => {
+      if (!userEmail) return;
+
+      // Fetch from Supabase
+      const { data, error } = await supabase
+        .from("custom_email_templates")
+        .select("*")
+        .or(`created_by_email.eq.${userEmail},is_global.eq.true`);
+
+      // Fallback logic
+      const saved = localStorage.getItem(`custom_email_templates_${userEmail}`);
+      const localTemplates = saved ? JSON.parse(saved) : [];
+
+      if (!error && data && data.length > 0) {
+        setCustomTemplates(data);
+        localStorage.setItem(`custom_email_templates_${userEmail}`, JSON.stringify(data));
+      } else {
+        setCustomTemplates(localTemplates);
+      }
+    };
+    fetchTemplates();
+  }, [userEmail]);
+
+  const saveCustomTemplate = async () => {
+    if (!userEmail) return;
+
+    const payload = {
+      ...editingTemplate,
+      created_by_email: userEmail,
+      created_by_name: userProfile?.full_name || userEmail,
+    };
+
+    const { error } = await supabase.from("custom_email_templates").upsert(payload);
+
+    // Always update localStorage as a backup
+    const newTemplatesList = editingTemplate.id
+      ? customTemplates.map(t => t.id === editingTemplate.id ? payload : t)
+      : [...customTemplates, { ...payload, id: editingTemplate.id || Math.random().toString(36).substr(2, 9) }];
+
+    setCustomTemplates(newTemplatesList);
+    localStorage.setItem(`custom_email_templates_${userEmail}`, JSON.stringify(newTemplatesList));
+
+    if (error) {
+      console.error("DB Save failed, but saved to local storage:", error.message);
+    } else {
+      const { data: refreshed } = await supabase
+        .from("custom_email_templates")
+        .select("*")
+        .or(`created_by_email.eq.${userEmail},is_global.eq.true`);
+      if (refreshed && refreshed.length > 0) {
+        setCustomTemplates(refreshed);
+        localStorage.setItem(`custom_email_templates_${userEmail}`, JSON.stringify(refreshed));
+      }
+    }
+
+    alert("Template saved successfully!");
+    setShowTemplateDialog(false);
+    setEditingTemplate(null);
+  };
+
+  const deleteCustomTemplate = async (templateId: string) => {
+    if (!userEmail || !confirm("Are you sure you want to delete this template?")) return;
+
+    const { error } = await supabase
+      .from("custom_email_templates")
+      .delete()
+      .eq("id", templateId);
+
+    if (error) {
+      console.error("DB delete failed, updating local state:", error.message);
+      const newTemplates = customTemplates.filter(t => t.id !== templateId);
+      setCustomTemplates(newTemplates);
+      localStorage.setItem(`custom_email_templates_${userEmail}`, JSON.stringify(newTemplates));
+    } else {
+      setCustomTemplates(prev => prev.filter(t => t.id !== templateId));
+    }
+
+    if (editingTemplate?.id === templateId) setEditingTemplate(null);
+  };
 
   const zoomEmbedRef = useRef<ZoomPhoneEmbedHandle>(null);
 
@@ -630,7 +993,8 @@ export default function SalesPage() {
 
   useEffect(() => {
     fetchSalesClosureCount();
-  }, []);
+    fetchStageCounts();
+  }, [userProfile, ownerFilter]);
 
   useEffect(() => {
     const run = async () => {
@@ -1007,10 +1371,17 @@ id, business_id, name, email, phone,
   }>({ key: null, direction: 'asc' });
 
   const handleSort = (key: keyof Lead) => {
-    setSortConfig((prev) => ({
-      key,
-      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc',
-    }));
+    setSortConfig((prev) => {
+      if (prev.key !== key) {
+        // Default to desc for date fields to show latest first
+        const defaultDir = (key === "created_at" || key === "assigned_at") ? "desc" : "asc";
+        return { key, direction: defaultDir };
+      }
+      return {
+        key,
+        direction: prev.direction === "asc" ? "desc" : "asc",
+      };
+    });
   };
 
   const handleUpdateAssignedTo = async (leadId: string, selectedName: string, selectedEmail: string) => {
@@ -1436,17 +1807,52 @@ id, business_id, name, email, phone,
   }, [filteredLeads, sortConfig]);
 
   const fetchSalesClosureCount = async () => {
-    const { count, error } = await supabase
+    let q = supabase
       .from("sales_closure")
       .select("lead_id", { count: "exact", head: true });
 
+    if (userProfile?.roles === "Sales Associate") {
+      q = q.eq("account_assigned_name", userProfile.full_name);
+    } else if (ownerFilter !== "all" && ["Admin", "Super Admin", "Sales", "Marketing"].includes(userProfile?.roles || "")) {
+      q = q.eq("account_assigned_name", ownerFilter);
+    }
+
+    const { count, error } = await q;
+
     if (!error) setSalesClosedTotal(count ?? 0);
+  };
+
+  const fetchStageCounts = async () => {
+    if (!userProfile) return;
+
+    // Manual counts from fetching stages or individual counts
+    const counts: Record<string, number> = {};
+    let total = 0;
+    for (const stage of salesStages) {
+      let q = supabase
+        .from("leads")
+        .select("*", { count: "exact", head: true })
+        .eq("status", "Assigned")
+        .eq("current_stage", stage);
+
+      if (userProfile.roles === "Sales Associate") {
+        q = q.eq("assigned_to", userProfile.full_name);
+      } else if (ownerFilter !== "all" && ["Admin", "Super Admin", "Sales", "Marketing"].includes(userProfile.roles)) {
+        q = q.eq("assigned_to", ownerFilter);
+      }
+
+      const { count } = await q;
+      counts[stage] = count || 0;
+      total += (count || 0);
+    }
+    counts['total'] = total;
+    setStageCounts(counts);
   };
 
 
 
   return (
-    <ProtectedRoute allowedRoles={["Sales", "Sales Associate", "Super Admin", "Admin"]}>
+    <ProtectedRoute allowedRoles={["Sales", "Sales Associate", "Super Admin", "Admin", "Marketing"]}>
       <style jsx global>{`
   .premium - font {
   -webkit - font - smoothing: antialiased;
@@ -1526,6 +1932,13 @@ id, business_id, name, email, phone,
                 <Button variant="outline" size="sm" onClick={() => setView("email_logs")} className="h-8 gap-2 border-blue-200 text-blue-600 font-medium bg-blue-50/50 hover:bg-blue-50">
                   <Mail className="w-4 h-4 text-blue-500" /> <span className="hidden lg:inline">Email History</span>
                 </Button>
+
+                <Button variant="outline" size="sm" onClick={() => {
+                  setEditingTemplate({ subject: "", body: "", is_global: false });
+                  setShowTemplateDialog(true);
+                }} className="h-8 gap-2 border-purple-200 text-purple-600 font-medium bg-purple-50/50 hover:bg-purple-50">
+                  <Plus className="w-4 h-4 text-purple-500" /> <span className="hidden lg:inline">Custom Template</span>
+                </Button>
               </div>
             </Header>
             <div className="flex flex-1 overflow-hidden">
@@ -1557,6 +1970,40 @@ id, business_id, name, email, phone,
                   )}
                 </div>
 
+                {view === "leads" && (
+                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4 mb-6">
+                    <Card className="border-none shadow-sm bg-white hover:shadow-md transition-shadow cursor-pointer" onClick={() => setStageFilter("all")}>
+                      <CardHeader className="p-3 pb-0">
+                        <CardTitle className="text-[10px] uppercase font-bold text-gray-500 tracking-wider h-8 flex items-center">
+                          Total Leads
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="p-3 pt-1">
+                        <div className="text-xl font-bold text-slate-800">
+                          {stageCounts['total'] || 0}
+                        </div>
+                        <div className="w-full h-1 mt-2 rounded-full opacity-50 bg-slate-400" />
+                      </CardContent>
+                    </Card>
+
+                    {salesStages.map((stage) => (
+                      <Card key={stage} className="border-none shadow-sm bg-white hover:shadow-md transition-shadow cursor-pointer" onClick={() => setStageFilter(stage)}>
+                        <CardHeader className="p-3 pb-0">
+                          <CardTitle className="text-[10px] uppercase font-bold text-gray-500 tracking-wider h-8 flex items-center">
+                            {stage}
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="p-3 pt-1">
+                          <div className="text-xl font-bold text-slate-800">
+                            {stageCounts[stage] || 0}
+                          </div>
+                          <div className={cn("w-full h-1 mt-2 rounded-full opacity-50", getStageColor(stage).split(" ")[0])} />
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+
                 {view === "activity" ? (
                   <ActivityView userProfile={userProfile} onBack={() => setView("leads")} />
                 ) : view === "call_stats" ? (
@@ -1564,7 +2011,7 @@ id, business_id, name, email, phone,
                 ) : view === "renewals" ? (
                   <RenewalsView />
                 ) : view === "email_logs" ? (
-                  <EmailLogView filterEmail={userEmail} />
+                  <EmailLogView filterEmail={["Admin", "Super Admin"].includes(userProfile?.roles || "") ? undefined : userEmail} />
                 ) : (
                   <>
 
@@ -1622,15 +2069,15 @@ id, business_id, name, email, phone,
                           </Select>
                         </div>
 
-                        {userProfile?.roles === "Admin" && (
+                        {["Admin", "Super Admin", "Sales", "Marketing"].includes(userProfile?.roles || "") && (
                           <div className="flex flex-col gap-1.5 min-w-[160px]">
-                            <Label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider">Owner</Label>
+                            <Label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider text-[#00a1e1]">Team View</Label>
                             <Select value={ownerFilter} onValueChange={setOwnerFilter}>
-                              <SelectTrigger className="h-8 text-xs border-gray-300 bg-white shadow-none">
-                                <SelectValue placeholder="Any" />
+                              <SelectTrigger className="h-8 text-xs border-gray-300 bg-white shadow-none focus:ring-1 focus:ring-[#00a1e1]">
+                                <SelectValue placeholder="Select Person" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="all">Any</SelectItem>
+                                <SelectItem value="all">View All (Team)</SelectItem>
                                 {salesUsers.map(u => <SelectItem key={u.user_email} value={u.full_name}>{u.full_name}</SelectItem>)}
                               </SelectContent>
                             </Select>
@@ -1684,6 +2131,7 @@ id, business_id, name, email, phone,
                       setPageSize={setPageSize}
                       isRightPanelCollapsed={isRightPanelCollapsed}
                       onOpenHistory={handleOpenHistory}
+                      onOpenMail={handleOpenMail}
                     />
                   </>
                 )}
@@ -1957,6 +2405,191 @@ id, business_id, name, email, phone,
         defaultMode={salesDialogMode}
       />
       <ZoomPhoneEmbed ref={zoomEmbedRef} callerEmail={userEmail} />
+
+      {/* Custom Email Template Dialog */}
+      <Dialog open={showTemplateDialog} onOpenChange={setShowTemplateDialog}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-purple-600">
+              <Mail className="w-5 h-5" />
+              {editingTemplate?.id ? "Edit Custom Template" : "Add New Custom Template"}
+            </DialogTitle>
+            <DialogDescription>
+              {userProfile?.roles?.includes("Admin") || userProfile?.roles?.includes("Super Admin")
+                ? "Draft a template for yourself or everyone."
+                : "Draft your personalized email template here."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-4">
+            <div className="space-y-2">
+              <Label>Template Name (e.g. Second Call)</Label>
+              <Input
+                placeholder="Enter template name..."
+                value={editingTemplate?.name || ""}
+                onChange={(e) => setEditingTemplate({ ...editingTemplate, name: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Email Subject</Label>
+              <Input
+                placeholder="Enter subject..."
+                value={editingTemplate?.subject || ""}
+                onChange={(e) => setEditingTemplate({ ...editingTemplate, subject: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Email Body</Label>
+              <Textarea
+                rows={10}
+                placeholder="Hi [Name], ..."
+                value={editingTemplate?.body || ""}
+                onChange={(e) => setEditingTemplate({ ...editingTemplate, body: e.target.value })}
+              />
+            </div>
+
+            {(userProfile?.roles?.includes("Admin") || userProfile?.roles?.includes("Super Admin")) && (
+              <div className="flex items-center space-x-2 border p-3 rounded bg-blue-50 border-blue-100">
+                <input
+                  type="checkbox"
+                  id="is_global_main"
+                  className="w-4 h-4"
+                  checked={editingTemplate?.is_global || false}
+                  onChange={(e) => setEditingTemplate({ ...editingTemplate, is_global: e.target.checked })}
+                />
+                <Label htmlFor="is_global_main" className="text-blue-700 font-semibold cursor-pointer">
+                  Make this template visible to ALL salespersons (Global)
+                </Label>
+              </div>
+            )}
+
+            {customTemplates.length > 0 && (
+              <div className="pt-4 border-t">
+                <Label className="text-xs text-gray-400 uppercase">Existing Templates</Label>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {customTemplates.map(t => (
+                    <div key={t.id} className="group relative">
+                      <button
+                        onClick={() => setEditingTemplate(t)}
+                        className={`px-3 py-1 text-xs border rounded-full transition-all pr-8 ${editingTemplate?.id === t.id ? 'bg-purple-100 border-purple-400 text-purple-700' : 'bg-white hover:bg-gray-50'}`}
+                      >
+                        {t.is_global ? "[G] " : ""}{t.name || t.subject.substring(0, 15)}
+                      </button>
+                      {(userProfile?.roles?.includes("Admin") || userProfile?.roles?.includes("Super Admin") || t.created_by_email === userEmail) && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); deleteCustomTemplate(t.id); }}
+                          className="absolute right-1 top-1/2 -translate-y-1/2 p-1 text-red-500 hover:bg-red-50 rounded-full transition-all"
+                          title="Delete Template"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter className="mt-6">
+            <Button variant="outline" onClick={() => { setShowTemplateDialog(false); setEditingTemplate(null); }}>
+              Cancel
+            </Button>
+            <Button
+              className="bg-purple-600 text-white hover:bg-purple-700"
+              onClick={saveCustomTemplate}
+              disabled={!editingTemplate?.name || !editingTemplate?.subject || !editingTemplate?.body}
+            >
+              Save Template
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Manual Compose Email Dialog */}
+      <Dialog open={isEmailModalOpen} onOpenChange={setIsEmailModalOpen}>
+        <DialogContent className="max-w-3xl overflow-hidden flex flex-col h-[90vh]">
+          <DialogHeader className="border-b pb-4">
+            <DialogTitle className="flex items-center gap-2">
+              <Mail className="w-5 h-5 text-blue-600" />
+              Compose Email to {selectedLeadForEmail?.client_name}
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto space-y-6 pt-6 px-1">
+            <div className="grid grid-cols-2 gap-4 p-4 bg-blue-50/50 rounded-lg border border-blue-100">
+              <div className="space-y-1">
+                <Label className="text-[10px] uppercase font-bold text-blue-600 tracking-wider">Recipient</Label>
+                <div className="text-sm font-semibold text-gray-800">{selectedLeadForEmail?.client_name}</div>
+                <div className="text-[11px] text-gray-500">{selectedLeadForEmail?.email}</div>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-[10px] uppercase font-bold text-blue-600 tracking-wider">Sender</Label>
+                <div className="text-sm font-semibold text-gray-800">{userProfile?.full_name}</div>
+                <div className="text-[11px] text-gray-500">{userEmail}</div>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <Label className="text-xs font-bold text-gray-700">Select Template Shortcut</Label>
+              <div className="flex flex-wrap gap-2">
+                {EMAIL_TEMPLATES.map(t => (
+                  <button
+                    key={t.id}
+                    onClick={() => handleTemplateSelect(t.id)}
+                    className={cn(
+                      "px-3 py-1.5 rounded-full text-[11px] font-semibold transition-all border",
+                      selectedTemplateId === t.id
+                        ? "bg-blue-600 text-white border-blue-600 shadow-md"
+                        : "bg-white text-gray-600 border-gray-200 hover:border-blue-400 hover:text-blue-600 shadow-sm"
+                    )}
+                  >
+                    {t.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label className="text-xs font-bold text-gray-700 uppercase tracking-widest text-indigo-600">Subject</Label>
+                <Input
+                  value={emailSubject}
+                  onChange={(e) => setEmailSubject(e.target.value)}
+                  placeholder="Enter email subject..."
+                  className="bg-white border-gray-200 focus:ring-2 focus:ring-blue-500 transition-all font-medium py-5 text-base"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs font-bold text-gray-700 uppercase tracking-widest text-indigo-600">Message Body</Label>
+                <Textarea
+                  value={emailBody}
+                  onChange={(e) => setEmailBody(e.target.value)}
+                  rows={15}
+                  placeholder="Write your message here..."
+                  className="bg-white border-gray-200 focus:ring-2 focus:ring-blue-500 transition-all font-medium resize-none text-[15px] leading-relaxed p-4"
+                />
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="border-t pt-4 mt-auto">
+            <Button variant="outline" onClick={() => setIsEmailModalOpen(false)} className="h-10 text-gray-500 border-gray-200 hover:bg-gray-50">
+              Discard Draft
+            </Button>
+            <Button
+              className="h-10 px-8 bg-blue-600 hover:bg-blue-700 text-white font-bold gap-2 shadow-lg shadow-blue-200 disabled:opacity-50 disabled:shadow-none"
+              onClick={handleSendMail}
+              disabled={sendingEmail || !emailBody || !emailSubject}
+            >
+              {sendingEmail ? (
+                <><Loader2 className="w-4 h-4 animate-spin" /> Sending...</>
+              ) : (
+                <><Send className="w-4 h-4" /> Send Email Now</>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </ProtectedRoute>
   );
 }
