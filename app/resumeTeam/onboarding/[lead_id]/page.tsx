@@ -250,11 +250,11 @@ export default function OnboardingForm() {
     // 1️⃣ Role Validation (Exact Match Check)
     let isNewDomain = false;
     const jobRoles = csvToArray(obJobRolesText);
-    const roleValue = (jobRoles[0] || fullOnboardingData?.role || "").trim();
+    const roleValue = obJobRolesText || fullOnboardingData?.role || "";
 
     try {
       // Fetch from us-jobs-roles as per requirement
-      const rolesRes = await fetch("https://applywizz-crm-tool.vercel.app/api/all-job-roles");
+      const rolesRes = await fetch("https://dashboard.apply-wizz.com/api/all-job-roles/");
       if (rolesRes.ok) {
         const rolesData = await rolesRes.json();
         // Be more flexible with the structure: Array, .data, .roles, or .job_roles
@@ -264,8 +264,7 @@ export default function OnboardingForm() {
 
         if (roleValue) {
           const matchedRole = rolesList.find((r: any) => {
-            const nameToMatch = (typeof r === 'string' ? r : r?.name || "")?.trim();
-            // Exact case-sensitive match as required
+            const nameToMatch = (typeof r === 'string' ? r : r?.name || "");
             return nameToMatch === roleValue;
           });
           isNewDomain = !matchedRole;
