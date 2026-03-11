@@ -108,8 +108,13 @@ export async function GET(request: Request) {
         // Send a single consolidated email
         await processEmailSending({
             senderEmail: "support@applywizz.com",
-            recipientEmail: "balaji@applywizz.com",
-            ccEmails: ["dinesh@applywizz.com"],
+            recipientEmail: "BALAJI@applywizz.com",
+            ccEmails: [
+                "RamaKrishna@applywizz.com",
+                "Shyam@applywizz.com",
+                "abhilash@applywizz.com",
+                "Dinesh@applywizz.com"
+            ],
             subject: subject,
             body: body,
         });
