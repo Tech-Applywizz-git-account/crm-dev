@@ -10,6 +10,7 @@ interface Attachment {
 interface EmailParams {
     senderEmail: string;
     recipientEmail: string;
+    ccEmails?: string[];
     subject: string;
     body: string;
     attachments?: Attachment[];
@@ -18,6 +19,7 @@ interface EmailParams {
 export async function sendGraphEmail({
     senderEmail,
     recipientEmail,
+    ccEmails,
     subject,
     body,
     attachments
@@ -40,6 +42,15 @@ export async function sendGraphEmail({
                     },
                 },
             ],
+            ...(ccEmails && ccEmails.length > 0
+                ? {
+                    ccRecipients: ccEmails.map((email) => ({
+                        emailAddress: {
+                            address: email,
+                        },
+                    })),
+                }
+                : {}),
             attachments: attachments?.map(att => ({
                 "@odata.type": "#microsoft.graph.fileAttachment",
                 name: att.name,
