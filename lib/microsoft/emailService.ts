@@ -11,6 +11,7 @@ interface Attachment {
 interface SendEmailParams {
     senderEmail: string;
     recipientEmail: string;
+    ccEmails?: string[];
     subject: string;
     body: string;
     attachments?: Attachment[];
@@ -19,6 +20,7 @@ interface SendEmailParams {
 export async function processEmailSending({
     senderEmail,
     recipientEmail,
+    ccEmails,
     subject,
     body,
     attachments
@@ -36,6 +38,7 @@ export async function processEmailSending({
         await sendGraphEmail({
             senderEmail,
             recipientEmail,
+            ccEmails,
             subject,
             body,
             attachments
