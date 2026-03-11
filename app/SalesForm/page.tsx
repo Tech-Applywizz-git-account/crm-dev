@@ -81,15 +81,17 @@ export default function SalesFormPage() {
 
   // Add-ons
   const [resumeValue, setResumeValue] = useState<string>("");
+  const [digitalResume, setDigitalResume] = useState<"yes" | "no" | null>(null);
   const [portfolioValue, setPortfolioValue] = useState<string>("");
   const [linkedinValue, setLinkedinValue] = useState<string>("");
   const [githubValue, setGithubValue] = useState<string>("");
   const [jobBoardValue, setJobBoardValue] = useState<string>("");
-  // Add with the other add-on states
   const [badgeValue, setBadgeValue] = useState<string>("");
-
+  const [forageInternshipValue, setForageInternshipValue] = useState<string>("");
 
   // NEW add-ons + notes
+  const [forageCertification, setForageCertification] = useState<string>("");
+  const [forageDescription, setForageDescription] = useState<string>("");
   const [coursesValue, setCoursesValue] = useState<string>("");
   const [customLabel, setCustomLabel] = useState<string>("");
   const [customValue, setCustomValue] = useState<string>("");
@@ -212,9 +214,10 @@ export default function SalesFormPage() {
       n(githubValue) +
       n(coursesValue) +
       n(badgeValue) +   // NEW
+      n(forageInternshipValue) + // NEW
       n(customValue) +     // NEW
       n(jobBoardValue),
-    [autoTotal, resumeValue, portfolioValue, linkedinValue, githubValue, coursesValue, customValue, badgeValue, jobBoardValue]
+    [autoTotal, resumeValue, portfolioValue, linkedinValue, githubValue, coursesValue, customValue, badgeValue, forageInternshipValue, jobBoardValue]
   );
 
   const nextDueDate = useMemo(() => {
@@ -375,6 +378,9 @@ export default function SalesFormPage() {
         courses_sale_value: numOrNull(coursesValue),
         custom_label: (customLabel.trim() || null),
         custom_sale_value: numOrNull(customValue),
+        forage_internship_sale_value: numOrNull(forageInternshipValue),
+        forage_internship_certification: forageCertification.trim() || null,
+        forage_internship_description: forageDescription.trim() || null,
         commitments: (commitments.trim() || null),
         no_of_job_applications:
           noOfJobApps.trim() === "" ? null : Math.max(0, parseInt(noOfJobApps, 10) || 0),
@@ -386,9 +392,54 @@ export default function SalesFormPage() {
         associates_name: "",
         associates_tl_email: "",
         associates_tl_name: "",
+        ...(() => {
+          let resumeAssoc = null;
+          let techAssoc = null;
+
+          const numResVal = numOrNull(resumeValue);
+          const numPortVal = numOrNull(portfolioValue);
+
+          if (digitalResume === "yes" && numPortVal !== null) {
+            resumeAssoc = "Resume Associate";
+            techAssoc = "Technical Associate";
+          } else if (digitalResume === "no" && numPortVal !== null) {
+            resumeAssoc = "Resume Associate";
+            techAssoc = "Technical Associate";
+          } else if (digitalResume === "yes" && numPortVal === null) {
+            resumeAssoc = "Resume Associate";
+            techAssoc = "Technical Associate"; // assign portfolio to tech
+          } else if (digitalResume === "no" && numPortVal === null) {
+            // no one gets assigned
+            resumeAssoc = null;
+            techAssoc = null;
+          }
+
+          // TODO: Replace with the actual email/name lookups or states for these roles if they exist.
+          // For now, setting the role name as placeholder or leaving empty based on logic.
+          return {
+            // Example placeholders:
+            // resume_associate_assigned: resumeAssoc,
+            // technical_associate_assigned: techAssoc,
+          };
+        })(),
         account_assigned_name: closerName?.trim() || null,
         account_assigned_email: closerEmail || null,
       };
+
+      // Handling Digital Resume Selection
+      if (digitalResume) {
+        // Option 2: Using a dedicated text column so old numbers are safe
+        (salesPayload as any).digital_resume = digitalResume;
+      }
+
+      // Since the UI fields (resumeValue and portfolioValue) automatically split 
+      // when the user clicks "Yes", the states already hold the correct 50/50 numbers.
+      // Therefore, we do not need to slice salesPayload.resume_sale_value again here backend-side!
+
+      // Explicitly forcing digital_resume_sale_value to null so the database doesn't auto-fill it
+      if (digitalResume === "yes") {
+        (salesPayload as any).digital_resume_sale_value = null;
+      }
 
       const { error: salesErr } = await supabase.from("sales_closure").insert(salesPayload);
       if (salesErr) {
@@ -411,11 +462,15 @@ export default function SalesFormPage() {
       setSubscriptionSaleValue("");
       setPaymentMode("");
       setResumeValue("");
+      setDigitalResume(null);
       setPortfolioValue("");
       setLinkedinValue("");
       setGithubValue("");
       setCoursesValue("");
       setBadgeValue("");
+      setForageInternshipValue("");
+      setForageCertification("");
+      setForageDescription("");
       setJobBoardValue("");
 
       setCustomLabel("");
@@ -728,15 +783,52 @@ export default function SalesFormPage() {
                 <div className="border rounded-md p-4 space-y-3">
                   <Label className="font-semibold">Optional Add-On Services</Label>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Input
-                      type="number"
-                      inputMode="decimal"
-                      min="0"
-                      step="0.01"
-                      placeholder="Resume Sale Value ($)"
-                      value={resumeValue}
-                      onChange={(e) => setResumeValue(e.target.value)}
-                    />
+                    <div className="flex flex-col gap-2">
+                      <Input
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        step="0.01"
+                        placeholder="Resume Sale Value ($)"
+                        value={resumeValue}
+                        onChange={(e) => setResumeValue(e.target.value)}
+                      />
+                      {resumeValue && Number(resumeValue) > 0 && (
+                        <div className="flex items-center gap-4 mt-2 px-1">
+                          <Label className="font-medium">Digital Resume Included?</Label>
+                          <div className="flex items-center gap-2">
+                            <label className="flex items-center gap-1 cursor-pointer">
+                              <input
+                                type="radio"
+                                name="digital_resume"
+                                value="yes"
+                                checked={digitalResume === "yes"}
+                                onChange={() => {
+                                  setDigitalResume("yes");
+                                  const val = Number(resumeValue || 0);
+                                  if (val > 0) {
+                                    const half = (val / 2).toString();
+                                    setResumeValue(half);
+                                    setPortfolioValue(half);
+                                  }
+                                }}
+                              />
+                              Yes
+                            </label>
+                            <label className="flex items-center gap-1 cursor-pointer">
+                              <input
+                                type="radio"
+                                name="digital_resume"
+                                value="no"
+                                checked={digitalResume === "no"}
+                                onChange={() => setDigitalResume("no")}
+                              />
+                              No
+                            </label>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                     <Input
                       type="number"
                       inputMode="decimal"
@@ -843,6 +935,31 @@ export default function SalesFormPage() {
                     </div>
                   </div>
 
+                  {/* Forage Internship Add-on */}
+                  <div className="border rounded-md p-4 space-y-3">
+                    <Label className="font-semibold">Forage Internship Details</Label>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <Input
+                        placeholder="Forage Internship Certification"
+                        value={forageCertification}
+                        onChange={(e) => setForageCertification(e.target.value)}
+                      />
+                      <Input
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        step="0.01"
+                        placeholder="Forage Internship Sale Value ($)"
+                        value={forageInternshipValue}
+                        onChange={(e) => setForageInternshipValue(e.target.value)}
+                      />
+                    </div>
+                    <Textarea
+                      placeholder="Enter Forage Internship Description..."
+                      value={forageDescription}
+                      onChange={(e) => setForageDescription(e.target.value)}
+                    />
+                  </div>
 
                   {/* Custom add-on: label + amount */}
 

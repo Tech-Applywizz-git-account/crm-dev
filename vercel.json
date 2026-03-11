@@ -1,0 +1,12 @@
+{
+    "crons": [
+        {
+            "path": "/api/cron/hourly-zoom-report",
+            "schedule": "0 * * * *"
+        },
+        {
+            "path": "/api/cron/other-role-alert",
+            "schedule": "30 2 * * *"
+        }
+    ]
+}

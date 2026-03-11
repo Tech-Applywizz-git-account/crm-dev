@@ -164,7 +164,11 @@ export default function NewSaleCloseForm({ leadId }: NewSaleCloseFormProps) {
 
 
   // Add-ons
+  const [digitalResume, setDigitalResume] = useState<string>("");
   const [resumeValue, setResumeValue] = useState<string>("");
+  const [forageInternshipValue, setForageInternshipValue] = useState<string>("");
+  const [forageCertification, setForageCertification] = useState<string>("");
+  const [forageDescription, setForageDescription] = useState<string>("");
   const [portfolioValue, setPortfolioValue] = useState<string>("");
   const [linkedinValue, setLinkedinValue] = useState<string>("");
   const [githubValue, setGithubValue] = useState<string>("");
@@ -274,6 +278,7 @@ export default function NewSaleCloseForm({ leadId }: NewSaleCloseFormProps) {
       badgeValue,
       jobBoardValue,
       coursesValue,
+      forageInternshipValue,
       customValue
     );
     return round2(autoTotal + addons);
@@ -286,6 +291,7 @@ export default function NewSaleCloseForm({ leadId }: NewSaleCloseFormProps) {
     badgeValue,
     jobBoardValue,
     coursesValue,
+    forageInternshipValue,
     customValue,
   ]);
 
@@ -365,8 +371,27 @@ export default function NewSaleCloseForm({ leadId }: NewSaleCloseFormProps) {
 
         // ⭐ NEW — Store closer name and email in sales_closure for attribution
         account_assigned_name: user?.name || user?.email || "Unknown",
-        account_assigned_email: user?.email || null
+        account_assigned_email: user?.email || null,
+
+        forage_internship_sale_value: safeParseFloatOrNull(forageInternshipValue),
+        forage_internship_certification: forageCertification.trim() || null,
+        forage_internship_description: forageDescription.trim() || null,
       };
+
+      // Handling Digital Resume Selection
+      if (digitalResume) {
+        // Option 2: Using a dedicated text column so old numbers are safe
+        (insertPayload as any).digital_resume = digitalResume;
+      }
+
+      // Since the UI fields (resumeValue and portfolioValue) automatically split 
+      // when the user clicks "Yes", the states already hold the correct 50/50 numbers.
+      // Therefore, we do not need to slice insertPayload.resume_sale_value again here backend-side!
+
+      // Explicitly forcing digital_resume_sale_value to null so the database doesn't auto-fill it
+      if (digitalResume === "yes") {
+        (insertPayload as any).digital_resume_sale_value = null;
+      }
 
 
       const { error: insertError } = await supabase
@@ -660,6 +685,43 @@ export default function NewSaleCloseForm({ leadId }: NewSaleCloseFormProps) {
                       value={resumeValue}
                       onChange={(e) => setResumeValue(e.target.value)}
                     />
+                    {Number(resumeValue) > 0 && (
+                      <div className="flex flex-col ml-4 mt-2">
+                        <Label className="text-sm text-gray-700 font-semibold mb-1">
+                          Digital Resume Included?
+                        </Label>
+                        <div className="flex items-center gap-4 text-sm mt-1">
+                          <label className="flex items-center gap-1 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="digital_resume"
+                              value="yes"
+                              checked={digitalResume === "yes"}
+                              onChange={() => {
+                                setDigitalResume("yes");
+                                const val = Number(resumeValue || 0);
+                                if (val > 0) {
+                                  const half = (val / 2).toString();
+                                  setResumeValue(half);
+                                  setPortfolioValue(half);
+                                }
+                              }}
+                            />
+                            Yes
+                          </label>
+                          <label className="flex items-center gap-1 cursor-pointer">
+                            <input
+                              type="radio"
+                              name="digital_resume"
+                              value="no"
+                              checked={digitalResume === "no"}
+                              onChange={() => setDigitalResume("no")}
+                            />
+                            No
+                          </label>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
 
@@ -760,6 +822,33 @@ export default function NewSaleCloseForm({ leadId }: NewSaleCloseFormProps) {
                   </div>
                 </div>
 
+                <div className="border rounded-md p-4 space-y-3">
+                  <Label className="font-semibold">Forage Internship Details</Label>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Input
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      placeholder="Forage Internship Value ($)"
+                      value={forageInternshipValue}
+                      onChange={(e) => setForageInternshipValue(e.target.value)}
+                    />
+                    <Input
+                      type="number"
+                      placeholder="No. of Certification(s)"
+                      min="0"
+                      value={forageCertification}
+                      onChange={(e) => setForageCertification(e.target.value)}
+                    />
+                    <div className="md:col-span-2">
+                      <Textarea
+                        placeholder="Detailed Description of the Internship…"
+                        value={forageDescription}
+                        onChange={(e) => setForageDescription(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
 
                 <div className="border rounded-md p-4 space-y-2">
                   <Label className="font-semibold">Commitments</Label>
