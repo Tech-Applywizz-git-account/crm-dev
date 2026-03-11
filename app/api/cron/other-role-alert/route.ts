@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/utils/supabase/server"; // Or however they get supabase server
 import { createClient } from "@supabase/supabase-js";
-import { processEmailSending } from "@/lib/microsoft/emailService";
+import { processEmailSending } from "../../../../lib/microsoft/emailService";
 
 // Helper to get exactly 08:00 AM IST (02:30 AM UTC) for a given date
 function getIST8AMBoundaries(currentUtcDate: Date) {
@@ -56,84 +55,69 @@ export async function GET(request: Request) {
             });
         }
 
-        let emailsSent = 0;
-        let emailsFailed = 0;
-        const failedDetails = [];
-
-        // Loop and send emails safely
+        // Build rows for all clients
+        let tableRows = "";
         for (const client of clients) {
-            try {
-                // Defensive extraction of client details
-                const fullName = client.full_name || client.name || "N/A";
-                const email = client.company_email || client.personal_email || client.email || "N/A";
-                // Get extension if user provided (+1... vs 1...)
-                const rawPhone = client.callable_phone || client.whatsapp_number || client.phone || "N/A";
-                let mobileNumberDisplay = rawPhone;
+            const fullName = client.full_name || client.name || "N/A";
+            const email = client.company_email || client.personal_email || client.email || "N/A";
+            const rawPhone = client.callable_phone || client.whatsapp_number || client.phone || "N/A";
 
-                // Construct the HTML Email Template
-                const subject = `Notice: Onboarding Client Chose "Other" Role - ${fullName}`;
-                const body = `
-                <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333333;">
-                    <p style="font-size: 16px;">Hi Balaji,</p>
-                    <p>A new client has completed onboarding and specifically chosen <strong>"Other"</strong> as their role. Please review their details below:</p>
-                    
-                    <table style="border-collapse: collapse; width: 100%; max-width: 600px; margin-top: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                        <tr>
-                            <td style="padding: 12px; border: 1px solid #e2e8f0; font-weight: 600; background-color: #f8fafc; width: 35%;">Client Name</td>
-                            <td style="padding: 12px; border: 1px solid #e2e8f0;">${fullName}</td>
-                        </tr>
-                        <tr>
-                            <td style="padding: 12px; border: 1px solid #e2e8f0; font-weight: 600; background-color: #f8fafc;">Email Details</td>
-                            <td style="padding: 12px; border: 1px solid #e2e8f0;">
-                                <a href="mailto:${email}" style="color: #2563eb; text-decoration: none;">${email}</a>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td style="padding: 12px; border: 1px solid #e2e8f0; font-weight: 600; background-color: #f8fafc;">Mobile Number</td>
-                            <td style="padding: 12px; border: 1px solid #e2e8f0;">${mobileNumberDisplay}</td>
-                        </tr>
-                        <tr>
-                            <td style="padding: 12px; border: 1px solid #e2e8f0; font-weight: 600; background-color: #f8fafc;">Selected Role</td>
-                            <td style="padding: 12px; border: 1px solid #e2e8f0;"><span style="background-color: #fef08a; padding: 2px 6px; border-radius: 4px;">${client.role}</span></td>
-                        </tr>
-                        <tr>
-                            <td style="padding: 12px; border: 1px solid #e2e8f0; font-weight: 600; background-color: #f8fafc;">Job Role (Other) provided</td>
-                            <td style="padding: 12px; border: 1px solid #e2e8f0;"><strong>${client.job_role_other}</strong></td>
-                        </tr>
-                    </table>
-
-                    <p style="margin-top: 30px; font-size: 14px; color: #475569;">
-                        Best Regards,<br>
-                        <strong>ApplyWizz Automated System</strong>
-                    </p>
-                </div>
-                `;
-
-                // Sending strictly one-by-one with proper error handling per client
-                await processEmailSending({
-                    senderEmail: "support@applywizz.com",
-                    recipientEmail: "balaji@applywizz.com",
-                    ccEmails: ["dinesh@applywizz.com"],
-                    subject: subject,
-                    body: body,
-                });
-
-                emailsSent++;
-                console.log(`✅ Email sent successfully to balaji for client ${fullName} (ID: ${client.id})`);
-
-            } catch (err: any) {
-                console.error(`❌ Failed to send alert email for Client ID Strategy ${client.id}:`, err);
-                emailsFailed++;
-                failedDetails.push({ clientId: client.id, error: err.message });
-            }
+            tableRows += `
+            <tr style="border-bottom: 1px solid #e2e8f0;">
+                <td style="padding: 12px; border: 1px solid #e2e8f0;">${fullName}</td>
+                <td style="padding: 12px; border: 1px solid #e2e8f0;">
+                    <a href="mailto:${email}" style="color: #2563eb; text-decoration: none;">${email}</a>
+                </td>
+                <td style="padding: 12px; border: 1px solid #e2e8f0;">${rawPhone}</td>
+                <td style="padding: 12px; border: 1px solid #e2e8f0;">
+                   <span style="background-color: #fef08a; padding: 2px 6px; border-radius: 4px;">${client.role}</span>
+                </td>
+                <td style="padding: 12px; border: 1px solid #e2e8f0;"><strong>${client.job_role_other}</strong></td>
+            </tr>
+            `;
         }
+
+        const subject = `Notice: ${clients.length} New Onboarding Client(s) Chose "Other" Role`;
+        const body = `
+        <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333333;">
+            <p style="font-size: 16px;">Hi Balaji,</p>
+            <p>The following ${clients.length} client(s) have completed onboarding and specifically chosen <strong>"Other"</strong> as their role. Please review their details below:</p>
+            
+            <table style="border-collapse: collapse; width: 100%; margin-top: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                <thead style="background-color: #f8fafc;">
+                    <tr>
+                        <th style="padding: 12px; border: 1px solid #e2e8f0; text-align: left;">Client Name</th>
+                        <th style="padding: 12px; border: 1px solid #e2e8f0; text-align: left;">Email Details</th>
+                        <th style="padding: 12px; border: 1px solid #e2e8f0; text-align: left;">Mobile</th>
+                        <th style="padding: 12px; border: 1px solid #e2e8f0; text-align: left;">Selected Role</th>
+                        <th style="padding: 12px; border: 1px solid #e2e8f0; text-align: left;">Job Role (Other)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${tableRows}
+                </tbody>
+            </table>
+
+            <p style="margin-top: 30px; font-size: 14px; color: #475569;">
+                Best Regards,<br>
+                <strong>ApplyWizz Automated System</strong>
+            </p>
+        </div>
+        `;
+
+        // Send a single consolidated email
+        await processEmailSending({
+            senderEmail: "support@applywizz.com",
+            recipientEmail: "balaji@applywizz.com",
+            ccEmails: ["dinesh@applywizz.com"],
+            subject: subject,
+            body: body,
+        });
 
         return NextResponse.json({
             success: true,
             totalProcessed: clients.length,
-            emailsSent,
-            emailsFailed,
-            failedDetails: failedDetails.length > 0 ? failedDetails : undefined,
+            message: "Consolidated email sent successfully."
         });
 
     } catch (e: any) {
