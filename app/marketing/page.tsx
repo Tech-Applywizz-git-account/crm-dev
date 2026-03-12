@@ -1,6 +1,6 @@
 //app/marketing/page.tsx
 "use client";
-import { useEffect, useRef, useState, useContext } from "react";
+import { useEffect, useRef, useState, useContext, useMemo } from "react";
 import Link from "next/link";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
@@ -70,6 +70,7 @@ interface Lead {
   created_at: string;
   assigned_to?: string;
   assigned_at?: string;
+  current_stage?: string;
 }
 
 
@@ -97,6 +98,7 @@ export default function MarketingPage() {
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [successDialogOpen, setSuccessDialogOpen] = useState(false);
   const [assignSuccessMessage, setAssignSuccessMessage] = useState("");
+  const [isLeadsLoading, setIsLeadsLoading] = useState(false);
   // const [leadTab, setLeadTab] = useState<"New" | "Assigned">("New");
 
   // Add state for deletion
@@ -158,9 +160,12 @@ export default function MarketingPage() {
   const [newSheetName, setNewSheetName] = useState("");
   const [newSheetUrl, setNewSheetUrl] = useState("");
   const [leadTab, setLeadTab] = useState<"New" | "Assigned" | "All">("New");
-  const [isAllView, setIsAllView] = useState(false);
   const [salesDoneLeads, setSalesDoneLeads] = useState([]);
   const [showSalesDoneDialog, setShowSalesDoneDialog] = useState(false);
+  const [unassignPersonFilter, setUnassignPersonFilter] = useState("all");
+  const [selectedStages, setSelectedStages] = useState<string[]>([]);
+  const [unassignConfirmDialogOpen, setUnassignConfirmDialogOpen] = useState(false);
+  const [stagesList, setStagesList] = useState<string[]>([]);
 
 
   const [resultDialogOpen, setResultDialogOpen] = useState(false);
@@ -184,10 +189,66 @@ export default function MarketingPage() {
   }, [resultDialogOpen]);
 
   useEffect(() => {
-    fetchGoogleSheets();
-    // fetchAllUniqueSources();
-    // ... your other useEffect code
+    const initData = async () => {
+      setLoading(true);
+      try {
+        await Promise.all([
+          fetchGoogleSheets(),
+          fetchSalesTeam(),
+          fetchLeadCounts(),
+          fetchStages(),
+          fetchSources(),
+          fetchLeadsAndSales(1, leadTab, searchTerm, statusFilter, sourceFilter, startDate, endDate, unassignPersonFilter, selectedStages)
+        ]);
+      } catch (err) {
+        console.error("Initialization failed:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    initData();
   }, []);
+
+  const fetchSalesTeam = async () => {
+    try {
+      const res = await fetch("/api/sales-users", { method: "GET" });
+      if (!res.ok) throw new Error(`Sales API failed: ${await res.text()}`);
+      const users = await res.json();
+      const sortedUsers = (users || []).sort((a: any, b: any) =>
+        (a.full_name || "").localeCompare(b.full_name || "")
+      );
+      setSalesTeamMembers(sortedUsers);
+    } catch (err) {
+      console.error("Failed to fetch sales team:", err);
+    }
+  };
+  const fetchSources = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("leads")
+        .select("source")
+        .not("source", "is", null);
+      if (error) throw error;
+      const sortedSources = Array.from(new Set(data.map((item: any) => item.source?.trim()))).filter(Boolean).sort();
+      setUniqueSources(sortedSources as string[]);
+    } catch (err) {
+      console.error("Failed to fetch sources:", err);
+    }
+  };
+
+  const fetchStages = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("leads")
+        .select("current_stage")
+        .not("current_stage", "is", null);
+      if (error) throw error;
+      const distinctStages = Array.from(new Set(data.map((item: any) => item.current_stage))).filter(Boolean);
+      setStagesList(distinctStages as string[]);
+    } catch (err) {
+      console.error("Failed to fetch stages:", err);
+    }
+  };
 
   useEffect(() => {
     let timer: NodeJS.Timeout;
@@ -200,38 +261,9 @@ export default function MarketingPage() {
   }, [copySuccess]);
 
 
-  const filteredLeads = leads.filter((lead) => {
-    const matchesSearch =
-      lead.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      lead.phone.includes(searchTerm) ||
-      lead.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      lead.city.toLowerCase().includes(searchTerm.toLowerCase());
-
-    const matchesStatus = statusFilter === "all" || lead.status === statusFilter;
-    // const matchesSource = sourceFilter === "all" || lead.source === sourceFilter;
-
-    const matchesSource =
-      sourceFilter === "all" ||
-      (lead.source?.toLowerCase().trim() === sourceFilter.toLowerCase().trim());
-
-
-    const matchesTab =
-      leadTab === "All" ||
-      (leadTab === "New" && lead.status === "New") ||
-      (leadTab === "Assigned" && lead.status === "Assigned");
-
-    return matchesSearch && matchesStatus && matchesSource && matchesTab;
-  });
-
-  // const paginationPages = Math.ceil(filteredLeads.length / pageSize);
-  const paginationPages = totalPages;
-
-
-
-  const sortLeads = (leads: Lead[]) => {
-    if (!sortConfig) return leads;
-
-    const sorted = [...leads].sort((a, b) => {
+  const sortedLeads = useMemo(() => {
+    if (!sortConfig) return leads || [];
+    const sorted = [...(leads || [])].sort((a, b) => {
       const aVal = a[sortConfig.key as keyof Lead];
       const bVal = b[sortConfig.key as keyof Lead];
 
@@ -248,28 +280,16 @@ export default function MarketingPage() {
       }
 
       if (sortConfig.key === "business_id") {
-        const getNumericPart = (val: string) => {
-          const match = val?.match(/\d+$/); // extract number after "AWL-"
-          return match ? parseInt(match[0]) : 0;
-        };
-
-        const aNum = getNumericPart(a.business_id);
-        const bNum = getNumericPart(b.business_id);
-
+        const aNum = parseInt(a.business_id?.match(/\d+$/)?.[0] || "0");
+        const bNum = parseInt(b.business_id?.match(/\d+$/)?.[0] || "0");
         return sortConfig.direction === "asc" ? aNum - bNum : bNum - aNum;
       }
-
-
-      // if (aStr < bStr) return sortConfig.direction === "asc" ? -1 : 1;
-      // if (aStr > bStr) return sortConfig.direction === "asc" ? 1 : -1;
       return 0;
     });
-
     return sorted;
-  };
+  }, [leads, sortConfig]);
 
-  const sortedLeads = sortLeads(filteredLeads);
-  const paginatedLeads = isAllView ? sortedLeads : sortedLeads;
+  const paginatedLeads = sortedLeads;
 
 
   const filteredSales = salesHistory.filter((item) => {
@@ -286,9 +306,7 @@ export default function MarketingPage() {
 
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
-      const selectableLeadIds = filteredLeads
-        .filter((lead) => lead.status !== "Assigned")
-        .map((lead) => lead.id);
+      const selectableLeadIds = (leads || []).map((lead) => lead.id);
       setSelectedLeads(selectableLeadIds);
     } else {
       setSelectedLeads([]);
@@ -507,21 +525,7 @@ export default function MarketingPage() {
   // };
 
 
-  const fetchAllUniqueSources = async () => {
-    try {
-      const { data, error } = await supabase
-        .from("leads")
-        .select("source")
-        .neq("source", "") // optional: ignore empty sources
 
-      if (error) throw error;
-
-      const sources = [...new Set(data.map(item => item.source))];
-      setUniqueSources(sources);
-    } catch (err) {
-      console.error("Error fetching unique sources:", err);
-    }
-  };
 
   const handleIndividualAssign = async (leadId: string, assignedTo: string) => {
     setLoading(true, "Assigning... please wait");
@@ -576,9 +580,7 @@ export default function MarketingPage() {
     }
   };
 
-  useEffect(() => {
-    fetchLeadCounts();
-  }, []);
+
 
 
   const handleMainFilterChange = ({
@@ -626,16 +628,18 @@ export default function MarketingPage() {
     status = statusFilter,
     source = sourceFilter,
     start = startDate,
-    end = endDate
+    end = endDate,
+    assignedTo = unassignPersonFilter,
+    stages = selectedStages
   ) => {
-    setLoading(true);
+    setIsLeadsLoading(true);
     try {
       const from = (page - 1) * pageSize;
       const to = from + pageSize - 1;
 
       let query = supabase
         .from("leads")
-        .select("*", { count: "exact" })
+        .select("id, business_id, name, phone, email, city, source, status, created_at, assigned_to, assigned_at, current_stage", { count: "exact" })
         .range(from, to)
         .order("created_at", { ascending: false });
 
@@ -652,53 +656,40 @@ export default function MarketingPage() {
           .lte("created_at", getUTCRange(end, false));
       }
 
-      if (tab && tab !== "All") query = query.eq("status", tab);
+      if (tab && tab !== "All") {
+        query = query.eq("status", tab);
+      } else if (status !== "all") {
+        query = query.eq("status", status);
+      }
+
       if (search) {
         query = query.or(
           `name.ilike.%${search}%,phone.ilike.%${search}%,email.ilike.%${search}%,city.ilike.%${search}%`
         );
       }
       if (source !== "all") query = query.eq("source", source);
-      if (status !== "all") query = query.eq("status", status);
+      if (assignedTo !== "all") query = query.eq("assigned_to", assignedTo);
+      if (stages.length > 0) query = query.in("current_stage", stages);
 
       const { data: leadsData, error, count } = await query;
       if (error) throw error;
 
       setLeads(leadsData ?? []);
       setTotalPages(Math.ceil((count || 0) / pageSize));
-
-
-      // Fetch Sales Team
-      const res = await fetch("/api/sales-users", { method: "GET" });
-      if (!res.ok) throw new Error(`Sales API failed: ${await res.text()}`);
-      const users = await res.json();
-      setSalesTeamMembers(users);
-
-      //     }
     } catch (err) {
       console.error("Error fetching leads:", err);
     } finally {
-      setLoading(false);
+      setIsLeadsLoading(false);
     }
   };
 
 
 
   useEffect(() => {
-    fetchLeadsAndSales(currentPage, leadTab, searchTerm, statusFilter, sourceFilter);
-  }, [currentPage, leadTab, pageSize, searchTerm, statusFilter, sourceFilter, startDate, endDate]);
+    fetchLeadsAndSales(currentPage, leadTab, searchTerm, statusFilter, sourceFilter, startDate, endDate, unassignPersonFilter, selectedStages);
+  }, [currentPage, leadTab, pageSize, searchTerm, statusFilter, sourceFilter, startDate, endDate, unassignPersonFilter, selectedStages]);
 
-  // Update uniqueSources whenever leads change to reflect only sources in the current page
-  useEffect(() => {
-    const sources = [
-      ...new Set(
-        leads
-          .map((l) => l.source?.trim())
-          .filter((s) => s && s.length > 0)
-      ),
-    ];
-    setUniqueSources(sources);
-  }, [leads]);
+
 
 
 
@@ -1045,10 +1036,55 @@ export default function MarketingPage() {
     setSortConfig({ key, direction });
   };
 
+  const handleUnassign = async () => {
+    setLoading(true);
+    try {
+      const { error } = await supabase
+        .from("leads")
+        .update({
+          status: "New",
+          assigned_to: null,
+          current_stage: "Prospect",
+          assigned_at: null,
+        })
+        .in("id", selectedLeads);
+
+      if (error) throw error;
+
+      setResultMessage({
+        title: "Success",
+        description: `Successfully unassigned ${selectedLeads.length} lead(s).`,
+        isError: false,
+      });
+      setResultDialogOpen(true);
+      setSelectedLeads([]);
+      setUnassignConfirmDialogOpen(false);
+      fetchLeadsAndSales(currentPage, leadTab, searchTerm, statusFilter, sourceFilter, startDate, endDate, unassignPersonFilter, selectedStages);
+      fetchLeadCounts();
+    } catch (err) {
+      console.error("Unassign error:", err);
+      setResultMessage({
+        title: "Error",
+        description: "Failed to unassign leads.",
+        isError: true,
+      });
+      setResultDialogOpen(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
 
   return (
     <>
       {loading && <FullScreenLoader />}
+      {isLeadsLoading && (
+        <div className="fixed top-0 left-0 w-full z-50">
+          <div className="h-1 bg-blue-100 overflow-hidden">
+            <div className="h-full bg-blue-600 animate-progress origin-left" />
+          </div>
+        </div>
+      )}
       <ProtectedRoute allowedRoles={["Marketing", "Super Admin"]}>
         {/* <div className="w-full overflow-x-hidden"> */}
         {/* <div className="w-full px-4 md:px-6 lg:px-8 overflow-x-hidden"> */}
@@ -1730,6 +1766,13 @@ export default function MarketingPage() {
                   </div>
                   {selectedLeads.length > 0 && (
                     <div className="flex gap-2">
+                      <Button
+                        onClick={() => setUnassignConfirmDialogOpen(true)}
+                        variant="secondary"
+                        className="gap-2"
+                      >
+                        Unassign ({selectedLeads.length})
+                      </Button>
                       <Button onClick={() => setBulkAssignDialogOpen(true)} className="gap-2">
                         <UserPlus className="h-4 w-4" />
                         Bulk Assign ({selectedLeads.length})
@@ -1747,16 +1790,14 @@ export default function MarketingPage() {
                 </div>
               </CardHeader>
               <CardContent>
-
-
-
-                <div className="flex flex-col sm:flex-row gap-4 mb-6">
-                  <div className="relative flex-1 flex gap-2">
+                <div className="flex flex-wrap items-end gap-4 mb-6">
+                  {/* Search Section */}
+                  <div className="flex-1 min-w-[300px] flex gap-2">
                     <div className="relative flex-1">
                       <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                       <Input
                         ref={searchInputRef}
-                        placeholder="Search by name, phone, email, or city..."
+                        placeholder="Search by name, phone, email..."
                         defaultValue={searchTerm}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
@@ -1778,85 +1819,159 @@ export default function MarketingPage() {
                     </Button>
                   </div>
 
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger className="min-w-[150px] w-full sm:w-auto">
-                      <SelectValue placeholder="Status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Status</SelectItem>
-                      <SelectItem value="New">New</SelectItem>
-                      <SelectItem value="Assigned">Assigned</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  {/* Status Filter */}
+                  <div className="flex flex-col gap-1">
+                    <Label className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">Status</Label>
+                    <Select value={statusFilter} onValueChange={setStatusFilter}>
+                      <SelectTrigger className="w-[130px]">
+                        <SelectValue placeholder="Status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Status</SelectItem>
+                        <SelectItem value="New">New</SelectItem>
+                        <SelectItem value="Assigned">Assigned</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
 
+                  {/* Source Filter */}
+                  <div className="flex flex-col gap-1">
+                    <Label className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">Source</Label>
+                    <Select
+                      value={sourceFilter}
+                      onValueChange={(value) => handleMainFilterChange({ source: value })}
+                    >
+                      <SelectTrigger className="w-[140px]">
+                        <SelectValue placeholder="Source" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Sources</SelectItem>
+                        {uniqueSources.map((source) => (
+                          <SelectItem key={source} value={source}>
+                            {source}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
+                  {/* Sales Person Filter */}
+                  <div className="flex flex-col gap-1">
+                    <Label className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">Sales Person</Label>
+                    <Select value={unassignPersonFilter} onValueChange={(val) => {
+                      setUnassignPersonFilter(val);
+                      setCurrentPage(1);
+                    }}>
+                      <SelectTrigger className="w-[160px]">
+                        <SelectValue placeholder="Select Sales Person" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Sales Persons</SelectItem>
+                        {salesTeamMembers
+                          .filter((member) => member.full_name && member.full_name.trim() !== "")
+                          .map((member) => (
+                            <SelectItem key={member.id} value={member.full_name}>
+                              {member.full_name}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-                  <Select
-                    value={sourceFilter}
-                    onValueChange={(value) =>
-                      handleMainFilterChange({ source: value })
-                    }
-                  >
-                    <SelectTrigger className="min-w-[150px] w-full sm:w-auto">
-                      <SelectValue placeholder="Source" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Sources</SelectItem>
-                      {uniqueSources.map((source) => (
-                        <SelectItem key={source} value={source}>
-                          {source}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-
-
-                  <div className="flex flex-col sm:flex-row gap-2">
-
+                  {/* Stages Filter */}
+                  <div className="flex flex-col gap-1">
+                    <Label className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">Stages</Label>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button variant="outline" className="min-w-[200px]">
-                          {startDate && endDate
-                            ? `📅 ${startDate} → ${endDate}`
-                            : "📅 Date Range"}
+                        <Button variant="outline" className="w-[160px] justify-between px-3">
+                          {selectedStages.length === 0 ? "Select Stages" : `${selectedStages.length} Selected`}
+                          <PlusCircle className="ml-2 h-4 w-4 opacity-50" />
                         </Button>
                       </DropdownMenuTrigger>
-
-                      <DropdownMenuContent className="p-4 space-y-4 w-[250px] sm:w-[300px]">
-                        <div className="space-y-2">
-                          <Label className="text-sm text-gray-600">Start Date</Label>
-                          {/* <Input
-        type="date"
-        value={startDate}
-        onChange={(e) => {
-          setStartDate(e.target.value);
-          setCurrentPage(1);
-        }}
-      /> */}
-                          <Input
-                            type="date"
-                            value={startDate}
-                            onChange={(e) =>
-                              handleMainFilterChange({ start: e.target.value })
-                            }
+                      <DropdownMenuContent className="w-[200px] p-2 max-h-[300px] overflow-y-auto">
+                        <div className="flex items-center space-x-2 p-1 hover:bg-gray-50 rounded border-b border-gray-100 mb-1 pb-2">
+                          <Checkbox
+                            id="stage-all"
+                            checked={selectedStages.length === stagesList.length && stagesList.length > 0}
+                            onCheckedChange={(checked) => {
+                              if (checked) {
+                                setSelectedStages([...stagesList]);
+                              } else {
+                                setSelectedStages([]);
+                              }
+                              setCurrentPage(1);
+                            }}
                           />
+                          <Label
+                            htmlFor="stage-all"
+                            className="text-sm font-bold leading-none cursor-pointer flex-1 py-1"
+                          >
+                            All Stages
+                          </Label>
                         </div>
+                        {stagesList.map((stage) => (
+                          <div key={stage} className="flex items-center space-x-2 p-1 hover:bg-gray-50 rounded">
+                            <Checkbox
+                              id={`stage-${stage}`}
+                              checked={selectedStages.includes(stage)}
+                              onCheckedChange={(checked) => {
+                                if (checked) {
+                                  setSelectedStages([...selectedStages, stage]);
+                                } else {
+                                  setSelectedStages(selectedStages.filter((s) => s !== stage));
+                                }
+                                setCurrentPage(1);
+                              }}
+                            />
+                            <Label
+                              htmlFor={`stage-${stage}`}
+                              className="text-sm font-medium leading-none capitalize cursor-pointer flex-1 py-1"
+                            >
+                              {stage}
+                            </Label>
+                          </div>
+                        ))}
+                        {selectedStages.length > 0 && (
+                          <>
+                            <div className="h-px bg-gray-200 my-2" />
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="w-full text-red-500 hover:text-red-600 hover:bg-red-50 text-xs"
+                              onClick={() => {
+                                setSelectedStages([]);
+                                setCurrentPage(1);
+                              }}
+                            >
+                              Clear All
+                            </Button>
+                          </>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
 
+                  {/* Date Range Filter */}
+                  <div className="flex flex-col gap-1">
+                    <Label className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">Date Range</Label>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" className="w-[160px]">
+                          {startDate && endDate ? `📅 ${startDate} → ${endDate}` : "📅 Date Range"}
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent className="p-4 space-y-4 w-[280px]">
                         <div className="space-y-2">
-                          <Label className="text-sm text-gray-600">End Date</Label>
-
-                          <Input
-                            type="date"
-                            value={endDate}
-                            onChange={(e) =>
-                              handleMainFilterChange({ end: e.target.value })
-                            }
-                          />
+                          <Label className="text-xs">Start Date</Label>
+                          <Input type="date" value={startDate} onChange={(e) => handleMainFilterChange({ start: e.target.value })} />
                         </div>
-
+                        <div className="space-y-2">
+                          <Label className="text-xs">End Date</Label>
+                          <Input type="date" value={endDate} onChange={(e) => handleMainFilterChange({ end: e.target.value })} />
+                        </div>
                         <Button
                           variant="ghost"
-                          className="text-red-500 text-sm p-0"
+                          className="text-red-500 text-xs p-0 w-full text-left"
                           onClick={() => {
                             setStartDate("");
                             setEndDate("");
@@ -1867,10 +1982,7 @@ export default function MarketingPage() {
                         </Button>
                       </DropdownMenuContent>
                     </DropdownMenu>
-
                   </div>
-
-
                 </div>
 
 
@@ -1895,11 +2007,9 @@ export default function MarketingPage() {
                   </Button>
                   <Button
                     variant={leadTab === "All" ? "default" : "outline"}
-                    onClick={async () => {
+                    onClick={() => {
                       setLeadTab("All");
                       setCurrentPage(1);
-                      // setIsAllView(true);
-                      setIsAllView(false); // 👈 make sure this is false to enable pagination
                     }}
                   >
                     All Leads
@@ -1907,37 +2017,16 @@ export default function MarketingPage() {
 
 
                   <div className="w-full sm:w-auto flex justify-end">
-                    {/* <Select onValueChange={(value) => setPageSize(Number(value))}> */}
                     <Select
-                      onValueChange={async (value) => {
-                        if (value === "all") {
-                          setIsAllView(true);
-                          setCurrentPage(1);
-
-                          // Fetch all data if "All" is selected
-                          const { data, error } = await supabase
-                            .from("leads")
-                            .select("*")
-                            .order("created_at", { ascending: false });
-
-                          if (!error) {
-                            setLeads(data);
-                          }
-                        } else {
-                          const pageSizeValue = Number(value);
-                          setPageSize(pageSizeValue);
-                          setIsAllView(false);
-                          setCurrentPage(1);
-
-                          // ✅ REFETCH data with new pageSize
-                          fetchLeadsAndSales(1, leadTab, searchTerm, statusFilter, sourceFilter);
-                        }
+                      value={pageSize.toString()}
+                      onValueChange={(value) => {
+                        const newSize = value === "all" ? 1000 : Number(value);
+                        setPageSize(newSize);
+                        setCurrentPage(1);
                       }}
                     >
-
-
                       <SelectTrigger className="w-[150px]">
-                        <SelectValue placeholder={`${pageSize} per page`} />
+                        <SelectValue placeholder={`${pageSize === 1000 ? "All" : pageSize} per page`} />
                       </SelectTrigger>
                       <SelectContent>
                         {[15, 25, 50, 100].map((num) => (
@@ -1945,8 +2034,7 @@ export default function MarketingPage() {
                             {num} per page
                           </SelectItem>
                         ))}
-                        <SelectItem value="all">All</SelectItem>
-
+                        <SelectItem value="all">All (Limit 1000)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -1967,7 +2055,7 @@ export default function MarketingPage() {
 
                         <TableHead className="sticky top-0 bg-white z-10 w-12 text-center">
                           <Checkbox
-                            checked={selectedLeads.length === filteredLeads.length && filteredLeads.length > 0}
+                            checked={selectedLeads.length === (leads || []).length && (leads || []).length > 0}
                             onCheckedChange={handleSelectAll}
                           />
                         </TableHead>
@@ -2152,7 +2240,6 @@ export default function MarketingPage() {
                             <Checkbox
                               checked={selectedLeads.includes(lead.id)}
                               onCheckedChange={(checked) => handleSelectLead(lead.id, checked as boolean)}
-                              disabled={lead.status === "Assigned"}
                             />
                           </TableCell>
                           <TableCell className="font-medium">{(currentPage - 1) * pageSize + index + 1}</TableCell>
@@ -2233,13 +2320,9 @@ export default function MarketingPage() {
                     </Button>
                     <span className="text-gray-600">
                       {/* Page {currentPage} of {paginationPages} */}
-                      {isAllView ? (
-                        <span className="text-gray-600">Showing all {filteredLeads.length} leads</span>
-                      ) : (
-                        <span className="text-gray-600">
-                          Page {currentPage} of {totalPages}
-                        </span>
-                      )}
+                    <span className="text-gray-600">
+                      Page {currentPage} of {totalPages}
+                    </span>
 
                     </span>
                     <Button
@@ -2444,6 +2527,33 @@ export default function MarketingPage() {
                   </div>
                 </div>
 
+              </DialogContent>
+            </Dialog>
+
+            {/* Unassign Confirmation Dialog */}
+            <Dialog open={unassignConfirmDialogOpen} onOpenChange={setUnassignConfirmDialogOpen}>
+              <DialogContent className="w-[95%] sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Confirm Unassign</DialogTitle>
+                  <DialogDescription>
+                    Are you sure you want to unassign {selectedLeads.length} lead(s)?
+                    They will be returned to the "New" status and current stage will be reset to "prospect".
+                  </DialogDescription>
+                </DialogHeader>
+                <DialogFooter className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => setUnassignConfirmDialogOpen(false)}
+                  >
+                    No, Cancel
+                  </Button>
+                  <Button
+                    className="bg-red-600 text-white hover:bg-red-700"
+                    onClick={handleUnassign}
+                  >
+                    Yes, Unassign
+                  </Button>
+                </DialogFooter>
               </DialogContent>
             </Dialog>
 
