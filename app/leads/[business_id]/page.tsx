@@ -87,7 +87,7 @@ interface ClientOnboardingDetails {
   date_of_birth: string | null; // date as ISO string
 
   visatypes: string | null; // new field
-
+  form_status: string | null;
 }
 
 // helper to find first non-null positive value by closed_at (desc)
@@ -1078,7 +1078,8 @@ ApplyWizz Team`
         addons,
         date_of_birth,
         lead_id,
-        visatypes
+        visatypes,
+        form_status
       `)
       .eq("lead_id", targetBusinessId)
       .order("created_at", { ascending: false })
@@ -1365,7 +1366,17 @@ ApplyWizz Team`
                   <span className="text-gray-400">Created At</span>
                   <span className="text-gray-700 font-medium">{new Date(lead.created_at).toLocaleDateString()}</span>
                 </div>
-                <div className="flex justify-between py-2 last:border-0">
+                <div className="flex justify-between py-2 border-b border-gray-50 last:border-0">
+                  <span className="text-gray-400">Onboard By</span>
+                  <span className="text-gray-700 font-medium">
+                    {onboarding?.form_status === "CORRECT"
+                      ? "regular form"
+                      : onboarding?.form_status === "ADDONS"
+                        ? "add-ons"
+                        : "null"}
+                  </span>
+                </div>
+                <div className="flex justify-between py-2 border-b border-gray-50 last:border-0">
                   <span className="text-gray-400">Business ID</span>
                   <span className="text-gray-700 font-medium">{lead.business_id}</span>
                 </div>

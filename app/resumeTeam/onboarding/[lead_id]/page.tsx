@@ -247,36 +247,113 @@ export default function OnboardingForm() {
     startDate: string,
     endDate: string | null
   ) => {
-    // 1️⃣ Role Validation (Exact Match Check)
+    // 1️⃣ Role Validation (Exact Match & Sub-array Check) - Using First Element Only
+    // let isNewDomain = false;
+    // const allRoles = csvToArray(obJobRolesText || fullOnboardingData?.role || "");
+    // let jobRoles: string[] = [];
+
+    // // Take only the first role if multiple are provided
+    // const primaryRoleInput = allRoles.length > 0 ? allRoles[0].trim() : "";
+
+    // try {
+    //   // Fetch from us-jobs-roles as per requirement
+    //   const rolesRes = await fetch("https://dashboard.apply-wizz.com/api/all-job-roles/");
+    //   if (rolesRes.ok) {
+    //     const rolesData = await rolesRes.json();
+    //     const rolesList = Array.isArray(rolesData)
+    //       ? rolesData
+    //       : (rolesData.data || rolesData.roles || rolesData.job_roles || []);
+
+    //     if (primaryRoleInput) {
+    //       // Priority 1: Exact match on primary 'name'
+    //       const primaryMatch = rolesList.find((r: any) => {
+    //         const nameToMatch = (typeof r === 'string' ? r : r?.name || "");
+    //         return nameToMatch === primaryRoleInput;
+    //       });
+
+    //       if (primaryMatch) {
+    //         jobRoles = [typeof primaryMatch === 'string' ? primaryMatch : primaryMatch.name];
+    //         isNewDomain = false;
+    //       } else {
+    //         // Priority 2: Check sub-arrays (alternateRoles, keywords)
+    //         const subMatch = rolesList.find((r: any) => {
+    //           if (typeof r === 'string') return false;
+    //           if (Array.isArray(r.alternateRoles) && r.alternateRoles.includes(primaryRoleInput)) return true;
+    //           if (Array.isArray(r.keywords) && r.keywords.includes(primaryRoleInput)) return true;
+    //           return false;
+    //         });
+
+    //         if (subMatch) {
+    //           jobRoles = [subMatch.name];
+    //           isNewDomain = false;
+    //         } else {
+    //           // No match found
+    //           jobRoles = [primaryRoleInput];
+    //           isNewDomain = true;
+    //         }
+    //       }
+    //     }
+    //   } else {
+    //     // If the roles API fails, we treat it as a new domain (safety fallback)
+    //     if (primaryRoleInput) {
+    //       jobRoles = [primaryRoleInput];
+    //       isNewDomain = true;
+    //     }
+    //   }
+    // } catch (err) {
+    //   console.error("Role validation error:", err);
+    //   // If the roles API fails, we treat it as a new domain (safety fallback)
+    //   if (primaryRoleInput) {
+    //     jobRoles = [primaryRoleInput];
+    //     isNewDomain = true;
+    //   }
+    // }
+    // 1️⃣ Role Validation (STRICT EXACT MATCH ONLY)
     let isNewDomain = false;
-    const jobRoles = csvToArray(obJobRolesText);
-    const roleValue = obJobRolesText || fullOnboardingData?.role || "";
+
+    const allRoles = csvToArray(obJobRolesText || fullOnboardingData?.role || "");
+    let jobRoles: string[] = [];
+
+    // Take only the first role
+    const primaryRoleInput = allRoles.length > 0 ? allRoles[0].trim() : "";
 
     try {
-      // Fetch from us-jobs-roles as per requirement
       const rolesRes = await fetch("https://dashboard.apply-wizz.com/api/all-job-roles/");
+
       if (rolesRes.ok) {
         const rolesData = await rolesRes.json();
-        // Be more flexible with the structure: Array, .data, .roles, or .job_roles
+
         const rolesList = Array.isArray(rolesData)
           ? rolesData
           : (rolesData.data || rolesData.roles || rolesData.job_roles || []);
 
-        if (roleValue) {
-          const matchedRole = rolesList.find((r: any) => {
-            const nameToMatch = (typeof r === 'string' ? r : r?.name || "");
-            return nameToMatch === roleValue;
+        if (primaryRoleInput) {
+          const exactMatch = rolesList.find((r: any) => {
+            const roleName = typeof r === "string" ? r : r?.name;
+            return roleName === primaryRoleInput;
           });
-          isNewDomain = !matchedRole;
+
+          if (exactMatch) {
+            jobRoles = [typeof exactMatch === "string" ? exactMatch : exactMatch.name];
+            isNewDomain = false;
+          } else {
+            jobRoles = [primaryRoleInput];
+            isNewDomain = true;
+          }
         }
       } else {
-        // If the roles API fails, we treat it as a new domain (safety fallback)
-        if (roleValue) isNewDomain = true;
+        if (primaryRoleInput) {
+          jobRoles = [primaryRoleInput];
+          isNewDomain = true;
+        }
       }
     } catch (err) {
       console.error("Role validation error:", err);
-      // If the roles API fails, we treat it as a new domain (safety fallback)
-      if (roleValue) isNewDomain = true;
+
+      if (primaryRoleInput) {
+        jobRoles = [primaryRoleInput];
+        isNewDomain = true;
+      }
     }
 
     // 2️⃣ Build Final API Payload
@@ -316,10 +393,10 @@ export default function OnboardingForm() {
       badge_value: scData?.badge_value ?? fullOnboardingData?.badge_value ?? 0,
 
       // 4. Consolidation & Internal flags
-      submission_type: "pending",
+      submission_type: "pending",//mandatory needed high alert on this
       is_new_domain: isNewDomain,
       submitted_by: currentUserId || fullOnboardingData?.submitted_by || onboardingData?.submitted_by || "",
-      target_role: roleValue || "Unknown",
+      target_role: jobRoles.join(", ") || "Unknown",
       end_date: endDate || null,
       salary_range: obSalaryRange || fullOnboardingData?.salary_range || null,
       work_auth_details: obWorkAuth || fullOnboardingData?.work_auth_details || null,
