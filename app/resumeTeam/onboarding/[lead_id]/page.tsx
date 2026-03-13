@@ -309,53 +309,111 @@ export default function OnboardingForm() {
     //   }
     // }
     // 1️⃣ Role Validation (STRICT EXACT MATCH ONLY)
-    let isNewDomain = false;
+    // let isNewDomain = false;
 
-    const allRoles = csvToArray(obJobRolesText || fullOnboardingData?.role || "");
+    // const allRoles = csvToArray(obJobRolesText || fullOnboardingData?.role || "");
+    // let jobRoles: string[] = [];
+
+    // // Take only the first role
+    // const primaryRoleInput = allRoles.length > 0 ? allRoles[0].trim() : "";
+
+    // try {
+    //   const rolesRes = await fetch("https://dashboard.apply-wizz.com/api/all-job-roles/");
+
+    //   if (rolesRes.ok) {
+    //     const rolesData = await rolesRes.json();
+
+    //     const rolesList = Array.isArray(rolesData)
+    //       ? rolesData
+    //       : (rolesData.data || rolesData.roles || rolesData.job_roles || []);
+
+    //     if (primaryRoleInput) {
+    //       const exactMatch = rolesList.find((r: any) => {
+    //         const roleName = typeof r === "string" ? r : r?.name;
+    //         return roleName === primaryRoleInput;
+    //       });
+
+    //       if (exactMatch) {
+    //         jobRoles = [typeof exactMatch === "string" ? exactMatch : exactMatch.name];
+    //         isNewDomain = false;
+    //       } else {
+    //         jobRoles = [primaryRoleInput];
+    //         isNewDomain = true;
+    //       }
+    //     }
+    //   } else {
+    //     if (primaryRoleInput) {
+    //       jobRoles = [primaryRoleInput];
+    //       isNewDomain = true;
+    //     }
+    //   }
+    // } catch (err) {
+    //   console.error("Role validation error:", err);
+
+    //   if (primaryRoleInput) {
+    //     jobRoles = [primaryRoleInput];
+    //     isNewDomain = true;
+    //   }
+    // }
+
+    let isNewDomain = false;
     let jobRoles: string[] = [];
 
-    // Take only the first role
-    const primaryRoleInput = allRoles.length > 0 ? allRoles[0].trim() : "";
+    const allRoles = csvToArray(obJobRolesText || fullOnboardingData?.role || "");
+    const primaryRoleInput = allRoles.length > 0 ? allRoles[0] : "";
+
+    console.log("Client role received:", primaryRoleInput);
 
     try {
+
       const rolesRes = await fetch("https://dashboard.apply-wizz.com/api/all-job-roles/");
 
-      if (rolesRes.ok) {
-        const rolesData = await rolesRes.json();
-
-        const rolesList = Array.isArray(rolesData)
-          ? rolesData
-          : (rolesData.data || rolesData.roles || rolesData.job_roles || []);
-
-        if (primaryRoleInput) {
-          const exactMatch = rolesList.find((r: any) => {
-            const roleName = typeof r === "string" ? r : r?.name;
-            return roleName === primaryRoleInput;
-          });
-
-          if (exactMatch) {
-            jobRoles = [typeof exactMatch === "string" ? exactMatch : exactMatch.name];
-            isNewDomain = false;
-          } else {
-            jobRoles = [primaryRoleInput];
-            isNewDomain = true;
-          }
-        }
-      } else {
-        if (primaryRoleInput) {
-          jobRoles = [primaryRoleInput];
-          isNewDomain = true;
-        }
+      if (!rolesRes.ok) {
+        throw new Error("Roles API failed");
       }
-    } catch (err) {
-      console.error("Role validation error:", err);
 
-      if (primaryRoleInput) {
+      const rolesData = await rolesRes.json();
+
+      const rolesList =
+        Array.isArray(rolesData)
+          ? rolesData
+          : Array.isArray(rolesData?.data)
+            ? rolesData.data
+            : [];
+
+      console.log("Total roles received from API:", rolesList.length);
+
+      const match = rolesList.find((role: any) => role.name === primaryRoleInput);
+
+      if (match) {
+
+        console.log("ROLE MATCHED ✅");
+        console.log("Matched Role ID from API:", match.id);
+        console.log("Matched Role Name from API:", match.name);
+        console.log("Compared Client Role:", primaryRoleInput);
+
+        jobRoles = [match.name];
+        isNewDomain = false;
+
+      } else {
+
+        console.log("ROLE NOT FOUND ❌");
+        console.log("Client Role:", primaryRoleInput);
+        console.log("Marked as new domain");
+
         jobRoles = [primaryRoleInput];
         isNewDomain = true;
-      }
-    }
 
+      }
+
+    } catch (error) {
+
+      console.error("Role validation error:", error);
+
+      jobRoles = primaryRoleInput ? [primaryRoleInput] : [];
+      isNewDomain = true;
+
+    }
     // 2️⃣ Build Final API Payload
     const payload: any = {
       // 1. Spread ALL data from DB first to catch every single field 
