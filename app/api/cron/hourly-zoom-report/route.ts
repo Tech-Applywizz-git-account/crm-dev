@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sendTeamsNotification } from "@/lib/microsoft/teamsService";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
-// ZOOM API Helpers (Inspired by existing zoom-call-stats)
+/* ---------------------------------------------------------
+   ZOOM API HELPERS
+---------------------------------------------------------- */
+
 async function getZoomAccessToken(): Promise<string> {
     const accountId = (process.env.ZOOM_ACCOUNT_ID || "").trim();
     const clientId = (process.env.ZOOM_CLIENT_ID || "").trim();
@@ -12,12 +16,14 @@ async function getZoomAccessToken(): Promise<string> {
     }
 
     const credentials = Buffer.from(clientId + ":" + clientSecret).toString("base64");
-    const tokenUrl = `https://zoom.us/oauth/token?grant_type=account_credentials&account_id=${accountId}`;
+
+    const tokenUrl =
+        `https://zoom.us/oauth/token?grant_type=account_credentials&account_id=${accountId}`;
 
     const res = await fetch(tokenUrl, {
         method: "POST",
         headers: { Authorization: "Basic " + credentials },
-        cache: "no-store",
+        cache: "no-store"
     });
 
     if (!res.ok) {
@@ -29,18 +35,22 @@ async function getZoomAccessToken(): Promise<string> {
 }
 
 async function fetchZoomCalls(from: string, to: string, token: string): Promise<any[]> {
+
     let all: any[] = [];
     let nextPageToken = "";
 
     do {
-        let url = `https://api.zoom.us/v2/phone/call_history?from=${from}&to=${to}&page_size=300&type=all`;
+
+        let url =
+            `https://api.zoom.us/v2/phone/call_history?from=${from}&to=${to}&page_size=300&type=all`;
+
         if (nextPageToken) {
             url += `&next_page_token=${nextPageToken}`;
         }
 
         const res = await fetch(url, {
             headers: { Authorization: "Bearer " + token },
-            cache: "no-store",
+            cache: "no-store"
         });
 
         if (!res.ok) {
@@ -49,19 +59,21 @@ async function fetchZoomCalls(from: string, to: string, token: string): Promise<
         }
 
         const data = await res.json();
+
         const items = data.call_logs || [];
+
         all = all.concat(items);
+
         nextPageToken = data.next_page_token || "";
+
     } while (nextPageToken);
 
     return all;
 }
 
-function formatDuration(totalSeconds: number): string {
-    const m = Math.floor(totalSeconds / 60);
-    const s = totalSeconds % 60;
-    return `${m}m ${s}s`;
-}
+/* ---------------------------------------------------------
+   HELPERS
+---------------------------------------------------------- */
 
 function formatDurationHHMMSS(totalSeconds: number): string {
     const h = Math.floor(totalSeconds / 3600);
@@ -70,87 +82,177 @@ function formatDurationHHMMSS(totalSeconds: number): string {
     return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-/**
- * HOURLY ZOOM REPORT CRON
- * Frequency: Every hour
- * Operating Window: 8:00 PM - 8:00 AM IST
- * Logic: Fetch calls from the previous 60 minutes and email them to stakeholders.
- */
+function formatDelta(deltaSeconds: number): string {
+    const minutes = Math.floor(Math.abs(deltaSeconds) / 60);
+    const prefix = deltaSeconds > 0 ? "+ " : deltaSeconds < 0 ? "- " : "";
+    return `${prefix}${minutes}m`;
+}
+
+/* ---------------------------------------------------------
+   HOURLY CRON ROUTE
+---------------------------------------------------------- */
+
 export async function GET(req: NextRequest) {
+
     try {
+
         const { searchParams } = new URL(req.url);
         const force = searchParams.get("force") === "true";
 
-        // 1. Determine current IST time
+        /* -----------------------------------------------
+           CURRENT TIME
+        ----------------------------------------------- */
+
         const nowUtc = new Date();
-        const istOffset = 5.5 * 60 * 60 * 1000;
-        const nowIst = new Date(nowUtc.getTime() + istOffset);
 
-        const currentHour = nowIst.getUTCHours();
-
-        console.log(`[Zoom Hourly Cron] Current IST Hour: ${currentHour}, Force: ${force}`);
-
-        // Check if we are in the reporting window: 9:00 PM (21:00) to 5:30 PM (17:30) IST
-        // This covers the full operation period except for the 5:30 PM - 9:00 PM gap.
-        const isReportHour = (
-            currentHour >= 21 ||
-            currentHour < 17 ||
-            (currentHour === 17 && nowIst.getUTCMinutes() <= 30)
+        const nowIst = new Date(
+            nowUtc.toLocaleString("en-US", { timeZone: "Asia/Kolkata" })
         );
 
+        const currentHour = nowIst.getHours();
+        const currentMinute = nowIst.getMinutes();
+
+        console.log(`[Zoom Hourly Cron] IST Hour: ${currentHour}:${currentMinute} Force:${force}`);
+
+        /* -----------------------------------------------
+           REPORT WINDOW
+           8 PM → 6 AM
+        ----------------------------------------------- */
+
+        const isReportHour = currentHour >= 20 || currentHour < 6;
+
         if (!isReportHour && !force) {
+
             return NextResponse.json({
                 success: true,
-                message: "Outside of reporting window (9 PM - 5:30 PM IST). Skip sending notification.",
+                message: "Outside reporting window (8 PM - 6 AM IST). Skip sending notification.",
                 currentIstHour: currentHour,
-                currentIstMin: nowIst.getUTCMinutes()
+                currentIstMinute: currentMinute
             });
+
         }
 
-        // 2. Define reporting window (Last 60 minutes)
+        /* -----------------------------------------------
+           HOUR WINDOWS
+        ----------------------------------------------- */
         const endRange = new Date(nowUtc);
         endRange.setSeconds(0, 0);
+
         const startRange = new Date(endRange.getTime() - 60 * 60 * 1000);
+        const prevEndRange = startRange;
+        const prevStartRange = new Date(prevEndRange.getTime() - 60 * 60 * 1000);
 
         const fromIso = startRange.toISOString().replace(/\.\d{3}Z$/, "Z");
         const toIso = endRange.toISOString().replace(/\.\d{3}Z$/, "Z");
 
-        console.log(`[Zoom Hourly Cron] Fetching calls from ${fromIso} to ${toIso}`);
+        const prevFromIso = prevStartRange.toISOString().replace(/\.\d{3}Z$/, "Z");
+        const prevToIso = prevEndRange.toISOString().replace(/\.\d{3}Z$/, "Z");
 
-        // 3. Fetch Calls from Zoom
+        console.log(`[Zoom Hourly Cron] IST: ${nowIst.toLocaleTimeString()} | Current: ${fromIso} to ${toIso} | Prev: ${prevFromIso} to ${prevToIso}`);
+
+        /* -----------------------------------------------
+           FETCH CALLS, PREV CALLS, SHIFT CALLS & AGENTS
+        ----------------------------------------------- */
         const token = await getZoomAccessToken();
-        const calls = await fetchZoomCalls(fromIso, toIso, token);
 
-        // 4. Calculate Stats & Grouping
-        const memberStats: Record<string, {
-            name: string;
-            extension: string;
-            total: number;
-            outbound: number;
-            inbound: number;
-            connected: number;
-            notConnected: number;
-            duration: number;
-            calls: any[];
-        }> = {};
+        // Calculate Shift Start (8:00 PM IST of the current "day's" shift)
+        const shiftStartIst = new Date(nowIst);
+        if (currentHour < 20) {
+            shiftStartIst.setDate(shiftStartIst.getDate() - 1);
+        }
+        shiftStartIst.setHours(20, 0, 0, 0);
+        
+        // Convert shiftStartIst (Local) back to a UTC ISO string for API
+        // We'll use a trick by formatting it and parsing as 'Asia/Kolkata' or just subtract offset manually
+        const shiftStartUtc = new Date(shiftStartIst.getTime() - (5.5 * 60 * 60 * 1000));
+        const shiftFromIso = shiftStartUtc.toISOString().replace(/\.\d{3}Z$/, "Z");
 
-        calls.forEach(log => {
-            const isOutbound = log.direction === "outbound";
-            const memberName = isOutbound ? (log.caller_name || "Unknown") : (log.callee_name || "Unknown");
-            const ext = isOutbound ? (log.caller_ext_number || "-") : (log.callee_ext_number || "-");
-            const memberKey = isOutbound ? (log.caller_ext_id || log.caller_email || memberName) : (log.callee_ext_id || log.callee_email || memberName);
+        const [calls, prevCalls, shiftCallsData, { data: agents }] = await Promise.all([
+            fetchZoomCalls(fromIso, toIso, token),
+            fetchZoomCalls(prevFromIso, prevToIso, token),
+            fetchZoomCalls(shiftFromIso, toIso, token),
+            supabaseAdmin.rpc('get_sales_team_names')
+        ]);
 
-            if (!memberStats[memberKey]) {
-                memberStats[memberKey] = {
-                    name: memberName,
-                    extension: ext,
+        /* -----------------------------------------------
+           MEMBER STATS
+        ----------------------------------------------- */
+        const memberStats: Record<string, any> = {};
+
+        // 0. Initialize all agents from database
+        if (Array.isArray(agents)) {
+            agents.forEach((agent: any) => {
+                const name = agent.full_name || "Unknown";
+                memberStats[name] = {
+                    name: name,
+                    extension: "-",
                     total: 0,
                     outbound: 0,
                     inbound: 0,
                     connected: 0,
                     notConnected: 0,
                     duration: 0,
-                    calls: []
+                    prevDuration: 0,
+                    shiftDuration: 0
+                };
+            });
+        }
+
+        // 1. Process shift calls for cumulative total
+        shiftCallsData.forEach(log => {
+            const isOutbound = log.direction === "outbound";
+            const memberName = isOutbound ? (log.caller_name || "Unknown") : (log.callee_name || "Unknown");
+            const memberKey = memberName;
+            if (memberStats[memberKey]) {
+                memberStats[memberKey].shiftDuration += (Number(log.duration) || 0);
+            }
+        });
+
+        // 2. Process previous hour for delta comparison
+        prevCalls.forEach(log => {
+            const isOutbound = log.direction === "outbound";
+            const memberName = isOutbound ? (log.caller_name || "Unknown") : (log.callee_name || "Unknown");
+            
+            // Use name as primary key to match initialized agents
+            const memberKey = memberName;
+
+            if (!memberStats[memberKey]) {
+                memberStats[memberKey] = {
+                    name: memberName,
+                    extension: isOutbound ? (log.caller_ext_number || "-") : (log.callee_ext_number || "-"),
+                    total: 0,
+                    outbound: 0,
+                    inbound: 0,
+                    connected: 0,
+                    notConnected: 0,
+                    duration: 0,
+                    prevDuration: 0,
+                    shiftDuration: 0
+                };
+            }
+            memberStats[memberKey].prevDuration += (Number(log.duration) || 0);
+        });
+
+        // 3. Process current hour
+        calls.forEach(log => {
+            const isOutbound = log.direction === "outbound";
+            const memberName = isOutbound ? (log.caller_name || "Unknown") : (log.callee_name || "Unknown");
+            
+            // Use name as primary key to match initialized agents
+            const memberKey = memberName;
+
+            if (!memberStats[memberKey]) {
+                memberStats[memberKey] = {
+                    name: memberName,
+                    extension: isOutbound ? (log.caller_ext_number || "-") : (log.callee_ext_number || "-"),
+                    total: 0,
+                    outbound: 0,
+                    inbound: 0,
+                    connected: 0,
+                    notConnected: 0,
+                    duration: 0,
+                    prevDuration: 0,
+                    shiftDuration: 0
                 };
             }
 
@@ -158,60 +260,94 @@ export async function GET(req: NextRequest) {
             stats.total++;
             if (isOutbound) stats.outbound++; else stats.inbound++;
 
-            const isAnswered = (log.call_result || "").toLowerCase() === "answered" || (log.call_result || "").toLowerCase() === "connected";
-            if (isAnswered) stats.connected++; else stats.notConnected++;
+            const result = (log.call_result || "").toLowerCase();
+            const isAnswered = result === "answered" || result === "connected";
+            if (isAnswered) stats.connected++;
+            else stats.notConnected++;
 
-            stats.duration += (Number(log.duration) || 0);
-            stats.calls.push(log);
+            stats.duration += Number(log.duration) || 0;
+            if (stats.extension === "-") {
+                stats.extension = isOutbound ? (log.caller_ext_number || "-") : (log.callee_ext_number || "-");
+            }
         });
 
+        /* -----------------------------------------------
+           TOTALS
+        ----------------------------------------------- */
+
         const totals = {
+
             total: calls.length,
+
             outbound: calls.filter(c => c.direction === "outbound").length,
+
             inbound: calls.filter(c => c.direction === "inbound").length,
-            connected: Object.values(memberStats).reduce((sum, m) => sum + m.connected, 0),
-            notConnected: Object.values(memberStats).reduce((sum, m) => sum + m.notConnected, 0),
-            duration: calls.reduce((sum, c) => sum + (Number(c.duration) || 0), 0)
+
+            connected: Object.values(memberStats)
+                .reduce((sum: number, m: any) => sum + m.connected, 0),
+
+            notConnected: Object.values(memberStats)
+                .reduce((sum: number, m: any) => sum + m.notConnected, 0),
+
+            duration: calls.reduce((sum, c) =>
+                sum + (Number(c.duration) || 0), 0),
+            
+            shiftDuration: Object.values(memberStats)
+                .reduce((sum: number, m: any) => sum + m.shiftDuration, 0)
         };
 
-        // 5. Teams Notification Integration
+        /* -----------------------------------------------
+           TEAMS MESSAGE
+        ----------------------------------------------- */
 
-        // 6. Final Teams Notification
+        const currentConnRate =
+            totals.total > 0
+                ? ((totals.connected / totals.total) * 100).toFixed(1)
+                : "0";
 
-        // 8. SEND TO TEAMS IF CONFIGURED via Webhook
-        try {
-            const currentConnRate = totals.total > 0 ? ((totals.connected / totals.total) * 100).toFixed(1) : "0";
-
-            // Build a Markdown-style table for Teams
-            let rowsText = "";
-            Object.values(memberStats).sort((a, b) => b.total - a.total).forEach(m => {
-                rowsText += `| ${m.name.padEnd(20)} | ${m.total.toString().padStart(5)} | ${m.connected.toString().padStart(5)} | ${m.notConnected.toString().padStart(5)} | ${formatDurationHHMMSS(m.duration)} |\n`;
+        let rowsText = "";
+        Object.values(memberStats)
+            .sort((a: any, b: any) => b.total - a.total)
+            .forEach((m: any) => {
+                const deltaSeconds = m.duration - m.prevDuration;
+                rowsText +=
+                    `| ${m.name.padEnd(20)} | ${m.total.toString().padStart(5)} | ${m.connected.toString().padStart(5)} | ${m.notConnected.toString().padStart(5)} | ${formatDurationHHMMSS(m.duration)} | ${formatDelta(deltaSeconds).padEnd(12)} | ${formatDurationHHMMSS(m.shiftDuration)} |\n`;
             });
 
-            const finalDetailedReport = `📡 **Zoom Hourly Activity**\n` +
-                `📅 **Date:** ${new Date().toLocaleDateString('en-GB')} | 🕒 **Time:** ${new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })} IST\n\n` +
-                `| Team Member          | Total | Conn  | Miss  | Duration |\n` +
-                `|:---------------------|:-----:|:-----:|:-----:|:---------|\n` +
-                `${rowsText}` +
-                `| **GRAND TOTAL**     | **${totals.total}** | **${totals.connected}** | **${totals.notConnected}** | **${formatDurationHHMMSS(totals.duration)}** |\n\n` +
-                `✅ **Connection Rate:** ${currentConnRate}%\n` +
-                `🔗 [Open Dashboard](https://applywizz-crm-tool.vercel.app/sales)`;
+        const finalDetailedReport =
+            `📡 **Zoom Hourly Activity**\n` +
+            `📅 **Date:** ${nowIst.toLocaleDateString("en-GB")} | 🕒 **Time:** ${nowIst.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })} IST\n\n` +
+            `| Team Member | Total | Conn | Miss | Hourly Dur | Δ vs Last Hr | Total Dur |\n` +
+            `|:----------------|:----:|:----:|:----:|:-----------|:------------|:----------|\n` +
+            `${rowsText}` +
+            `| **GRAND TOTAL** | **${totals.total}** | **${totals.connected}** | **${totals.notConnected}** | **${formatDurationHHMMSS(totals.duration)}** | | **${formatDurationHHMMSS(totals.shiftDuration)}** |\n\n` +
+            `✅ **Connection Rate:** ${currentConnRate}%\n` +
+            `🔗 https://applywizz-crm-tool.vercel.app/sales`;
 
-            await sendTeamsNotification(finalDetailedReport);
-        } catch (teamsErr: any) {
-            console.error("[Zoom Hourly Cron] Teams Notification Failed:", teamsErr.message);
-        }
+        await sendTeamsNotification(finalDetailedReport);
+
+        /* -----------------------------------------------
+           RESPONSE
+        ----------------------------------------------- */
 
         return NextResponse.json({
             success: true,
             hourSent: currentHour,
             callsProcessed: calls.length,
-            teamsNotified: true,
-            emailSent: false
+            teamsNotified: true
         });
 
-    } catch (err: any) {
-        console.error("[Zoom Hourly Cron] Global Error:", err);
-        return NextResponse.json({ success: false, error: err.message }, { status: 500 });
     }
+
+    catch (err: any) {
+
+        console.error("[Zoom Hourly Cron] Global Error:", err);
+
+        return NextResponse.json(
+            { success: false, error: err.message },
+            { status: 500 }
+        );
+
+    }
+
 }
