@@ -355,18 +355,83 @@ export default function OnboardingForm() {
     //     isNewDomain = true;
     //   }
     // }
+    // ============================
+    // let isNewDomain = false;
+    // let jobRoles: string[] = [];
+
+    // const allRoles = csvToArray(obJobRolesText || fullOnboardingData?.role || "");
+    // const primaryRoleInput = allRoles.length > 0 ? allRoles[0] : "";
+
+    // console.log("Client role received:", primaryRoleInput);
+
+    // try {
+
+    //   const rolesRes = await fetch("https://dashboard.apply-wizz.com/api/all-job-roles/");
+
+    //   if (!rolesRes.ok) {
+    //     throw new Error("Roles API failed");
+    //   }
+
+    //   const rolesData = await rolesRes.json();
+
+    //   const rolesList =
+    //     Array.isArray(rolesData)
+    //       ? rolesData
+    //       : Array.isArray(rolesData?.data)
+    //         ? rolesData.data
+    //         : [];
+
+    //   console.log("Total roles received from API:", rolesList.length);
+
+    //   const match = rolesList.find((role: any) => role.name === primaryRoleInput);
+
+    //   if (match) {
+
+    //     console.log("ROLE MATCHED ✅");
+    //     console.log("Matched Role ID from API:", match.id);
+    //     console.log("Matched Role Name from API:", match.name);
+    //     console.log("Compared Client Role:", primaryRoleInput);
+
+    //     jobRoles = [match.name];
+    //     isNewDomain = false;
+
+    //   } else {
+
+    //     console.log("ROLE NOT FOUND ❌");
+    //     console.log("Client Role:", primaryRoleInput);
+    //     console.log("Marked as new domain");
+
+    //     jobRoles = [primaryRoleInput];
+    //     isNewDomain = true;
+
+    //   }
+
+    // } catch (error) {
+
+    //   console.error("Role validation error:", error);
+
+    //   jobRoles = primaryRoleInput ? [primaryRoleInput] : [];
+    //   isNewDomain = true;
+
+    // }
+    // ============================
 
     let isNewDomain = false;
     let jobRoles: string[] = [];
 
-    const allRoles = csvToArray(obJobRolesText || fullOnboardingData?.role || "");
-    const primaryRoleInput = allRoles.length > 0 ? allRoles[0] : "";
+    const primaryRoleInput =
+      obJobRolesText ||
+      fullOnboardingData?.job_role_preferences?.[0] ||
+      fullOnboardingData?.role ||
+      "";
 
     console.log("Client role received:", primaryRoleInput);
 
     try {
 
-      const rolesRes = await fetch("https://dashboard.apply-wizz.com/api/all-job-roles/");
+      const rolesRes = await fetch(
+        "https://dashboard.apply-wizz.com/api/all-job-roles/"
+      );
 
       if (!rolesRes.ok) {
         throw new Error("Roles API failed");
@@ -375,31 +440,36 @@ export default function OnboardingForm() {
       const rolesData = await rolesRes.json();
 
       const rolesList =
-        Array.isArray(rolesData)
-          ? rolesData
-          : Array.isArray(rolesData?.data)
-            ? rolesData.data
-            : [];
+        rolesData?.data ||
+        rolesData?.roles ||
+        rolesData?.job_roles ||
+        rolesData ||
+        [];
 
       console.log("Total roles received from API:", rolesList.length);
 
-      const match = rolesList.find((role: any) => role.name === primaryRoleInput);
+      // Build exact lookup map
+      const roleMap = new Map();
 
-      if (match) {
+      for (const role of rolesList) {
+        roleMap.set(role.name, role);
+      }
+
+      const matchedRole = roleMap.get(primaryRoleInput);
+
+      if (matchedRole) {
 
         console.log("ROLE MATCHED ✅");
-        console.log("Matched Role ID from API:", match.id);
-        console.log("Matched Role Name from API:", match.name);
-        console.log("Compared Client Role:", primaryRoleInput);
+        console.log("Matched Role ID:", matchedRole.id);
+        console.log("Matched Role Name:", matchedRole.name);
 
-        jobRoles = [match.name];
+        jobRoles = [matchedRole.name];
         isNewDomain = false;
 
       } else {
 
         console.log("ROLE NOT FOUND ❌");
         console.log("Client Role:", primaryRoleInput);
-        console.log("Marked as new domain");
 
         jobRoles = [primaryRoleInput];
         isNewDomain = true;
