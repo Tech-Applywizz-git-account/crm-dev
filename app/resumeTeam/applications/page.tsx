@@ -584,36 +584,21 @@ export default function ApplicationsPage() {
 
     try {
       const { data, error } = await supabase
-        .from("users")
-        .select("id,name,email,role")
-        .in("role", ["Resume Head", "Resume Associate"]);
+        .from("profiles")
+        .select("user_id,full_name,user_email,roles")
+        .in("roles", ["Resume Head", "Resume Associate"]);
 
 
-      if (!error && data) members = data as TeamMember[];
+      if (!error && data) {
+        members = (data as any[]).map((d) => ({
+          id: d.user_id,
+          name: d.full_name ?? null,
+          email: d.user_email ?? null,
+          role: d.roles ?? null,
+        }));
+      }
     } catch {
       // ignore
-    }
-
-
-    if (!members.length) {
-      try {
-        const { data, error } = await supabase
-          .from("profiles")
-          .select("user_id,full_name,user_email,roles")
-          .in("roles", ["Resume Head", "Resume Associate"]);
-
-
-        if (!error && data) {
-          members = (data as any[]).map((d) => ({
-            id: d.user_id,
-            name: d.full_name ?? null,
-            email: d.user_email ?? null,
-            role: d.roles ?? null,
-          }));
-        }
-      } catch {
-        // ignore
-      }
     }
 
 

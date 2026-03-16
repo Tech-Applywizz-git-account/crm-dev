@@ -14,20 +14,41 @@ export const GET = async () => {
 });
     console.log(`📥 [GET] /api/sales-users → Fetching sales team... [${istTime} IST]`);
 
-    const { data, error } = await supabaseAdmin.rpc('get_sales_team_names');
+    const { data: rpcData, error: rpcError } = await supabaseAdmin.rpc('get_sales_team_names');
 
-    if (error) {
-      console.error("❌ Supabase RPC Error:", error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    if (rpcError) {
+      console.error("❌ Supabase RPC Error:", rpcError);
+      return NextResponse.json({ error: rpcError.message }, { status: 500 });
     }
 
-    if (!data || !Array.isArray(data)) {
-      console.warn("⚠️ Unexpected response format from RPC.");
-      return NextResponse.json({ error: "Invalid data format from Supabase RPC." }, { status: 500 });
+    // Also fetch users with 'Sales Head' role from profiles table
+    const { data: headsData, error: headsError } = await supabaseAdmin
+      .from('profiles')
+      .select('auth_id, full_name')
+      .eq('roles', 'Sales Head');
+
+    let combined: { id: string; full_name: string }[] = [];
+    if (rpcData && Array.isArray(rpcData)) {
+      combined = [...rpcData];
     }
 
-    console.log("✅ Sales users fetched:", data.length);
-    return NextResponse.json(data);
+    if (headsData && Array.isArray(headsData)) {
+      headsData.forEach(head => {
+        // Ensure the format matches { id, full_name }
+        const formattedHead = {
+          id: head.auth_id,
+          full_name: head.full_name
+        };
+        
+        // Add only if not already in the list
+        if (!combined.some(c => c.full_name === formattedHead.full_name)) {
+          combined.push(formattedHead);
+        }
+      });
+    }
+
+    console.log("✅ Sales users fetched:", combined.length);
+    return NextResponse.json(combined);
   } catch (err: any) {
     console.error("🔥 Unexpected GET /api/sales-users error:", err.message);
     return NextResponse.json({ error: err.message || "Internal server error" }, { status: 500 });
