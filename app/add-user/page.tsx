@@ -995,8 +995,18 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Settings2, Plus, ShieldCheck, Briefcase, Eye, EyeOff } from "lucide-react";
 
-export const roles = [
+export const DEFAULT_ROLES = [
   "Admin",
   "Finance",
   "Sales",
@@ -1025,15 +1035,228 @@ interface Profile {
 
 // --- Sub-components to isolate state and prevent over-rendering ---
 
-const AddUserForm = memo(({ setMessage, fetchProfiles, setSignupEmail }: {
+const SwapRoleDialog = memo(({ user, availableRoles, onUpdated, setMessage }: { 
+  user: Profile, 
+  availableRoles: string[], 
+  onUpdated: () => void,
+  setMessage: (m: string) => void 
+}) => {
+  const [selectedRole, setSelectedRole] = useState(user.roles);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [step, setStep] = useState(1); // 1: Select Role, 2: Password Confirmation
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  const handleUpdate = async () => {
+    if (step === 1) {
+      setStep(2);
+      return;
+    }
+
+    if (confirmPassword !== "Shyam@123") {
+      setPasswordError("Incorrect confirmation password");
+      return;
+    }
+    setPasswordError("");
+    setIsUpdating(true);
+    try {
+      const { error } = await supabase
+        .from("profiles")
+        .update({ roles: selectedRole })
+        .eq("auth_id", user.auth_id);
+
+      if (error) throw error;
+      
+      setMessage(`✅ Role swapped for ${user.full_name} to ${selectedRole}`);
+      setOpen(false);
+      onUpdated();
+    } catch (err: any) {
+      setMessage("❌ Failed to swap role: " + err.message);
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          className="h-8 gap-2 border-blue-100 bg-blue-50/50 text-blue-700 hover:bg-blue-100 hover:text-blue-800 font-medium text-[11px] px-3 transition-all"
+        >
+          <Settings2 className="h-3.5 w-3.5" />
+          {user.roles}
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Settings2 className="h-5 w-5 text-blue-600" />
+            Swap Employee Role
+          </DialogTitle>
+          <DialogDescription>
+            Moving <strong>{user.full_name}</strong> to a different position.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4 py-6">
+          <div className="space-y-3">
+            {step === 1 ? (
+              <div className="space-y-4">
+                <div className="flex justify-between text-[12px]">
+                  <span className="text-gray-500">Current Role:</span>
+                  <span className="font-bold text-gray-900">{user.roles}</span>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-gray-700">Select New Role</label>
+                  <Select value={selectedRole} onValueChange={setSelectedRole}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Choose a new role..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableRoles.map((r) => (
+                        <SelectItem key={r} value={r}>{r}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="bg-blue-50 p-3 rounded-md border border-blue-100 flex flex-col gap-1">
+                  <div className="text-[10px] uppercase text-blue-600 font-bold">Planned Swap</div>
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <span className="text-gray-500">{user.roles}</span>
+                    <Settings2 className="h-3 w-3 text-gray-400" />
+                    <span className="text-blue-700 font-bold">{selectedRole}</span>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-gray-700">Confirmation Password</label>
+                  <div className="relative">
+                    <Input 
+                      type={showConfirmPassword ? "text" : "password"} 
+                      placeholder="Enter password to confirm" 
+                      value={confirmPassword} 
+                      autoFocus
+                      onChange={(e) => {
+                        setConfirmPassword(e.target.value);
+                        if (passwordError) setPasswordError("");
+                      }}
+                      className={passwordError ? "border-red-500 pr-10" : "pr-10"}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none"
+                    >
+                      {showConfirmPassword ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
+                  {passwordError && <p className="text-[10px] text-red-500 font-medium">{passwordError}</p>}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button 
+            variant="ghost" 
+            onClick={() => { 
+              if (step === 2) {
+                setStep(1);
+                setConfirmPassword("");
+                setPasswordError("");
+                setShowConfirmPassword(false);
+              } else {
+                setOpen(false); 
+                setConfirmPassword(""); 
+                setPasswordError(""); 
+                setShowConfirmPassword(false);
+              }
+            }}
+          >
+            {step === 2 ? "Back" : "Cancel"}
+          </Button>
+          <Button 
+            onClick={handleUpdate} 
+            disabled={isUpdating || selectedRole === user.roles || (step === 2 && !confirmPassword)}
+            className="bg-blue-600 hover:bg-blue-700 text-white"
+          >
+            {step === 1 ? "Confirm Role Swap" : (isUpdating ? "Processing Swap..." : "Finalize Swap")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+});
+SwapRoleDialog.displayName = "SwapRoleDialog";
+
+const AddRoleDialog = memo(({ onAdd }: { onAdd: (role: string) => void }) => {
+  const [newRole, setNewRole] = useState("");
+  const [open, setOpen] = useState(false);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newRole.trim()) {
+      onAdd(newRole.trim());
+      setNewRole("");
+      setOpen(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" className="gap-2 h-7 px-3 bg-white hover:bg-gray-50 text-[10px]">
+          <Plus className="h-3 w-3" />
+          Add New Role
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle>Add New Role</DialogTitle>
+          <DialogDescription>
+            This will add a new role to the dropdown options. Please note this is currently session-based unless persisted to DB.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4 py-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Role Name</label>
+            <Input 
+              placeholder="e.g. Quality Analyst" 
+              value={newRole}
+              onChange={(e) => setNewRole(e.target.value)}
+              required
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button type="submit">Add Role</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+});
+AddRoleDialog.displayName = "AddRoleDialog";
+
+const AddUserForm = memo(({ setMessage, fetchProfiles, setSignupEmail, availableRoles }: {
   setMessage: (m: string) => void,
   fetchProfiles: () => void,
-  setSignupEmail: (e: string) => void
+  setSignupEmail: (e: string) => void,
+  availableRoles: string[]
 }) => {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState("Sales");
+  const [role, setRole] = useState<string>(availableRoles[0] || "Sales");
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -1143,16 +1366,16 @@ const AddUserForm = memo(({ setMessage, fetchProfiles, setSignupEmail }: {
         </div>
         <div className="space-y-2">
           <label className="text-[12px] font-medium">Role</label>
-          <Select value={role} onValueChange={setRole}>
-            <SelectTrigger>
-              <SelectValue placeholder="Select role" />
-            </SelectTrigger>
-            <SelectContent>
-              {roles.map((r) => (
-                <SelectItem key={r} value={r}>{r}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+                  <Select value={role} onValueChange={setRole}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableRoles.map((r) => (
+                        <SelectItem key={r} value={r}>{r}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
         </div>
       </div>
       <Button type="submit" disabled={isSubmitting} className="w-full mt-4">
@@ -1343,7 +1566,7 @@ const RemoveAccessForm = memo(({ profiles, fetchProfiles, setMessage }: {
 });
 RemoveAccessForm.displayName = "RemoveAccessForm";
 
-const TeamOverview = memo(({ profiles, filterStatus, setFilterStatus, searchQuery, setSearchQuery, sortConfig, toggleSort, formatDate, calculateTenure, counts }: any) => {
+const TeamOverview = memo(({ profiles, filterStatus, setFilterStatus, searchQuery, setSearchQuery, sortConfig, toggleSort, formatDate, calculateTenure, counts, availableRoles, fetchProfiles, setMessage }: any) => {
   return (
     <Card className="w-full xl:w-[65%] overflow-hidden">
       <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between space-y-4 sm:space-y-0 pb-4">
@@ -1420,7 +1643,7 @@ const TeamOverview = memo(({ profiles, filterStatus, setFilterStatus, searchQuer
                 </TableHead>
                 <TableHead className="px-2 text-[12px] text-center cursor-pointer hover:bg-gray-100" onClick={() => toggleSort('roles')}>
                   <div className="flex items-center justify-center gap-1">
-                    Role
+                    Role & Swap
                     {sortConfig?.key === 'roles' ? (sortConfig.direction === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 text-gray-400" />}
                   </div>
                 </TableHead>
@@ -1458,7 +1681,14 @@ const TeamOverview = memo(({ profiles, filterStatus, setFilterStatus, searchQuer
                     <TableCell className="font-mono text-[11px] text-gray-500 px-2 text-center">{profile.user_id}</TableCell>
                     <TableCell className="font-medium whitespace-nowrap px-2 text-[12px] text-center">{profile.full_name}</TableCell>
                     <TableCell className="whitespace-nowrap px-2 text-[12px] text-center">{profile.user_email}</TableCell>
-                    <TableCell className="whitespace-nowrap px-2 text-[12px] text-center">{profile.roles}</TableCell>
+                    <TableCell className="px-2 text-center">
+                      <SwapRoleDialog 
+                        user={profile} 
+                        availableRoles={availableRoles} 
+                        onUpdated={fetchProfiles} 
+                        setMessage={setMessage}
+                      />
+                    </TableCell>
                     <TableCell className="px-2 text-center text-[12px]">
                       <span className={cn(
                         "px-1.5 py-0.5 rounded-full text-[10px] font-bold uppercase",
@@ -1492,6 +1722,15 @@ export default function AddUserPage() {
   const [mode, setMode] = useState<"add" | "deactivate">("add");
   const [message, setMessage] = useState("");
   const { setSignupEmail } = useEmail();
+  
+  const [dynamicRoles, setDynamicRoles] = useState<string[]>(Array.from(DEFAULT_ROLES));
+
+  const handleAddRole = useCallback((newRole: string) => {
+    setDynamicRoles(prev => {
+      if (prev.includes(newRole)) return prev;
+      return [...prev, newRole].sort();
+    });
+  }, []);
 
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [filterStatus, setFilterStatus] = useState<"all" | "active" | "deactivated">("all");
@@ -1516,6 +1755,17 @@ export default function AddUserPage() {
   useEffect(() => {
     fetchProfiles();
   }, [fetchProfiles]);
+
+  // Discover existing roles in system and add them to dynamicRoles
+  useEffect(() => {
+    if (profiles.length > 0) {
+      const existingRoles = Array.from(new Set(profiles.map(p => p.roles).filter(Boolean)));
+      setDynamicRoles(prev => {
+        const next = new Set([...prev, ...existingRoles]);
+        return Array.from(next).sort();
+      });
+    }
+  }, [profiles]);
 
   const toggleSort = useCallback((key: keyof Profile | 'tenure' | 'sno') => {
     setSortConfig(prev => {
@@ -1618,26 +1868,27 @@ export default function AddUserPage() {
           <div className="flex gap-10 items-center pr-4">
             <h1 className="text-2xl font-bold">User Management</h1>
             <div className="flex gap-2 bg-gray-100 p-1 rounded-lg">
-              <Button
-                variant={mode === "add" ? "default" : "ghost"}
-                size="sm"
-                onClick={() => { setMode("add"); setMessage(""); }}
-                className="gap-2"
-              >
-                <UserPlus className="h-4 w-4" />
-                Add User
-              </Button>
-              <Button
-                variant={mode === "deactivate" ? "default" : "ghost"}
-                size="sm"
-                onClick={() => { setMode("deactivate"); setMessage(""); }}
-                className="gap-2"
-              >
-                <UserMinus className="h-4 w-4" />
-                Deactivate Account
-              </Button>
+                <Button
+                  variant={mode === "add" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => { setMode("add"); setMessage(""); }}
+                  className="gap-2"
+                >
+                  <UserPlus className="h-4 w-4" />
+                  Add User
+                </Button>
+                <Button
+                  variant={mode === "deactivate" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => { setMode("deactivate"); setMessage(""); }}
+                  className="gap-2"
+                >
+                  <UserMinus className="h-4 w-4" />
+                  Deactivate Account
+                </Button>
+              </div>
+              <AddRoleDialog onAdd={handleAddRole} />
             </div>
-          </div>
 
           <div className="flex flex-col xl:flex-row gap-6 items-start">
             {/* Left Side: Actions (35%) */}
@@ -1656,6 +1907,7 @@ export default function AddUserPage() {
                     setMessage={setMessage}
                     fetchProfiles={fetchProfiles}
                     setSignupEmail={setSignupEmail}
+                    availableRoles={dynamicRoles}
                   />
                 ) : (
                   <RemoveAccessForm
@@ -1695,6 +1947,9 @@ export default function AddUserPage() {
               formatDate={formatDate}
               calculateTenure={calculateTenure}
               counts={counts}
+              availableRoles={dynamicRoles}
+              fetchProfiles={fetchProfiles}
+              setMessage={setMessage}
             />
           </div>
         </div>

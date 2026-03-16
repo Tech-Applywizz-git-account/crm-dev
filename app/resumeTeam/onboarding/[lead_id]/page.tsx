@@ -2286,6 +2286,8 @@ const csvToArray = (csv: string): string[] => {
     .filter(Boolean);
 };
 
+const JOB_ROLES_API_ROUTE = "/api/job-roles";
+
 const formatDateForInput = (dateString: string): string => {
   if (!dateString) return "";
   try {
@@ -2444,7 +2446,7 @@ export default function OnboardingForm() {
   // ==================== Core Business Logic ====================
   /**
    * Validates if a role exists in the API with STRICT matching
-   * - Fetches from https://dashboard.apply-wizz.com/api/all-job-roles/
+   * - Fetches from the local /api/job-roles proxy to avoid browser CORS issues
    * - Response is a direct array of objects: { id, name, alternateRoles, keywords }
    * - Extracts canonical 'name' only
    * - Strict exact string equality (case-sensitive, trimmed input only)
@@ -2463,12 +2465,8 @@ export default function OnboardingForm() {
 
       console.log("🔍 Fetching roles from API...");
 
-      const rolesRes = await fetch("https://dashboard.apply-wizz.com/api/all-job-roles/", {
-        signal: controller.signal,
-        headers: {
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache'
-        }
+      const rolesRes = await fetch(JOB_ROLES_API_ROUTE, {
+        signal: controller.signal
       });
 
       clearTimeout(timeoutId);
@@ -2544,17 +2542,17 @@ export default function OnboardingForm() {
     } catch (error) {
       console.error("❌ Role validation error:", error);
 
+      let msg = "Role validation failed. ";
       if (error instanceof DOMException && error.name === "AbortError") {
-        toast.error("Role validation timeout. Please try again.");
+        msg += "The request timed out. Please check your connection and try again.";
       } else {
-        toast.error(`Role validation failed: ${String(error)}`);
+        msg += `A network or CORS error occurred (${String(error)}). Onboarding cannot proceed until roles are validated.`;
       }
 
-      return {
-        exists: false,
-        validRoles: [],
-        debug: { error: String(error) }
-      };
+      toast.error(msg);
+      
+      // Critical change: throw error to stop the execution flow in handleSave
+      throw new Error(msg);
     }
   };
 
