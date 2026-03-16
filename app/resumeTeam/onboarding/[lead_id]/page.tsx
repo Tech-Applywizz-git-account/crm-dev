@@ -1388,15 +1388,16 @@ export default function OnboardingForm() {
    * Validates if a role exists in the API with STRICT matching
    * Zero normalization - exact string comparison only
    */
-  const validateRoleStrict = async (role: string): Promise<{ exists: boolean; validRoles: string[] }> => {
+  const validateRoleStrict = async (role: string): Promise<{ exists: boolean; validRoles: string[]; debug: any }> => {
     if (!role || role.trim() === "") {
-      return { exists: false, validRoles: [] };
+      return { exists: false, validRoles: [], debug: { error: "Empty role" } };
     }
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
 
+      console.log("🔍 Fetching roles from API...");
       const rolesRes = await fetch("https://dashboard.apply-wizz.com/api/all-job-roles/", {
         signal: controller.signal,
         headers: {
@@ -1412,43 +1413,84 @@ export default function OnboardingForm() {
       }
 
       const rolesData = await rolesRes.json();
+      console.log("📦 Raw API Response:", rolesData);
 
-      // Handle different possible response structures
-      const rolesList = rolesData?.data || rolesData?.roles || rolesData?.job_roles || rolesData || [];
+      // ============== FIXED PARSING LOGIC ==============
+      // The API returns an ARRAY OF OBJECTS directly
+      // Each object has: { id: number, name: string, alternateRoles: string[], keywords: string[] }
 
-      if (!Array.isArray(rolesList)) {
-        console.error("Roles API returned non-array data:", rolesList);
-        return { exists: false, validRoles: [] };
+      let rolesList: any[] = [];
+
+      if (Array.isArray(rolesData)) {
+        // Direct array of objects
+        rolesList = rolesData;
+      } else if (rolesData?.data && Array.isArray(rolesData.data)) {
+        // Wrapped in a data property
+        rolesList = rolesData.data;
+      } else {
+        // Try to find any array in the response
+        for (const key in rolesData) {
+          if (Array.isArray(rolesData[key])) {
+            rolesList = rolesData[key];
+            break;
+          }
+        }
       }
 
-      // Extract role names - keep them EXACTLY as they are
+      console.log("📋 Extracted roles list (count):", rolesList.length);
+
+      // Extract role names from the 'name' property of each object
       const validRoles = rolesList
-        .map((role: any) => {
-          if (typeof role === 'string') return role;
-          if (role?.name && typeof role.name === 'string') return role.name;
+        .map((item: any) => {
+          if (item && typeof item === 'object' && item.name) {
+            return item.name; // Extract the 'name' field from each object
+          }
+          if (typeof item === 'string') {
+            return item; // Fallback for string arrays
+          }
           return null;
         })
         .filter(Boolean);
 
-      // STRICT MATCHING - exact string comparison, no normalization
+      console.log("✅ Valid roles extracted (sample):", validRoles.slice(0, 10));
+
+      // STRICT MATCHING - exact string comparison
       const exists = validRoles.some(validRole => validRole === role);
 
-      console.log("🔍 Role Validation:", {
+      // Find the exact matching role object for debugging
+      const matchingRole = rolesList.find((item: any) =>
+        item && item.name === role
+      );
+
+      const debug = {
         inputRole: role,
         exists,
+        matchingRoleId: matchingRole?.id || null,
         validRolesCount: validRoles.length,
-        matchingRole: exists ? role : null
-      });
+        validRolesSample: validRoles.slice(0, 10),
+        rawResponseType: Array.isArray(rolesData) ? 'array' : typeof rolesData
+      };
 
-      return { exists, validRoles };
+      console.log("🔍 Role Validation Debug:", debug);
+
+      // Show toast for debugging
+      if (exists) {
+        toast.success(`✅ Role "${role}" found in API! (ID: ${matchingRole?.id})`);
+      } else {
+        toast.error(`❌ Role "${role}" NOT found in API. Check console for available roles.`);
+      }
+
+      return { exists, validRoles, debug };
 
     } catch (error) {
       console.error("❌ Role validation error:", error);
-      // On API failure, we assume role doesn't exist (safety first)
-      return { exists: false, validRoles: [] };
+      return {
+        exists: false,
+        validRoles: [],
+        debug: { error: String(error) }
+      };
     }
   };
-
   const fetchAndValidateResume = async (lead_id: string): Promise<string> => {
     const { data: rpData, error: rpError } = await supabase
       .from("resume_progress")
