@@ -103,7 +103,7 @@ export default function AccountManagementPage() {
   // ---- ROLE NORMALIZATION (robust to "Admin" vs "Super Admin", "Accounts" vs "Account Management")
   const roleNorm = (me.role || "").trim().toLowerCase();
   const isAssociate = roleNorm === "accounts associate";
-  const canAssign = ["super admin", "admin", "account management", "accounts"].includes(roleNorm);
+  const canAssign = ["super admin", "admin", "account management", "accounts", "sales head"].includes(roleNorm);
 
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
@@ -741,7 +741,7 @@ export default function AccountManagementPage() {
     const { data, error } = await supabase
       .from("profiles")
       .select("full_name, user_email, roles")
-      .in("roles", ["Sales Associate", "Accounts Associate", "Admin", "Resume Head", "Finance", "Sales", "Accounts"]);
+      .in("roles", ["Sales Associate", "Accounts Associate", "Admin", "Resume Head", "Finance", "Sales", "Accounts", "Sales Head"]);
 
 
     // .in("roles",["Sales Associate","Admin"]);
@@ -801,7 +801,7 @@ export default function AccountManagementPage() {
     <>
       {pageLoading && <FullScreenLoader />}
       {/* Allow all three roles into the page (include Admin for robustness) */}
-      <ProtectedRoute allowedRoles={["Super Admin", "Admin", "Account Management", "Accounts", "Sales", "Sales Associate"]}>
+      <ProtectedRoute allowedRoles={["Super Admin", "Admin", "Account Management", "Accounts", "Sales", "Sales Associate", "Sales Head"]}>
         <DashboardLayout>
           <div className="space-y-6">
             <div className="flex justify-between items-center">

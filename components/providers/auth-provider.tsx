@@ -474,7 +474,8 @@ export type UserRole =
   | "Technical Head"
   | "Technical Associate"
   | "Resume Head"
-  | "Resume Associate";
+  | "Resume Associate"
+  | "Sales Head";
 
 
 interface User {
@@ -585,8 +586,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         router.push("/marketingAssociates");
         break;
       case "Sales":
-        router.push("/sales");
-        break;
+      case "Sales Head":
       case "Sales Associate":
         router.push("/sales");
         break;
@@ -640,6 +640,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         "technical", "technical-associate", "resume", "resume-associate", "onboard"
       ],
       Marketing: ["marketing", "marketingAssociate", "onboard", "sales"],
+      "Sales Head": ["sales", "account-management", "onboard"],
       Sales: ["sales", "Sales Associate", "onboard"],
       "Account Management": ["account-management", "onboard"],
       Finance: ["finance", "onboard"],                     // keep as-is unless you want Onboard here too
@@ -691,6 +692,7 @@ function convertRole(role: string): UserRole {
     "Technical Associate": "Technical Associate",
     "Resume Head": "Resume Head",
     "Resume Associate": "Resume Associate",
+    "Sales Head": "Sales Head",
   };
 
   return map[role] ?? "Super Admin";

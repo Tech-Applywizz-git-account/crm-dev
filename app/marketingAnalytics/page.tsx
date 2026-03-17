@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useContext, useMemo, useRef } from "react";
+import { useEffect, useState, useContext, useMemo, useRef, useCallback } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { MarketingCharts } from "./MarketingCharts";
 import { Button } from "@/components/ui/button";
@@ -37,7 +37,8 @@ import {
     RefreshCw,
     TrendingUp,
     UserPlus,
-    Trash2
+    Trash2,
+    Flame
 } from "lucide-react";
 
 dayjs.extend(isBetween);
@@ -53,8 +54,8 @@ interface Lead {
     status: string;
     current_stage: string;
     created_at: string;
-    assigned_to: string;
-    assigned_at: string;
+    assigned_to: string | null;
+    assigned_at: string | null;
     extra_data: any;
 }
 
@@ -68,15 +69,24 @@ export default function MarketingAnalyticsPage() {
     const [statusFilter, setStatusFilter] = useState<string>("all");
     const [stageFilter, setStageFilter] = useState<string>("all");
     const [scoreFilter, setScoreFilter] = useState<string>("all");
+    const [salesPersonFilter, setSalesPersonFilter] = useState<string>("all");
     const [searchQuery, setSearchQuery] = useState<string>("");
     const searchInputRef = useRef<HTMLInputElement>(null);
 
     const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
-    const [salesTeamMembers, setSalesTeamMembers] = useState<{ id: string; full_name: string }[]>([]);
+    const [salesTeamMembers, setSalesTeamMembers] = useState<{ id: string; full_name: string; user_email?: string }[]>([]);
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
     const [bulkAssignDialogOpen, setBulkAssignDialogOpen] = useState(false);
     const [selectedSalesMember, setSelectedSalesMember] = useState<string | null>(null);
     const [leadToDelete, setLeadToDelete] = useState<string | null>(null);
+    const [performanceRange, setPerformanceRange] = useState<string>("30");
+    const [salesPerformances, setSalesPerformances] = useState<Record<string, {
+        conversionRate: number;
+        avgSaleValue: number;
+        leadsAssigned: number;
+        salesDone: number;
+        revenue: number;
+    }>>({});
 
     // Pagination state
     const [currentPage, setCurrentPage] = useState(1);
@@ -88,12 +98,127 @@ export default function MarketingAnalyticsPage() {
     const [score90Count, setScore90Count] = useState(0);
     const [score60Count, setScore60Count] = useState(0);
     const [outOfTgCount, setOutOfTgCount] = useState(0);
+
+    // —— Hot Leads States ——
+    const [hotSources, setHotSources] = useState<string[]>(() => {
+        if (typeof window !== 'undefined') {
+            const saved = localStorage.getItem('hotSources');
+            return saved ? JSON.parse(saved) : [];
+        }
+        return [];
+    });
+
+    const isHotLead = useCallback((lead: Lead) => {
+        if (!lead.source || !hotSources.includes(lead.source)) return false;
+        const leadDate = dayjs(lead.created_at);
+        const ageInDays = dayjs().diff(leadDate, 'day');
+        return ageInDays >= 0 && ageInDays <= 3;
+    }, [hotSources]);
+
+    const toggleHotSource = (source: string) => {
+        setHotSources(prev => {
+            const next = prev.includes(source) ? prev.filter(s => s !== source) : [...prev, source];
+            localStorage.setItem('hotSources', JSON.stringify(next));
+            return next;
+        });
+    };
+
+    const [showHotSourcesDialog, setShowHotSourcesDialog] = useState(false);
     const [dnpCount, setDnpCount] = useState(0);
     const [convDoneCount, setConvDoneCount] = useState(0);
     const [chartDataState, setChartDataState] = useState<{ sourceData: any[]; trendData: any[] }>({
         sourceData: [],
         trendData: []
     });
+
+
+    useEffect(() => {
+        if (bulkAssignDialogOpen) {
+            fetchSalesPerformance();
+        }
+    }, [bulkAssignDialogOpen, performanceRange]);
+
+    const fetchSalesPerformance = async () => {
+        try {
+            let dateFilter = dayjs().subtract(parseInt(performanceRange), 'day').startOf('day').toISOString();
+            if (performanceRange === "all") dateFilter = dayjs('2000-01-01').toISOString();
+            if (performanceRange === "custom") {
+                dateFilter = startDate ? dayjs(startDate).toISOString() : dayjs().subtract(30, 'day').toISOString();
+            }
+
+            const endDateFilter = (performanceRange === "custom" && endDate)
+                ? dayjs(endDate).endOf('day').toISOString()
+                : dayjs().toISOString();
+
+            // 1. Fetch leads assigned in the period
+            const { data: leadsData, error: leadsError } = await supabase
+                .from("leads")
+                .select("assigned_to, assigned_to_email, assigned_at")
+                .not("assigned_to", "is", null)
+                .gte("assigned_at", dateFilter)
+                .lte("assigned_at", endDateFilter);
+
+            if (leadsError) throw leadsError;
+
+            // 2. Fetch sales done in the period
+            const { data: salesData, error: salesError } = await supabase
+                .from("sales_closure")
+                .select("account_assigned_name, account_assigned_email, associates_name, associates_email, sale_value, closed_at")
+                .gte("closed_at", dateFilter)
+                .lte("closed_at", endDateFilter);
+
+            if (salesError) throw salesError;
+
+            const performances: Record<string, any> = {};
+
+            salesTeamMembers.forEach(member => {
+                const mName = (member.full_name || "").toLowerCase().trim();
+                const mEmail = (member.user_email || "").toLowerCase().trim();
+
+                let assignedCount = 0;
+                let salesCount = 0;
+                let revenue = 0;
+
+                // Match leads
+                leadsData.forEach(lead => {
+                    const lName = (lead.assigned_to || "").toLowerCase().trim();
+                    const lEmail = (lead.assigned_to_email || "").toLowerCase().trim();
+
+                    if ((mEmail && lEmail === mEmail) || (lName && lName === mName)) {
+                        assignedCount++;
+                    }
+                });
+
+                // Match sales
+                salesData.forEach(sale => {
+                    const sName1 = (sale.account_assigned_name || "").toLowerCase().trim();
+                    const sEmail1 = (sale.account_assigned_email || "").toLowerCase().trim();
+                    const sName2 = (sale.associates_name || "").toLowerCase().trim();
+                    const sEmail2 = (sale.associates_email || "").toLowerCase().trim();
+
+                    const matches = (mEmail && (sEmail1 === mEmail || sEmail2 === mEmail)) ||
+                        (mName && (sName1 === mName || sName2 === mName));
+
+                    if (matches) {
+                        salesCount++;
+                        revenue += (sale.sale_value || 0);
+                    }
+                });
+
+                performances[member.full_name] = {
+                    leadsAssigned: assignedCount,
+                    salesDone: salesCount,
+                    revenue: revenue,
+                    conversionRate: assignedCount > 0 ? parseFloat(((salesCount / assignedCount) * 100).toFixed(1)) : 0,
+                    avgSaleValue: salesCount > 0 ? Math.round(revenue / salesCount) : 0
+                };
+            });
+
+            setSalesPerformances(performances);
+        } catch (err) {
+            console.error("Error fetching sales performance:", err);
+        }
+    };
 
     useEffect(() => {
         fetchUniqueSources();
@@ -111,25 +236,38 @@ export default function MarketingAnalyticsPage() {
         } else {
             setCurrentPage(1);
         }
-    }, [selectedSources, startDate, endDate, statusFilter, stageFilter, scoreFilter, searchQuery]);
+    }, [selectedSources, startDate, endDate, statusFilter, stageFilter, scoreFilter, salesPersonFilter, searchQuery]);
 
     const fetchSalesTeamMembers = async () => {
         try {
-            const res = await fetch("/api/sales-users", { method: "GET" });
-            if (!res.ok) throw new Error(`Sales API failed: ${await res.text()}`);
-            const users = await res.json();
-            setSalesTeamMembers(users);
+            const { data, error } = await supabase
+                .from('profiles')
+                .select('auth_id, full_name, user_email')
+                .or('roles.eq.Sales,roles.eq.Sales Associate,roles.eq.Sales Head')
+                .eq('is_active', 'true');
+
+            if (error) throw error;
+
+            const formatted = data.map(p => ({
+                id: p.auth_id,
+                full_name: p.full_name,
+                user_email: p.user_email
+            })).sort((a, b) => a.full_name.localeCompare(b.full_name));
+
+            setSalesTeamMembers(formatted);
         } catch (err) {
             console.error("Error fetching sales team:", err);
         }
     };
+
 
     const fetchUniqueSources = async () => {
         try {
             const { data, error } = await supabase
                 .from("leads")
                 .select("source")
-                .order("source");
+                .order("source")
+                .limit(10000); // Increased limit to capture all potential sources
 
             if (error) throw error;
 
@@ -158,7 +296,9 @@ export default function MarketingAnalyticsPage() {
                     filteredQ = filteredQ.in("source", selectedSources);
                 }
                 if (startDate && endDate) {
-                    filteredQ = filteredQ.gte("created_at", `${startDate}T00:00:00`).lte("created_at", `${endDate}T23:59:59`);
+                    const startISO = dayjs(startDate).startOf("day").toISOString();
+                    const endISO = dayjs(endDate).endOf("day").toISOString();
+                    filteredQ = filteredQ.gte("created_at", startISO).lte("created_at", endISO);
                 }
                 if (statusFilter !== "all") {
                     filteredQ = filteredQ.eq("status", statusFilter);
@@ -168,6 +308,9 @@ export default function MarketingAnalyticsPage() {
                 }
                 if (scoreFilter !== "all") {
                     filteredQ = filteredQ.or(`extra_data->>probability_score.eq.${scoreFilter},extra_data->Form1->>probability_score.eq.${scoreFilter},extra_data->Form2->>probability_score.eq.${scoreFilter}`);
+                }
+                if (salesPersonFilter !== "all") {
+                    filteredQ = filteredQ.eq("assigned_to", salesPersonFilter);
                 }
                 if (searchQuery) {
                     filteredQ = filteredQ.or(`name.ilike.%${searchQuery}%,email.ilike.%${searchQuery}%,phone.ilike.%${searchQuery}%,business_id.ilike.%${searchQuery}%`);
@@ -387,6 +530,38 @@ export default function MarketingAnalyticsPage() {
         }
     };
 
+    const handleBulkUnassign = async () => {
+        if (selectedLeads.length === 0) return;
+        if (!confirm(`Are you sure you want to unassign ${selectedLeads.length} leads?`)) return;
+
+        setLoading(true);
+        try {
+            const { error } = await supabase
+                .from("leads")
+                .update({
+                    status: "New",
+                    assigned_to: null,
+                    assigned_at: null,
+                    assigned_to_email: null
+                })
+                .in("id", selectedLeads);
+
+            if (error) throw error;
+
+            setLeads(prev => prev.map((lead: Lead) =>
+                selectedLeads.includes(lead.id)
+                    ? { ...lead, status: "New", assigned_to: null, assigned_at: null } as Lead
+                    : lead
+            ));
+
+            setSelectedLeads([]);
+        } catch (err) {
+            console.error("Bulk unassign error:", err);
+        } finally {
+            setLoading(false);
+        }
+    };
+
 
     const getProbabilityScoreBadge = (extraData: any) => {
         const score = extraData?.probability_score ?? extraData?.Form2?.probability_score ?? extraData?.Form1?.probability_score;
@@ -425,35 +600,82 @@ export default function MarketingAnalyticsPage() {
         { name: "Sale Done", value: saleDoneCount, color: "rgb(34 197 94)" },
     ].filter(d => d.value > 0), [prospectCount, targetCount, dnpCount, convDoneCount, outOfTgCount, saleDoneCount]);
 
+    const sortedLeads = useMemo(() => {
+        return [...leads].sort((a, b) => {
+            const aHot = isHotLead(a);
+            const bHot = isHotLead(b);
+            if (aHot && !bHot) return -1;
+            if (!aHot && bHot) return 1;
+            return 0; // Maintain original creation date order from API
+        });
+    }, [leads, isHotLead]);
+
     return (
         <DashboardLayout>
             <div className="flex flex-col h-full gap-4 p-4 lg:flex-row" suppressHydrationWarning>
                 {/* Left Sidebar - Sources */}
-                <Card className="w-full lg:w-64 h-fit sticky top-4">
-                    <CardHeader className="pb-2">
+                <Card className="w-full lg:w-64 h-fit sticky top-4 border-orange-100">
+                    <CardHeader className="pb-2 flex flex-row items-center justify-between">
                         <CardTitle className="text-sm font-bold flex items-center gap-2">
                             <Filter className="w-4 h-4" /> Marketing Sources
                         </CardTitle>
+                        <Flame className={`w-4 h-4 ${hotSources.length > 0 ? "text-orange-500 fill-orange-500 animate-pulse" : "text-gray-300"}`} />
                     </CardHeader>
-                    <CardContent className="max-h-[60vh] overflow-y-auto space-y-2 p-4 pt-0">
-                        {sources.map(source => (
-                            <div key={source.name} className="flex items-center space-x-2">
-                                <Checkbox
-                                    id={`source-${source.name}`}
-                                    checked={selectedSources.includes(source.name)}
-                                    onCheckedChange={() => handleSourceToggle(source.name)}
-                                />
-                                <label
-                                    htmlFor={`source-${source.name}`}
-                                    className="text-sm font-medium leading-tight peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1"
-                                >
-                                    {source.name}
-                                    <div className="text-[10px] text-muted-foreground">
-                                        ({source.total}) - ({source.sales})
-                                    </div>
-                                </label>
+                    <CardContent className="max-h-[75vh] overflow-y-auto space-y-4 p-4 pt-0">
+                        {/* Dedicated Hot Bucket Section */}
+                        {hotSources.length > 0 && (
+                            <div className="bg-orange-50/50 p-2 rounded-lg border border-orange-100 mb-2">
+                                <Label className="text-[10px] font-bold text-orange-600 uppercase flex items-center gap-1 mb-2">
+                                    <Flame className="w-3 h-3 fill-orange-500" /> Hot Bucket ({hotSources.length})
+                                </Label>
+                                <div className="flex flex-wrap gap-1">
+                                    {hotSources.map(hs => (
+                                        <Badge key={hs} variant="outline" className="bg-white text-[10px] border-orange-200 text-orange-700 py-0 h-5 flex items-center gap-1 pr-1">
+                                            {hs}
+                                            <button
+                                                onClick={() => toggleHotSource(hs)}
+                                                className="hover:text-red-500 rounded-full hover:bg-red-50 p-0.5"
+                                            >
+                                                <XCircle className="w-2.5 h-2.5" />
+                                            </button>
+                                        </Badge>
+                                    ))}
+                                </div>
                             </div>
-                        ))}
+                        )}
+
+                        <div className="space-y-2">
+                            <Label className="text-[10px] text-muted-foreground uppercase font-bold">All Sources</Label>
+                            {sources.map(source => (
+                                <div key={source.name} className="flex items-center space-x-2 w-full group">
+                                    <Checkbox
+                                        id={`source-${source.name}`}
+                                        checked={selectedSources.includes(source.name)}
+                                        onCheckedChange={() => handleSourceToggle(source.name)}
+                                    />
+                                    <label
+                                        htmlFor={`source-${source.name}`}
+                                        className="text-sm font-medium leading-tight peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1 truncate"
+                                        title={source.name}
+                                    >
+                                        {source.name}
+                                        <div className="text-[10px] text-muted-foreground">
+                                            ({source.total}) - ({source.sales})
+                                        </div>
+                                    </label>
+                                    <button
+                                        onClick={(e) => { e.preventDefault(); toggleHotSource(source.name); }}
+                                        className={`p-1.5 rounded-full transition-all duration-200 hover:scale-110 ${hotSources.includes(source.name)
+                                            ? "text-orange-500 bg-orange-100 shadow-sm border border-orange-200"
+                                            : "text-gray-400 opacity-60 hover:opacity-100 hover:text-orange-500 hover:bg-orange-50"
+                                            }`}
+                                        title={hotSources.includes(source.name) ? "Remove from Hot Bucket" : "Add to Hot Bucket"}
+                                    >
+                                        <Flame className={`w-3.5 h-3.5 ${hotSources.includes(source.name) ? "fill-orange-500 animate-pulse" : ""}`} />
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
                         {sources.length === 0 && <p className="text-xs text-muted-foreground">No sources found.</p>}
                     </CardContent>
                 </Card>
@@ -524,6 +746,20 @@ export default function MarketingAnalyticsPage() {
                                     </SelectContent>
                                 </Select>
                             </div>
+                            <div className="space-y-1">
+                                <Label className="text-xs">Sales Person</Label>
+                                <Select value={salesPersonFilter} onValueChange={setSalesPersonFilter}>
+                                    <SelectTrigger className="w-44">
+                                        <SelectValue placeholder="All Sales Persons" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="all">All Sales Persons</SelectItem>
+                                        {salesTeamMembers.map(m => (
+                                            <SelectItem key={m.id} value={m.full_name}>{m.full_name}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
                             <Button
                                 variant="outline"
                                 size="icon"
@@ -544,6 +780,14 @@ export default function MarketingAnalyticsPage() {
                                         <UserPlus className="w-4 h-4 mr-2" /> Assign ({selectedLeads.length})
                                     </Button>
                                     <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="text-orange-600 border-orange-200 hover:bg-orange-50"
+                                        onClick={handleBulkUnassign}
+                                    >
+                                        <XCircle className="w-4 h-4 mr-2" /> Unassign
+                                    </Button>
+                                    <Button
                                         variant="destructive"
                                         size="sm"
                                         onClick={() => {
@@ -555,6 +799,15 @@ export default function MarketingAnalyticsPage() {
                                     </Button>
                                 </div>
                             )}
+                            {/* 
+                            <Button
+                                variant="outline"
+                                onClick={() => setShowHotSourcesDialog(true)}
+                                className={`gap-2 ${hotSources.length > 0 ? "border-orange-200 text-orange-600 hover:bg-orange-50" : ""}`}
+                            >
+                                <Flame className={`w-4 h-4 ${hotSources.length > 0 ? "fill-orange-500 text-orange-500 animate-pulse" : ""}`} />
+                                Hot Bucket ({hotSources.length})
+                            </Button> */}
 
                             <Button
                                 variant="ghost"
@@ -565,6 +818,7 @@ export default function MarketingAnalyticsPage() {
                                     setStatusFilter("all");
                                     setStageFilter("all");
                                     setScoreFilter("all");
+                                    setSalesPersonFilter("all");
                                     setSelectedSources([]);
                                     setSelectedLeads([]);
                                     setSearchQuery("");
@@ -688,7 +942,7 @@ export default function MarketingAnalyticsPage() {
                                                 </TableRow>
                                             ))
                                         ) : (
-                                            leads.map((lead, index) => (
+                                            sortedLeads.map((lead, index) => (
                                                 <TableRow key={lead.id} className={selectedLeads.includes(lead.id) ? "bg-blue-50/50" : ""}>
                                                     <TableCell>
                                                         <Checkbox
@@ -696,11 +950,20 @@ export default function MarketingAnalyticsPage() {
                                                             onCheckedChange={(checked) => handleSelectLead(lead.id, !!checked)}
                                                         />
                                                     </TableCell>
-                                                    <TableCell className="font-medium text-xs">
+                                                    <TableCell className="font-bold text-slate-900 text-sm">
                                                         {(currentPage - 1) * pageSize + index + 1}
                                                     </TableCell>
                                                     <TableCell className="font-mono text-xs">{lead.business_id}</TableCell>
-                                                    <TableCell className="font-medium whitespace-nowrap text-sm">{lead.name}</TableCell>
+                                                    <TableCell className="font-medium whitespace-nowrap text-sm relative group">
+                                                        <div className="flex items-center gap-2">
+                                                            {lead.name}
+                                                            {isHotLead(lead) && (
+                                                                <div className="relative">
+                                                                    <Flame className="w-4 h-4 text-orange-600 fill-orange-500 animate-hot-float drop-shadow-[0_0_8px_rgba(249,115,22,0.4)]" />
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </TableCell>
                                                     <TableCell>
                                                         <div className="text-xs leading-tight">
                                                             <div className="font-medium truncate max-w-[120px]" title={lead.email}>{lead.email}</div>
@@ -709,9 +972,11 @@ export default function MarketingAnalyticsPage() {
                                                     </TableCell>
                                                     <TableCell className="text-sm">{lead.city}</TableCell>
                                                     <TableCell className="whitespace-nowrap text-sm">
-                                                        {dayjs(lead.created_at).format("DD MMM, YY")}
+                                                        {dayjs(lead.created_at).add(5, 'hour').add(30, 'minute').format("DD MMM, YY")}
                                                         <br />
-                                                        <span className="text-xs text-muted-foreground">{dayjs(lead.created_at).format("HH:mm")}</span>
+                                                        <span className="text-xs text-muted-foreground">
+                                                            {dayjs(lead.created_at).add(5, 'hour').add(30, 'minute').format("HH:mm")} IST
+                                                        </span>
                                                     </TableCell>
                                                     <TableCell className="text-sm">{lead.source}</TableCell>
                                                     <TableCell className="text-center">
@@ -731,7 +996,7 @@ export default function MarketingAnalyticsPage() {
                                                         <div className="font-medium text-xs">{lead.assigned_to || "—"}</div>
                                                         {lead.assigned_at && (
                                                             <div className="text-muted-foreground text-[10px]">
-                                                                {dayjs(lead.assigned_at).format("DD-MM-YYYY")}
+                                                                {dayjs(lead.assigned_at).add(5, 'hour').add(30, 'minute').format("DD-MM-YYYY HH:mm")} IST
                                                             </div>
                                                         )}
                                                     </TableCell>
@@ -808,25 +1073,82 @@ export default function MarketingAnalyticsPage() {
                     <Dialog open={bulkAssignDialogOpen} onOpenChange={setBulkAssignDialogOpen}>
                         <DialogContent>
                             <DialogHeader>
-                                <DialogTitle>Assign Leads to Sales Team</DialogTitle>
+                                <DialogTitle className="flex items-center gap-2">
+                                    <Users className="w-5 h-5 text-blue-500" />
+                                    Assign Leads to Sales Team
+                                </DialogTitle>
                                 <DialogDescription>
                                     Select a sales team member to assign {selectedLeads.length} leads.
                                 </DialogDescription>
                             </DialogHeader>
-                            <div className="py-4">
-                                <Label className="text-sm mb-2 block">Sales Person</Label>
-                                <Select value={selectedSalesMember || ""} onValueChange={setSelectedSalesMember}>
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Select sales person" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {salesTeamMembers.map(member => (
-                                            <SelectItem key={member.id} value={member.full_name}>
-                                                {member.full_name}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                            <div className="py-4 space-y-4">
+                                <div className="space-y-2">
+                                    <Label className="text-xs font-bold uppercase text-muted-foreground tracking-wider">Performance Period</Label>
+                                    <Select value={performanceRange} onValueChange={setPerformanceRange}>
+                                        <SelectTrigger className="h-8 text-xs">
+                                            <SelectValue placeholder="Select Range" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="7">Last 7 Days</SelectItem>
+                                            <SelectItem value="15">Last 15 Days</SelectItem>
+                                            <SelectItem value="30">Last 30 Days</SelectItem>
+                                            <SelectItem value="90">Last 90 Days</SelectItem>
+                                            <SelectItem value="all">All Time</SelectItem>
+                                            <SelectItem value="custom">Use Global Date Filter</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label className="text-xs font-bold uppercase text-muted-foreground tracking-wider">Sales Person</Label>
+                                    <Select value={selectedSalesMember || ""} onValueChange={setSelectedSalesMember}>
+                                        <SelectTrigger className="h-12">
+                                            <SelectValue placeholder="Select sales person" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {salesTeamMembers.map(member => {
+                                                const perf = salesPerformances[member.full_name] || { conversionRate: 0, avgSaleValue: 0, leadsAssigned: 0, salesDone: 0 };
+                                                return (
+                                                    <SelectItem key={member.id} value={member.full_name}>
+                                                        <div className="flex flex-col w-full py-2 min-w-[280px]">
+                                                            <div className="flex items-center justify-between gap-4 mb-2">
+                                                                <span className="text-slate-900 text-base">{member.full_name}</span>
+                                                                <div className="flex gap-1">
+                                                                    <Badge className="bg-emerald-600 text-white hover:bg-emerald-700 text-xs px-2 py-0.5">
+                                                                        {perf.conversionRate}% CONV
+                                                                    </Badge>
+                                                                    <Badge className="bg-blue-600 text-white hover:bg-blue-700 text-xs px-2 py-0.5">
+                                                                        ${perf.avgSaleValue} AVG
+                                                                    </Badge>
+                                                                </div>
+                                                            </div>
+                                                            <div className="flex items-center gap-4 text-xs text-slate-500">
+                                                                <span className="flex items-center gap-1.5 bg-slate-100 px-2 py-1 rounded">
+                                                                    <Target className="w-3.5 h-3.5 text-slate-900" />
+                                                                    <span className="text-slate-900">{perf.leadsAssigned}</span> Leads
+                                                                </span>
+                                                                <span className="flex items-center gap-1.5 bg-slate-100 px-2 py-1 rounded">
+                                                                    <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+                                                                    <span className="text-slate-900">{perf.salesDone}</span> Sales
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    </SelectItem>
+                                                );
+                                            })}
+                                        </SelectContent>
+                                    </Select>
+                                    <div className="grid grid-cols-2 gap-2 mt-2">
+                                        <div className="p-2 bg-slate-50 rounded border border-slate-100">
+                                            <p className="text-[10px] text-slate-500 uppercase font-bold">Conv. Rate</p>
+                                            <p className="text-[9px] text-slate-400 italic">Sales / Assigned</p>
+                                        </div>
+                                        <div className="p-2 bg-slate-50 rounded border border-slate-100">
+                                            <p className="text-[10px] text-slate-500 uppercase font-bold">Avg Sale Value</p>
+                                            <p className="text-[9px] text-slate-400 italic">Revenue / Sales</p>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                             <DialogFooter>
                                 <Button variant="ghost" onClick={() => setBulkAssignDialogOpen(false)}>Cancel</Button>
@@ -834,9 +1156,56 @@ export default function MarketingAnalyticsPage() {
                             </DialogFooter>
                         </DialogContent>
                     </Dialog>
+                    <Dialog open={showHotSourcesDialog} onOpenChange={setShowHotSourcesDialog}>
+                        <DialogContent className="sm:max-w-[425px]">
+                            <DialogHeader>
+                                <DialogTitle className="flex items-center gap-2">
+                                    <Flame className="w-5 h-5 text-orange-500 fill-orange-500" />
+                                    Manage Hot Sources
+                                </DialogTitle>
+                                <DialogDescription>
+                                    Leads from these sources created in the last 3 days will be marked as "Hot" and pinned to the top.
+                                </DialogDescription>
+                            </DialogHeader>
+                            <div className="grid gap-4 py-4 text-center">
+                                <div className="flex flex-wrap gap-2 justify-center">
+                                    {sources.map(s => s.name).map(source => (
+                                        <Badge
+                                            key={source}
+                                            variant={hotSources.includes(source) ? "default" : "outline"}
+                                            className={`cursor-pointer transition-all hover:scale-105 ${hotSources.includes(source) ? "bg-orange-500 hover:bg-orange-600" : "hover:border-orange-400"}`}
+                                            onClick={() => toggleHotSource(source)}
+                                        >
+                                            {source}
+                                            {hotSources.includes(source) && <XCircle className="w-3 h-3 ml-1" />}
+                                        </Badge>
+                                    ))}
+                                </div>
+                                {sources.length === 0 && (
+                                    <p className="text-sm text-muted-foreground text-center py-4 italic">
+                                        No sources found to mark as hot.
+                                    </p>
+                                )}
+                            </div>
+                            <DialogFooter>
+                                <Button onClick={() => setShowHotSourcesDialog(false)} className="w-full">Done</Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
+
                 </div>
             </div>
+            <style jsx global>{`
+                @keyframes hot-float {
+                    0%, 100% { transform: translateY(0) scale(1.0); }
+                    50% { transform: translateY(-4px) scale(1.1); }
+                }
+                .animate-hot-float {
+                    animation: hot-float 1.2s ease-in-out infinite;
+                }
+            `}</style>
         </DashboardLayout>
     );
 }
+
 
