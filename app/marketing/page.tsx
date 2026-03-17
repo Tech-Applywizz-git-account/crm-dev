@@ -1,6 +1,6 @@
 //app/marketing/page.tsx
 "use client";
-import { useEffect, useRef, useState, useContext, useMemo } from "react";
+import { useEffect, useRef, useState, useContext, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
@@ -49,7 +49,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { MoreVertical, PlusCircle } from "lucide-react";
 
-import { Upload, Search, UserPlus, Download, List } from "lucide-react";
+import { Upload, Search, UserPlus, Download, List, Flame, Filter, XCircle } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import Papa from "papaparse";
@@ -57,6 +57,7 @@ import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import { supabase } from "@/utils/supabase/client";
 import { LoadingContext } from "@/components/providers/LoadingContext";
 import FullScreenLoader from "@/components/ui/FullScreenLoader";
+import dayjs from "dayjs";
 
 interface Lead {
   id: string;
@@ -167,6 +168,32 @@ export default function MarketingPage() {
   const [unassignConfirmDialogOpen, setUnassignConfirmDialogOpen] = useState(false);
   const [stagesList, setStagesList] = useState<string[]>([]);
 
+  // —— Hot Leads States ——
+  const [hotSources, setHotSources] = useState<string[]>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('hotSources');
+      return saved ? JSON.parse(saved) : [];
+    }
+    return [];
+  });
+
+  const isHotLead = useCallback((lead: Lead) => {
+    if (!lead.source || !hotSources.includes(lead.source)) return false;
+    const leadDate = new Date(lead.created_at);
+    const ageInDays = Math.floor((new Date().getTime() - leadDate.getTime()) / (1000 * 3600 * 24));
+    return ageInDays >= 0 && ageInDays <= 3;
+  }, [hotSources]);
+
+  const toggleHotSource = (source: string) => {
+    setHotSources(prev => {
+      const next = prev.includes(source) ? prev.filter(s => s !== source) : [...prev, source];
+      localStorage.setItem('hotSources', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const [showHotSourcesDialog, setShowHotSourcesDialog] = useState(false);
+
 
   const [resultDialogOpen, setResultDialogOpen] = useState(false);
   const [resultMessage, setResultMessage] = useState({
@@ -264,6 +291,16 @@ export default function MarketingPage() {
   const sortedLeads = useMemo(() => {
     if (!sortConfig) return leads || [];
     const sorted = [...(leads || [])].sort((a, b) => {
+      // Priority 1: Hot Leads (Always sorted at top)
+      const aHot = isHotLead(a);
+      const bHot = isHotLead(b);
+      if (aHot && !bHot) return -1;
+      if (!aHot && bHot) return 1;
+
+      if (!sortConfig) {
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      }
+
       const aVal = a[sortConfig.key as keyof Lead];
       const bVal = b[sortConfig.key as keyof Lead];
 
@@ -287,7 +324,7 @@ export default function MarketingPage() {
       return 0;
     });
     return sorted;
-  }, [leads, sortConfig]);
+  }, [leads, sortConfig, isHotLead]);
 
   const paginatedLeads = sortedLeads;
 
@@ -1373,6 +1410,15 @@ export default function MarketingPage() {
                   </DialogContent>
                 </Dialog>
 
+                {/* <Button
+                  variant="outline"
+                  onClick={() => setShowHotSourcesDialog(true)}
+                  className={`gap-2 ${hotSources.length > 0 ? "border-orange-200 text-orange-600 hover:bg-orange-50" : ""}`}
+                >
+                  <Flame className={`w-4 h-4 ${hotSources.length > 0 ? "fill-orange-500 text-orange-500 animate-pulse" : ""}`} />
+                  Hot Bucket ({hotSources.length})
+                </Button> */}
+
                 <Dialog open={googleSheetDialogOpen} onOpenChange={setGoogleSheetDialogOpen}>
                   {/* <DialogContent className="max-w-md"> */}
                   <DialogContent className="max-w-4xl">
@@ -2249,7 +2295,12 @@ export default function MarketingPage() {
                             className="font-medium max-w-[150px] break-words whitespace-normal cursor-pointer text-blue-600 hover:underline"
                             onClick={() => window.open(`/leads/${lead.business_id}`, "_blank")}
                           >
-                            {lead.name}
+                            <div className="flex items-center gap-2 justify-center">
+                              {lead.name}
+                              {lead.status === "Assigned" && isHotLead(lead) && (
+                                <Flame className="w-4 h-4 text-orange-500 fill-orange-500 animate-bounce" />
+                              )}
+                            </div>
                           </TableCell>
                           {/* <TableCell className="font-medium max-w-[150px] break-words whitespace-normal">{lead.name}</TableCell> */}
                           <TableCell className="max-w-[100px] break-words whitespace-normal">{lead.phone}</TableCell>
@@ -2320,9 +2371,9 @@ export default function MarketingPage() {
                     </Button>
                     <span className="text-gray-600">
                       {/* Page {currentPage} of {paginationPages} */}
-                    <span className="text-gray-600">
-                      Page {currentPage} of {totalPages}
-                    </span>
+                      <span className="text-gray-600">
+                        Page {currentPage} of {totalPages}
+                      </span>
 
                     </span>
                     <Button
@@ -2621,6 +2672,43 @@ export default function MarketingPage() {
 
           </div>
           {/* </main> */}
+          <Dialog open={showHotSourcesDialog} onOpenChange={setShowHotSourcesDialog}>
+            <DialogContent className="sm:max-w-[425px]">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Flame className="w-5 h-5 text-orange-500 fill-orange-500" />
+                  Manage Hot Sources
+                </DialogTitle>
+                <DialogDescription>
+                  Leads from these sources created in the last 3 days will be marked as "Hot" and pinned to the top.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 py-4 text-center">
+                <div className="flex flex-wrap gap-2 justify-center">
+                  {uniqueSources.map(source => (
+                    <Badge
+                      key={source}
+                      variant={hotSources.includes(source) ? "default" : "outline"}
+                      className={`cursor-pointer transition-all hover:scale-105 ${hotSources.includes(source) ? "bg-orange-500 hover:bg-orange-600" : "hover:border-orange-400"}`}
+                      onClick={() => toggleHotSource(source)}
+                    >
+                      {source}
+                      {hotSources.includes(source) && <XCircle className="w-3 h-3 ml-1" />}
+                    </Badge>
+                  ))}
+                </div>
+                {uniqueSources.length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-4 italic">
+                    No sources found to mark as hot.
+                  </p>
+                )}
+              </div>
+              <DialogFooter>
+                <Button onClick={() => setShowHotSourcesDialog(false)} className="w-full">Done</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
         </DashboardLayout>
         {/* </div> */}
       </ProtectedRoute>

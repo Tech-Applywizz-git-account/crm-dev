@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { EditIcon, Eye, Search, ExternalLink, Bell, User, ChevronDown, ChevronRight, ChevronLeft, ChevronUp, Star, Settings, Phone, History as HistoryIcon, Trash2, Plus, Download, Tag, Loader2, Calendar, BarChart, ListOrdered, RefreshCw, Mail, Send } from "lucide-react";
+import { EditIcon, Eye, Search, ExternalLink, Bell, User, ChevronDown, ChevronRight, ChevronLeft, ChevronUp, Star, Settings, Phone, History as HistoryIcon, Trash2, Plus, Download, Tag, Loader2, Calendar, BarChart, ListOrdered, RefreshCw, Mail, Send, Flame, ArrowUp } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -185,7 +185,6 @@ const getStageColor = (stage: SalesStage) => {
   }
 };
 
-// 🚀 Memoized Row Component to prevent full-table re-renders
 const LeadRow = React.memo(({
   item,
   idx,
@@ -193,23 +192,44 @@ const LeadRow = React.memo(({
   handleStageUpdate,
   handlePhoneClick,
   isRightPanelCollapsed,
-  onOpenHistory
+  onOpenHistory,
+  onOpenMail,
+  onUpdateAssignedTo,
+  salesUsers,
+  isHot,
+  isSelected,
+  onSelect,
+  serialNumber
 }: {
-  item: Lead,
-  idx: number,
-  userProfile: Profile | null,
-  handleStageUpdate: (id: string, stage: SalesStage) => void,
-  handlePhoneClick: (phone: string) => void,
-  isRightPanelCollapsed: boolean,
-  onOpenHistory: (lead: Lead) => void,
-  onOpenMail: (lead: Lead) => void
+  item: Lead;
+  idx: number;
+  userProfile: Profile | null;
+  handleStageUpdate: (id: string, stage: SalesStage) => void;
+  handlePhoneClick: (phone: string) => void;
+  isRightPanelCollapsed: boolean;
+  onOpenHistory: (lead: Lead) => void;
+  onOpenMail: (lead: Lead) => void;
+  onUpdateAssignedTo: (id: string, name: string, email: string) => void;
+  salesUsers: { full_name: string; user_email: string }[];
+  isHot: boolean;
+  isSelected: boolean;
+  onSelect: (id: string) => void;
+  serialNumber: number;
 }) => {
   const leadScore = item.current_stage === "sale done" ? 100 : Math.max(2, 26 - (idx * 3));
 
   return (
-    <TableRow className="group hover:bg-[#f5faff] transition-colors border-b last:border-0 min-h-[56px]">
+    <TableRow className={cn("group hover:bg-[#f5faff] transition-colors border-b last:border-0 min-h-[56px]", isSelected && "bg-blue-50/50")}>
       <TableCell className="px-4 py-3 align-top">
-        <input type="checkbox" className="rounded mt-1" />
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-bold text-slate-900 w-6">{serialNumber}</span>
+          <input 
+            type="checkbox" 
+            className="rounded mt-1 cursor-pointer" 
+            checked={isSelected}
+            onChange={() => onSelect(item.id)}
+          />
+        </div>
       </TableCell>
       <TableCell className="py-3 align-top min-w-[220px]">
         <div className="flex items-start gap-2">
@@ -222,7 +242,14 @@ const LeadRow = React.memo(({
               className="lead-name-link text-smooth hover:underline cursor-pointer text-[14px] font-semibold"
               onClick={() => window.open(`/leads/${item.business_id}`, "_blank")}
             >
-              {item.client_name}
+              <div className="flex items-center gap-1.5">
+                {item.client_name}
+                {isHot && (
+                  <div className="relative inline-flex mb-1">
+                    <Flame className="w-4 h-4 text-orange-600 fill-orange-500 animate-hot-float drop-shadow-[0_0_8px_rgba(249,115,22,0.4)]" />
+                  </div>
+                )}
+              </div>
             </span>
             <div className="flex items-center gap-2 mt-1">
               <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded uppercase tracking-wider">
@@ -276,7 +303,26 @@ const LeadRow = React.memo(({
         </Select>
       </TableCell>
       <TableCell className="py-3 align-top text-slate-700 font-medium whitespace-nowrap text-[13px]">
-        {item.assigned_to || "—"}
+        {["Admin", "Super Admin", "Sales Head"].includes(userProfile?.roles || "") ? (
+          <Select
+            value={item.assigned_to}
+            onValueChange={(val) => {
+              const u = salesUsers.find(x => x.full_name === val);
+              if (u) onUpdateAssignedTo(item.id, u.full_name, u.user_email);
+            }}
+          >
+            <SelectTrigger className="h-7 w-fit border-none shadow-none bg-transparent hover:bg-slate-100 p-1 focus:ring-0">
+              <SelectValue placeholder="Assign To" />
+            </SelectTrigger>
+            <SelectContent>
+              {salesUsers.map(u => (
+                <SelectItem key={u.user_email} value={u.full_name}>{u.full_name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          item.assigned_to || "—"
+        )}
       </TableCell>
       <TableCell className="py-3 align-top text-gray-500 whitespace-nowrap text-[11px] pt-4">
         {item.created_at ? dayjs(item.created_at).fromNow(true) : "—"}
@@ -334,7 +380,6 @@ const LeadRow = React.memo(({
   );
 });
 
-// 🚀 Memoized Table Component
 const LeadsTable = React.memo(({
   leads,
   sortConfig,
@@ -349,31 +394,64 @@ const LeadsTable = React.memo(({
   setPageSize,
   isRightPanelCollapsed,
   onOpenHistory,
-  onOpenMail
+  onOpenMail,
+  onUpdateAssignedTo,
+  salesUsers,
+  isHotLead,
+  selectedLeads,
+  onSelectedLeadsChange,
 }: {
-  leads: Lead[],
-  sortConfig: { key: keyof Lead | null, direction: "asc" | "desc" },
-  handleSort: (key: keyof Lead) => void,
-  handleStageUpdate: (id: string, stage: SalesStage) => void,
-  handlePhoneClick: (phone: string) => void,
-  userProfile: Profile | null,
-  page: number,
-  pageSize: number,
-  totalRecords: number,
-  setPage: React.Dispatch<React.SetStateAction<number>>,
-  setPageSize: React.Dispatch<React.SetStateAction<number>>,
-  isRightPanelCollapsed: boolean,
-  onOpenHistory: (lead: Lead) => void,
-  onOpenMail: (lead: Lead) => void
+  leads: Lead[];
+  sortConfig: { key: keyof Lead | null; direction: "asc" | "desc" };
+  handleSort: (key: keyof Lead) => void;
+  handleStageUpdate: (id: string, stage: SalesStage) => void;
+  handlePhoneClick: (phone: string) => void;
+  userProfile: Profile | null;
+  page: number;
+  pageSize: number;
+  totalRecords: number;
+  setPage: React.Dispatch<React.SetStateAction<number>>;
+  setPageSize: React.Dispatch<React.SetStateAction<number>>;
+  isRightPanelCollapsed: boolean;
+  onOpenHistory: (lead: Lead) => void;
+  onOpenMail: (lead: Lead) => void;
+  onUpdateAssignedTo: (id: string, name: string, email: string) => void;
+  salesUsers: { full_name: string; user_email: string }[];
+  isHotLead: (lead: Lead) => boolean;
+  selectedLeads: string[];
+  onSelectedLeadsChange: (ids: string[]) => void;
 }) => {
+  const toggleSelectAll = () => {
+    if (selectedLeads.length === leads.length && leads.length > 0) {
+      onSelectedLeadsChange([]);
+    } else {
+      onSelectedLeadsChange(leads.map(l => l.id));
+    }
+  };
+
+  const handleSelectLead = (id: string) => {
+    onSelectedLeadsChange(
+      selectedLeads.includes(id) 
+        ? selectedLeads.filter(l => l !== id) 
+        : [...selectedLeads, id]
+    );
+  };
   return (
     <div className="bg-white border rounded shadow-sm overflow-hidden flex flex-col min-h-[400px]">
       <div className="overflow-x-auto">
         <Table className="text-sm">
           <TableHeader className="sales-table-header">
             <TableRow className="hover:bg-transparent border-b">
-              <TableHead className="w-10 px-4 align-middle h-12">
-                <input type="checkbox" className="rounded" />
+              <TableHead className="px-4 align-middle h-12 w-20">
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] font-bold text-slate-400 w-4">#</span>
+                  <input 
+                    type="checkbox" 
+                    className="rounded cursor-pointer" 
+                    checked={leads.length > 0 && selectedLeads.length === leads.length}
+                    onChange={toggleSelectAll}
+                  />
+                </div>
               </TableHead>
               <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider min-w-[220px] align-middle h-12">Lead Details & ID</TableHead>
               <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider align-middle h-12">Source</TableHead>
@@ -413,6 +491,12 @@ const LeadsTable = React.memo(({
                   isRightPanelCollapsed={isRightPanelCollapsed}
                   onOpenHistory={onOpenHistory}
                   onOpenMail={onOpenMail}
+                  onUpdateAssignedTo={onUpdateAssignedTo}
+                  salesUsers={salesUsers}
+                  isHot={isHotLead(item)}
+                  isSelected={selectedLeads.includes(item.id)}
+                  onSelect={handleSelectLead}
+                  serialNumber={(page - 1) * pageSize + idx + 1}
                 />
               ))
             )}
@@ -532,10 +616,37 @@ export default function SalesPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [view, setView] = useState<"leads" | "activity" | "call_stats" | "renewals" | "email_logs">("leads");
   const [showSalesDialog, setShowSalesDialog] = useState(false);
-  const [salesDialogMode, setSalesDialogMode] = useState<"new" | "edit">("new");
+  const [salesDialogMode, setSalesDialogMode] = useState<"all" | "first">("first");
 
   // —— Email States ——
+  // —— Hot Leads States ——
+  const [hotSources, setHotSources] = useState<string[]>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('hotSources');
+      return saved ? JSON.parse(saved) : [];
+    }
+    return [];
+  });
+
+  const isHotLead = useCallback((lead: Lead) => {
+    if (!lead.source || !hotSources.includes(lead.source)) return false;
+    const leadDate = dayjs(lead.created_at);
+    const ageInDays = dayjs().diff(leadDate, 'day');
+    return ageInDays >= 0 && ageInDays <= 3;
+  }, [hotSources]);
+
+  const toggleHotSource = (source: string) => {
+    setHotSources(prev => {
+      const next = prev.includes(source) ? prev.filter(s => s !== source) : [...prev, source];
+      localStorage.setItem('hotSources', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const [showHotSourcesDialog, setShowHotSourcesDialog] = useState(false);
+
   const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
+  const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
   const [selectedLeadForEmail, setSelectedLeadForEmail] = useState<Lead | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
   const [emailSubject, setEmailSubject] = useState("");
@@ -747,9 +858,10 @@ Team ApplyWizz`
   const [totalAmount, setTotalAmount] = useState(0);
   const [subscriptionEndsOn, setSubscriptionEndsOn] = useState<string>("");
   const [startDate, setStartDate] = useState<string | null>(null);
+  const [endDate, setEndDate] = useState<string | null>(null);
+  const [dateFilterType, setDateFilterType] = useState<string>("last_activity");
   const [editingNote, setEditingNote] = useState(false);
   const [editedNote, setEditedNote] = useState("");
-
   const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(true);
 
 
@@ -916,7 +1028,6 @@ Team ApplyWizz`
   };
 
 
-  const [endDate, setEndDate] = useState<string | null>(null);
   const [isDateDropdownOpen, setIsDateDropdownOpen] = useState(false);
   const [onboardDialogOpen, setOnboardDialogOpen] = useState(false);
 
@@ -994,7 +1105,7 @@ Team ApplyWizz`
   useEffect(() => {
     fetchSalesClosureCount();
     fetchStageCounts();
-  }, [userProfile, ownerFilter]);
+  }, [userProfile, ownerFilter, sourceFilter, startDate, endDate, dateFilterType]);
 
   useEffect(() => {
     const run = async () => {
@@ -1106,83 +1217,92 @@ Team ApplyWizz`
 
   const fetchLeads = async (profile: Profile) => {
     try {
-      // Count total leads FIRST (for pagination display)
-      let countQuery = supabase
-        .from("leads")
-        .select("*", { count: "exact", head: true })
-        .eq("status", "Assigned");
+      const savedHotSources: string[] = JSON.parse(localStorage.getItem('hotSources') || '[]');
+      const threeDaysAgo = dayjs().subtract(3, 'day').startOf('day').toISOString();
 
-      if (profile.roles === "Sales Associate") {
-        countQuery = countQuery.eq("assigned_to", profile.full_name);
+      // Base filters common to both queries
+      const applyBaseFilters = (q: any) => {
+        let qry = q.eq("status", "Assigned");
+        if (profile.roles === "Sales Associate") {
+          qry = qry.eq("assigned_to", profile.full_name);
+        }
+        if (sourceFilter !== "all") {
+          qry = qry.eq("source", sourceFilter);
+        }
+        if (ownerFilter !== "all" && ["Admin", "Super Admin", "Sales Head", "Marketing"].includes(profile.roles || "")) {
+          qry = qry.eq("assigned_to", ownerFilter);
+        }
+        if (stageFilter !== "all") {
+          qry = qry.eq("current_stage", stageFilter);
+        }
+        if (debouncedSearchTerm.trim()) {
+          const term = debouncedSearchTerm.trim();
+          const bidPart = term.toUpperCase().startsWith("AWL-") ? `business_id.eq.${term}` : `business_id.ilike.%${term}%`;
+          qry = qry.or(`name.ilike.%${term}%,phone.ilike.%${term}%,${bidPart},email.ilike.%${term}%,assigned_to.ilike.%${term}%`);
+        }
+        return qry;
+      };
+
+      // 1. Hot Leads Query
+      let hotQ = supabase.from("leads").select("*", { count: "exact" });
+      hotQ = applyBaseFilters(hotQ);
+      if (savedHotSources.length > 0) {
+        hotQ = hotQ.in("source", savedHotSources).gte("created_at", threeDaysAgo);
+      } else {
+        // If no hot sources, hot count is zero
+        hotQ = hotQ.eq("id", "00000000-0000-0000-0000-000000000000"); // Impossible ID
       }
 
-      if (sourceFilter !== "all") {
-        countQuery = countQuery.eq("source", sourceFilter);
+      // 2. Regular Leads Query (Not Hot)
+      let regQ = supabase.from("leads").select("*", { count: "exact" });
+      regQ = applyBaseFilters(regQ);
+      if (savedHotSources.length > 0) {
+        // NOT (source IN hotSources AND created_at >= threeDaysAgo) 
+        // equals (source NOT IN hotSources OR created_at < threeDaysAgo)
+        const hotSourcesStr = `("${savedHotSources.join('","')}")`;
+        regQ = regQ.or(`source.not.in.${hotSourcesStr},created_at.lt.${threeDaysAgo}`);
       }
 
-      if (ownerFilter !== "all" && profile.roles === "Admin") {
-        countQuery = countQuery.eq("assigned_to", ownerFilter);
-      }
+      // Fetch counts in parallel
+      const [{ count: hotCount }, { count: regCount }] = await Promise.all([
+        hotQ.select("*", { count: "exact", head: true }),
+        regQ.select("*", { count: "exact", head: true })
+      ]);
 
-      if (stageFilter !== "all") {
-        countQuery = countQuery.eq("current_stage", stageFilter);
-      }
+      const totalHot = hotCount || 0;
+      const totalReg = regCount || 0;
+      setTotalRecords(totalHot + totalReg);
 
-      if (debouncedSearchTerm.trim()) {
-        const term = debouncedSearchTerm.trim();
-        const bidPart = term.toUpperCase().startsWith("AWL-") ? `business_id.eq.${term}` : `business_id.ilike.%${term}%`;
-        countQuery = countQuery.or(`name.ilike.%${term}%,phone.ilike.%${term}%,${bidPart},email.ilike.%${term}%,assigned_to.ilike.%${term}%`);
-      }
-
-      const { count } = await countQuery;
-      setTotalRecords(count ?? 0);
-
-      // Now fetch paginated leads
+      // 3. Determine range and fetch actual data
       const from = (page - 1) * pageSize;
       const to = from + pageSize - 1;
 
-      let query = supabase
-        .from("leads")
-        .select(`
-id, business_id, name, email, phone,
-  assigned_to, current_stage, status,
-  created_at, assigned_at, source
-    `)
-        .eq("status", "Assigned")
-        .order("assigned_at", { ascending: false })   // 👈 NEW SORT
-        .range(from, to);
+      let combinedData: any[] = [];
 
-
-      if (profile.roles === "Sales Associate") {
-        query = query.eq("assigned_to", profile.full_name);
+      // Logic to fetch from hot leads
+      if (from < totalHot) {
+        const fetchHotTo = Math.min(to, totalHot - 1);
+        const { data: hotData } = await hotQ
+          .select("id, business_id, name, email, phone, assigned_to, current_stage, status, created_at, assigned_at, source")
+          .order("assigned_at", { ascending: false })
+          .range(from, fetchHotTo);
+        if (hotData) combinedData = [...combinedData, ...hotData];
       }
 
-      if (sourceFilter !== "all") {
-        query = query.eq("source", sourceFilter);
+      // Logic to fetch from regular leads
+      if (combinedData.length < pageSize && (from + combinedData.length) < (totalHot + totalReg)) {
+        const needed = pageSize - combinedData.length;
+        const regFrom = Math.max(0, from - totalHot);
+        const regTo = regFrom + needed - 1;
+
+        const { data: regData } = await regQ
+          .select("id, business_id, name, email, phone, assigned_to, current_stage, status, created_at, assigned_at, source")
+          .order("assigned_at", { ascending: false })
+          .range(regFrom, regTo);
+        if (regData) combinedData = [...combinedData, ...regData];
       }
 
-      if (ownerFilter !== "all" && profile.roles === "Admin") {
-        query = query.eq("assigned_to", ownerFilter);
-      }
-
-      if (stageFilter !== "all") {
-        query = query.eq("current_stage", stageFilter);
-      }
-
-      if (debouncedSearchTerm.trim()) {
-        const term = debouncedSearchTerm.trim();
-        const bidPart = term.toUpperCase().startsWith("AWL-") ? `business_id.eq.${term}` : `business_id.ilike.%${term}%`;
-        query = query.or(`name.ilike.%${term}%,phone.ilike.%${term}%,${bidPart},email.ilike.%${term}%,assigned_to.ilike.%${term}%`);
-      }
-
-      const { data, error } = await query;
-
-      if (error) {
-        console.error("Error fetching leads:", error);
-        return;
-      }
-
-      const leadsData = (data ?? []).map((lead: any) => ({
+      const leadsData = combinedData.map((lead: any) => ({
         id: lead.id,
         business_id: lead.business_id,
         client_name: lead.name,
@@ -1199,7 +1319,7 @@ id, business_id, name, email, phone,
       setLeads(leadsData);
 
     } catch (err) {
-      console.error("Pagination fetch error:", err);
+      console.error("Prioritized pagination fetch error:", err);
     }
   };
 
@@ -1323,7 +1443,7 @@ id, business_id, name, email, phone,
       .select("id, business_id, name, email, phone, assigned_to, current_stage")
       .in("current_stage", ["DNP", "Conversation Done", "Target"]);
 
-    // 🔒 Filter by name if not Admin
+    // 🔒 Filter by name if Sales Associate
     if (userProfile.roles === "Sales Associate") {
       leadsQuery = leadsQuery.eq("assigned_to", userProfile.full_name);
     }
@@ -1413,7 +1533,10 @@ id, business_id, name, email, phone,
       }
 
       alert(`Lead assigned to ${selectedName}`);
-      if (userProfile) await fetchLeads(userProfile);
+      if (userProfile) {
+        await fetchLeads(userProfile);
+        fetchStageCounts();
+      }
     } catch (err: any) {
       console.error("Error updating assigned_to:", err.message);
       alert("Failed to update assignment.");
@@ -1430,15 +1553,24 @@ id, business_id, name, email, phone,
     return leads.filter((lead) => {
       const matchesStage = stageFilter === "all" || lead.current_stage === stageFilter;
       const matchesSource = sourceFilter === "all" || lead.source === sourceFilter;
+      const matchesOwner = ownerFilter === "all" || lead.assigned_to === ownerFilter;
 
       let matchesDate = true;
-      if (startIso && endIso && lead.assigned_at) {
-        matchesDate = lead.assigned_at >= startIso && lead.assigned_at <= endIso;
+      if (startIso && endIso) {
+        let dateToCompare = lead.assigned_at;
+        if (dateFilterType === "created_at") dateToCompare = lead.created_at;
+        else if (dateFilterType === "last_activity") dateToCompare = lead.updated_at || lead.assigned_at;
+
+        if (dateToCompare) {
+          matchesDate = dateToCompare >= startIso && dateToCompare <= endIso;
+        } else {
+          matchesDate = false;
+        }
       }
 
-      return matchesStage && matchesSource && matchesDate;
+      return matchesStage && matchesSource && matchesOwner && matchesDate;
     });
-  }, [leads, stageFilter, sourceFilter, startDate, endDate]);
+  }, [leads, stageFilter, sourceFilter, ownerFilter, startDate, endDate, dateFilterType]);
 
   const handleStageUpdate = useCallback(async (leadId: string, newStage: SalesStage) => {
     const lead = leads.find((l) => l.id === leadId);
@@ -1548,6 +1680,7 @@ id, business_id, name, email, phone,
     // 👇 After updating stage and call_history
     const updatedFollowUps = await fetchFollowUps();
     setFollowUpsData(updatedFollowUps);
+    fetchStageCounts(); // Refresh KPI cards
     setFollowUpSubmitted(false);      // reset for next time
 
   };
@@ -1604,7 +1737,7 @@ id, business_id, name, email, phone,
     const { data, error } = await supabase
       .from("profiles")
       .select("full_name, user_email")
-      .in("roles", ["Sales", "Sales Associate", "Sale Associate", "Admin", "Super Admin"]);
+      .in("roles", ["Sales", "Sales Associate", "Sale Associate", "Admin", "Super Admin", "Sales Head"]);
 
     if (error) {
       console.error("Error fetching sales users:", error);
@@ -1779,9 +1912,17 @@ id, business_id, name, email, phone,
   const sortedLeads = useMemo(() => {
     const leadsToSort = [...filteredLeads];
     const { key, direction } = sortConfig;
-    if (!key) return leadsToSort;
 
     return leadsToSort.sort((a, b) => {
+      // 1. Hot Leads Priority (Always at top)
+      const aHot = isHotLead(a);
+      const bHot = isHotLead(b);
+      if (aHot && !bHot) return -1;
+      if (!aHot && bHot) return 1;
+
+      // 2. Normal Priority Sorting
+      if (!key) return 0;
+
       let aValue: any = a[key as keyof Lead];
       let bValue: any = b[key as keyof Lead];
 
@@ -1804,7 +1945,7 @@ id, business_id, name, email, phone,
         ? (aValue || 0) - (bValue || 0)
         : (bValue || 0) - (aValue || 0);
     });
-  }, [filteredLeads, sortConfig]);
+  }, [filteredLeads, sortConfig, isHotLead]);
 
   const fetchSalesClosureCount = async () => {
     let q = supabase
@@ -1813,8 +1954,14 @@ id, business_id, name, email, phone,
 
     if (userProfile?.roles === "Sales Associate") {
       q = q.eq("account_assigned_name", userProfile.full_name);
-    } else if (ownerFilter !== "all" && ["Admin", "Super Admin", "Sales", "Marketing"].includes(userProfile?.roles || "")) {
+    } else if (ownerFilter !== "all" && ["Admin", "Super Admin", "Sales", "Marketing", "Sales Head"].includes(userProfile?.roles || "")) {
       q = q.eq("account_assigned_name", ownerFilter);
+    }
+
+    if (startDate && endDate) {
+      q = q
+        .gte("closed_at", dayjs(startDate).format("YYYY-MM-DD"))
+        .lte("closed_at", dayjs(endDate).format("YYYY-MM-DD"));
     }
 
     const { count, error } = await q;
@@ -1825,26 +1972,48 @@ id, business_id, name, email, phone,
   const fetchStageCounts = async () => {
     if (!userProfile) return;
 
-    // Manual counts from fetching stages or individual counts
+    let q = supabase
+      .from("leads")
+      .select("current_stage")
+      .eq("status", "Assigned");
+
+    if (userProfile.roles === "Sales Associate") {
+      q = q.eq("assigned_to", userProfile.full_name);
+    } else if (ownerFilter !== "all" && ["Admin", "Super Admin", "Sales", "Marketing", "Sales Head"].includes(userProfile.roles)) {
+      q = q.eq("assigned_to", ownerFilter);
+    }
+
+    if (sourceFilter !== "all") {
+      q = q.eq("source", sourceFilter);
+    }
+
+    if (startDate && endDate) {
+      const startIso = dayjs(startDate).startOf("day").toISOString();
+      const endIso = dayjs(endDate).endOf("day").toISOString();
+      let dateCol = dateFilterType === "created_at" ? "created_at" : "assigned_at";
+      q = q.gte(dateCol, startIso).lte(dateCol, endIso);
+    }
+
+    const { data, error } = await q;
+    if (error) {
+      console.error("Error fetching stage counts:", error);
+      return;
+    }
+
     const counts: Record<string, number> = {};
     let total = 0;
-    for (const stage of salesStages) {
-      let q = supabase
-        .from("leads")
-        .select("*", { count: "exact", head: true })
-        .eq("status", "Assigned")
-        .eq("current_stage", stage);
 
-      if (userProfile.roles === "Sales Associate") {
-        q = q.eq("assigned_to", userProfile.full_name);
-      } else if (ownerFilter !== "all" && ["Admin", "Super Admin", "Sales", "Marketing"].includes(userProfile.roles)) {
-        q = q.eq("assigned_to", ownerFilter);
+    // Initialize all stages to 0
+    salesStages.forEach(s => counts[s] = 0);
+
+    data.forEach(lead => {
+      const stage = lead.current_stage;
+      if (stage && counts.hasOwnProperty(stage)) {
+        counts[stage]++;
       }
+      total++;
+    });
 
-      const { count } = await q;
-      counts[stage] = count || 0;
-      total += (count || 0);
-    }
     counts['total'] = total;
     setStageCounts(counts);
   };
@@ -1852,7 +2021,7 @@ id, business_id, name, email, phone,
 
 
   return (
-    <ProtectedRoute allowedRoles={["Sales", "Sales Associate", "Super Admin", "Admin", "Marketing"]}>
+    <ProtectedRoute allowedRoles={["Sales", "Sales Associate", "Super Admin", "Admin", "Marketing", "Sales Head"]}>
       <style jsx global>{`
   .premium - font {
   -webkit - font - smoothing: antialiased;
@@ -1919,7 +2088,7 @@ id, business_id, name, email, phone,
                   <ListOrdered className="w-4 h-4 text-gray-400" /> <span className="hidden lg:inline">Activity View</span>
                 </Button>
 
-                {["Admin", "Super Admin"].includes(userProfile?.roles || "") && (
+                {["Admin", "Super Admin", "Sales Head"].includes(userProfile?.roles || "") && (
                   <Button variant="outline" size="sm" onClick={() => setView("call_stats")} className="h-8 gap-2 border-gray-300 font-normal bg-white">
                     <BarChart className="w-4 h-4 text-gray-400" /> <span className="hidden lg:inline">View Call Stats</span>
                   </Button>
@@ -2027,10 +2196,30 @@ id, business_id, name, email, phone,
                           <Button
                             variant="ghost"
                             className="h-8 text-xs text-red-500 hover:text-red-600 p-0 px-2"
-                            onClick={() => { setStartDate(null); setEndDate(null); setStageFilter("all"); setSourceFilter("all"); setOwnerFilter("all"); }}
+                            onClick={() => { 
+                              setStartDate(null); 
+                              setEndDate(null); 
+                              setStageFilter("all"); 
+                              setSourceFilter("all"); 
+                              setOwnerFilter("all"); 
+                              setDateFilterType("last_activity");
+                            }}
                           >
                             Reset Filters
                           </Button>
+                          <div className="h-4 w-px bg-gray-200 mx-1" />
+                          {/* <Button
+                            variant="outline"
+                            size="sm"
+                            className={cn(
+                              "h-8 gap-2 border-orange-200 text-orange-600 font-medium bg-orange-50/50 hover:bg-orange-100",
+                              hotSources.length > 0 && "animate-pulse border-orange-400"
+                            )}
+                            onClick={() => setShowHotSourcesDialog(true)}
+                          >
+                            <Flame className={cn("w-3.5 h-3.5", hotSources.length > 0 ? "fill-orange-500" : "text-orange-400")} />
+                            Hot Bucket ({hotSources.length})
+                          </Button> */}
                         </div>
 
                         <div
@@ -2069,7 +2258,7 @@ id, business_id, name, email, phone,
                           </Select>
                         </div>
 
-                        {["Admin", "Super Admin", "Sales", "Marketing"].includes(userProfile?.roles || "") && (
+                        {["Admin", "Super Admin", "Sales", "Marketing", "Sales Head"].includes(userProfile?.roles || "") && (
                           <div className="flex flex-col gap-1.5 min-w-[160px]">
                             <Label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider text-[#00a1e1]">Team View</Label>
                             <Select value={ownerFilter} onValueChange={setOwnerFilter}>
@@ -2087,7 +2276,7 @@ id, business_id, name, email, phone,
                         <div className="flex flex-col gap-1.5 flex-1 min-w-[320px]">
                           <Label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider">Date Filters</Label>
                           <div className="flex gap-2">
-                            <Select defaultValue="last_activity">
+                            <Select value={dateFilterType} onValueChange={setDateFilterType}>
                               <SelectTrigger className="h-8 text-xs border-gray-300 bg-white shadow-none w-[110px] shrink-0">
                                 <SelectValue placeholder="Activity" />
                               </SelectTrigger>
@@ -2132,6 +2321,11 @@ id, business_id, name, email, phone,
                       isRightPanelCollapsed={isRightPanelCollapsed}
                       onOpenHistory={handleOpenHistory}
                       onOpenMail={handleOpenMail}
+                      onUpdateAssignedTo={handleUpdateAssignedTo}
+                      salesUsers={salesUsers}
+                      isHotLead={isHotLead}
+                      selectedLeads={selectedLeads}
+                      onSelectedLeadsChange={setSelectedLeads}
                     />
                   </>
                 )}
@@ -2590,6 +2784,56 @@ id, business_id, name, email, phone,
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {/* Hot Sources Management Dialog */}
+      <Dialog open={showHotSourcesDialog} onOpenChange={setShowHotSourcesDialog}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Flame className="w-5 h-5 text-orange-500 fill-orange-500" />
+              Manage Hot Bucket Sources
+            </DialogTitle>
+            <DialogDescription>
+              Any lead from these sources arriving in the last 3 days will be prioritized at the top.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[50vh] overflow-y-auto space-y-1 p-1">
+            {sources.length === 0 ? (
+              <p className="text-center py-4 text-gray-400 text-sm">No lead sources found in history.</p>
+            ) : (
+              sources.map(source => (
+                <div key={source} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded-md group">
+                  <span className="text-sm font-medium text-slate-700">{source}</span>
+                  <Button
+                    variant={hotSources.includes(source) ? "default" : "outline"}
+                    size="sm"
+                    className={cn(
+                      "h-7 text-[10px] uppercase font-bold",
+                      hotSources.includes(source) ? "bg-orange-500 hover:bg-orange-600 border-none" : "text-gray-400 border-gray-200"
+                    )}
+                    onClick={() => toggleHotSource(source)}
+                  >
+                    {hotSources.includes(source) ? "Active" : "Add"}
+                  </Button>
+                </div>
+              ))
+            )}
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setShowHotSourcesDialog(false)} className="w-full">Done</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Hot Float Keyframes */}
+      <style jsx global>{`
+        @keyframes hot-float {
+          0%, 100% { transform: translateY(0) rotate(0deg); }
+          50% { transform: translateY(-3px) rotate(5deg); }
+        }
+        .animate-hot-float {
+          animation: hot-float 1.5s ease-in-out infinite;
+        }
+      `}</style>
     </ProtectedRoute>
   );
 }

@@ -102,7 +102,7 @@
 //       setSignupEmail('');
 //       sessionStorage.removeItem('signup_email');
 //       localStorage.removeItem("applywizz_user_email");
-      
+
 //       setMessage("❌ " + (err.message || "Failed to create user"));
 //     } finally {
 //       setLoading(false);
@@ -1020,6 +1020,7 @@ export const DEFAULT_ROLES = [
   "Technical Associate",
   "Resume Head",
   "Resume Associate",
+  "Sales Head",
 ] as const;
 
 interface Profile {
@@ -1035,11 +1036,11 @@ interface Profile {
 
 // --- Sub-components to isolate state and prevent over-rendering ---
 
-const SwapRoleDialog = memo(({ user, availableRoles, onUpdated, setMessage }: { 
-  user: Profile, 
-  availableRoles: string[], 
+const SwapRoleDialog = memo(({ user, availableRoles, onUpdated, setMessage }: {
+  user: Profile,
+  availableRoles: string[],
   onUpdated: () => void,
-  setMessage: (m: string) => void 
+  setMessage: (m: string) => void
 }) => {
   const [selectedRole, setSelectedRole] = useState(user.roles);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -1068,7 +1069,7 @@ const SwapRoleDialog = memo(({ user, availableRoles, onUpdated, setMessage }: {
         .eq("auth_id", user.auth_id);
 
       if (error) throw error;
-      
+
       setMessage(`✅ Role swapped for ${user.full_name} to ${selectedRole}`);
       setOpen(false);
       onUpdated();
@@ -1082,9 +1083,9 @@ const SwapRoleDialog = memo(({ user, availableRoles, onUpdated, setMessage }: {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button 
-          variant="outline" 
-          size="sm" 
+        <Button
+          variant="outline"
+          size="sm"
           className="h-8 gap-2 border-blue-100 bg-blue-50/50 text-blue-700 hover:bg-blue-100 hover:text-blue-800 font-medium text-[11px] px-3 transition-all"
         >
           <Settings2 className="h-3.5 w-3.5" />
@@ -1136,10 +1137,10 @@ const SwapRoleDialog = memo(({ user, availableRoles, onUpdated, setMessage }: {
                 <div className="space-y-2">
                   <label className="text-sm font-semibold text-gray-700">Confirmation Password</label>
                   <div className="relative">
-                    <Input 
-                      type={showConfirmPassword ? "text" : "password"} 
-                      placeholder="Enter password to confirm" 
-                      value={confirmPassword} 
+                    <Input
+                      type={showConfirmPassword ? "text" : "password"}
+                      placeholder="Enter password to confirm"
+                      value={confirmPassword}
                       autoFocus
                       onChange={(e) => {
                         setConfirmPassword(e.target.value);
@@ -1166,26 +1167,26 @@ const SwapRoleDialog = memo(({ user, availableRoles, onUpdated, setMessage }: {
           </div>
         </div>
         <DialogFooter className="gap-2 sm:gap-0">
-          <Button 
-            variant="ghost" 
-            onClick={() => { 
+          <Button
+            variant="ghost"
+            onClick={() => {
               if (step === 2) {
                 setStep(1);
                 setConfirmPassword("");
                 setPasswordError("");
                 setShowConfirmPassword(false);
               } else {
-                setOpen(false); 
-                setConfirmPassword(""); 
-                setPasswordError(""); 
+                setOpen(false);
+                setConfirmPassword("");
+                setPasswordError("");
                 setShowConfirmPassword(false);
               }
             }}
           >
             {step === 2 ? "Back" : "Cancel"}
           </Button>
-          <Button 
-            onClick={handleUpdate} 
+          <Button
+            onClick={handleUpdate}
             disabled={isUpdating || selectedRole === user.roles || (step === 2 && !confirmPassword)}
             className="bg-blue-600 hover:bg-blue-700 text-white"
           >
@@ -1229,8 +1230,8 @@ const AddRoleDialog = memo(({ onAdd }: { onAdd: (role: string) => void }) => {
         <form onSubmit={handleSubmit} className="space-y-4 py-4">
           <div className="space-y-2">
             <label className="text-sm font-medium">Role Name</label>
-            <Input 
-              placeholder="e.g. Quality Analyst" 
+            <Input
+              placeholder="e.g. Quality Analyst"
               value={newRole}
               onChange={(e) => setNewRole(e.target.value)}
               required
@@ -1366,16 +1367,16 @@ const AddUserForm = memo(({ setMessage, fetchProfiles, setSignupEmail, available
         </div>
         <div className="space-y-2">
           <label className="text-[12px] font-medium">Role</label>
-                  <Select value={role} onValueChange={setRole}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select role" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {availableRoles.map((r) => (
-                        <SelectItem key={r} value={r}>{r}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+          <Select value={role} onValueChange={setRole}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select role" />
+            </SelectTrigger>
+            <SelectContent>
+              {availableRoles.map((r) => (
+                <SelectItem key={r} value={r}>{r}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
       <Button type="submit" disabled={isSubmitting} className="w-full mt-4">
@@ -1682,10 +1683,10 @@ const TeamOverview = memo(({ profiles, filterStatus, setFilterStatus, searchQuer
                     <TableCell className="font-medium whitespace-nowrap px-2 text-[12px] text-center">{profile.full_name}</TableCell>
                     <TableCell className="whitespace-nowrap px-2 text-[12px] text-center">{profile.user_email}</TableCell>
                     <TableCell className="px-2 text-center">
-                      <SwapRoleDialog 
-                        user={profile} 
-                        availableRoles={availableRoles} 
-                        onUpdated={fetchProfiles} 
+                      <SwapRoleDialog
+                        user={profile}
+                        availableRoles={availableRoles}
+                        onUpdated={fetchProfiles}
                         setMessage={setMessage}
                       />
                     </TableCell>
@@ -1722,7 +1723,7 @@ export default function AddUserPage() {
   const [mode, setMode] = useState<"add" | "deactivate">("add");
   const [message, setMessage] = useState("");
   const { setSignupEmail } = useEmail();
-  
+
   const [dynamicRoles, setDynamicRoles] = useState<string[]>(Array.from(DEFAULT_ROLES));
 
   const handleAddRole = useCallback((newRole: string) => {
@@ -1868,27 +1869,27 @@ export default function AddUserPage() {
           <div className="flex gap-10 items-center pr-4">
             <h1 className="text-2xl font-bold">User Management</h1>
             <div className="flex gap-2 bg-gray-100 p-1 rounded-lg">
-                <Button
-                  variant={mode === "add" ? "default" : "ghost"}
-                  size="sm"
-                  onClick={() => { setMode("add"); setMessage(""); }}
-                  className="gap-2"
-                >
-                  <UserPlus className="h-4 w-4" />
-                  Add User
-                </Button>
-                <Button
-                  variant={mode === "deactivate" ? "default" : "ghost"}
-                  size="sm"
-                  onClick={() => { setMode("deactivate"); setMessage(""); }}
-                  className="gap-2"
-                >
-                  <UserMinus className="h-4 w-4" />
-                  Deactivate Account
-                </Button>
-              </div>
-              <AddRoleDialog onAdd={handleAddRole} />
+              <Button
+                variant={mode === "add" ? "default" : "ghost"}
+                size="sm"
+                onClick={() => { setMode("add"); setMessage(""); }}
+                className="gap-2"
+              >
+                <UserPlus className="h-4 w-4" />
+                Add User
+              </Button>
+              <Button
+                variant={mode === "deactivate" ? "default" : "ghost"}
+                size="sm"
+                onClick={() => { setMode("deactivate"); setMessage(""); }}
+                className="gap-2"
+              >
+                <UserMinus className="h-4 w-4" />
+                Deactivate Account
+              </Button>
             </div>
+            <AddRoleDialog onAdd={handleAddRole} />
+          </div>
 
           <div className="flex flex-col xl:flex-row gap-6 items-start">
             {/* Left Side: Actions (35%) */}

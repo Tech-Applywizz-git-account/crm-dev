@@ -579,6 +579,7 @@ export default function SalesFormPage() {
         "Resume Head",
         "Technical Head",
         "Super Admin",
+        "Sales Head",
       ]}
     >
       <DashboardLayout>

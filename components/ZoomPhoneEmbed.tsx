@@ -149,8 +149,55 @@ export const ZoomPhoneEmbed = React.forwardRef<ZoomPhoneEmbedHandle, ZoomPhoneEm
         setIsMinimized(!isMinimized);
     };
 
+    const [position, setPosition] = useState({ x: 0, y: 0 });
+    const [isDragging, setIsDragging] = useState(false);
+    const dragRef = useRef({ startX: 0, startY: 0, initialX: 0, initialY: 0 });
+
+    const handleMouseDown = (e: React.MouseEvent) => {
+        setIsDragging(true);
+        dragRef.current = {
+            startX: e.clientX,
+            startY: e.clientY,
+            initialX: position.x,
+            initialY: position.y
+        };
+    };
+
+    useEffect(() => {
+        const handleMouseMove = (e: MouseEvent) => {
+            if (!isDragging) return;
+            const dx = e.clientX - dragRef.current.startX;
+            const dy = e.clientY - dragRef.current.startY;
+            setPosition({
+                x: dragRef.current.initialX - dx, // Subtracted because we use bottom/right
+                y: dragRef.current.initialY - dy
+            });
+        };
+
+        const handleMouseUp = () => {
+            setIsDragging(false);
+        };
+
+        if (isDragging) {
+            window.addEventListener('mousemove', handleMouseMove);
+            window.addEventListener('mouseup', handleMouseUp);
+        }
+
+        return () => {
+            window.removeEventListener('mousemove', handleMouseMove);
+            window.removeEventListener('mouseup', handleMouseUp);
+        };
+    }, [isDragging]);
+
     return (
-        <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-2 pointer-events-none">
+        <div 
+            className="fixed z-50 flex flex-col items-end gap-2 pointer-events-none transition-all duration-75 select-none"
+            style={{ 
+                bottom: `calc(1.5rem + ${position.y}px)`, 
+                right: `calc(1.5rem + ${position.x}px)`,
+                cursor: isDragging ? 'grabbing' : 'auto'
+            }}
+        >
             {/* Zoom Phone Widget */}
             <div
                 className={cn(
@@ -159,9 +206,12 @@ export const ZoomPhoneEmbed = React.forwardRef<ZoomPhoneEmbedHandle, ZoomPhoneEm
                     isMinimized ? "w-64 h-16" : "w-[375px] h-[600px]"
                 )}
             >
-                {/* Header */}
-                <div className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-100 h-12">
-                    <span className="text-sm font-medium text-gray-700">Zoom Phone</span>
+                {/* Header - Drag Handle */}
+                <div 
+                    className="flex items-center justify-between px-4 py-2 bg-gray-50 border-b border-gray-100 h-12 cursor-grab active:cursor-grabbing"
+                    onMouseDown={handleMouseDown}
+                >
+                    <span className="text-sm font-medium text-gray-700 pointer-events-none">Zoom Phone</span>
                     <div className="flex items-center gap-1">
                         <Button variant="ghost" size="icon" className="h-6 w-6 text-gray-500 hover:text-gray-700" onClick={toggleMinimize}>
                             {isMinimized ? <Maximize2 size={14} /> : <Minimize2 size={14} />}
@@ -204,11 +254,12 @@ export const ZoomPhoneEmbed = React.forwardRef<ZoomPhoneEmbedHandle, ZoomPhoneEm
                 </div>
             </div>
 
-            {/* Floating Toggle Button */}
+            {/* Floating Toggle Button - Also Drag Handle */}
             <Button
-                onClick={toggleOpen}
+                onClick={() => !isDragging && toggleOpen()}
+                onMouseDown={handleMouseDown}
                 className={cn(
-                    "h-14 w-14 rounded-full shadow-lg transition-all duration-300 hover:scale-110 pointer-events-auto",
+                    "h-14 w-14 rounded-full shadow-lg transition-all duration-300 hover:scale-110 pointer-events-auto cursor-grab active:cursor-grabbing",
                     isOpen ? "bg-red-500 hover:bg-red-600 rotate-90" : "bg-blue-600 hover:bg-blue-700"
                 )}
                 style={!isOpen ? { animation: "pulse-ring 2s infinite" } : {}}
