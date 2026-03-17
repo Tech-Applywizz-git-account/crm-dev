@@ -799,15 +799,15 @@ export default function MarketingAnalyticsPage() {
                                     </Button>
                                 </div>
                             )}
-                            {/* 
+
                             <Button
                                 variant="outline"
-                                onClick={() => setShowHotSourcesDialog(true)}
+                                onClick={() => window.open('/marketingAnalytics/hot-leads', '_blank')}
                                 className={`gap-2 ${hotSources.length > 0 ? "border-orange-200 text-orange-600 hover:bg-orange-50" : ""}`}
                             >
                                 <Flame className={`w-4 h-4 ${hotSources.length > 0 ? "fill-orange-500 text-orange-500 animate-pulse" : ""}`} />
                                 Hot Bucket ({hotSources.length})
-                            </Button> */}
+                            </Button>
 
                             <Button
                                 variant="ghost"
@@ -908,7 +908,7 @@ export default function MarketingAnalyticsPage() {
                         <CardContent className="p-0">
                             <div className="overflow-x-auto max-h-[60vh]">
                                 <Table>
-                                    <TableHeader className="sticky top-0 bg-background z-10">
+                                    <TableHeader className="sticky top-0 bg-background z-0">
                                         <TableRow>
                                             <TableHead className="w-[50px]">
                                                 <Checkbox
