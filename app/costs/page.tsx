@@ -212,6 +212,110 @@ function AWSCostTable({ month }: { month: string }) {
   );
 }
 
+function AWSAllServicesTable({ month }: { month: string }) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [records, setRecords] = useState<any[]>([]);
+
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    const ts = Date.now();
+    fetch(`/api/costs/aws-all-services?month=${month}&_=${ts}`, { cache: "no-store" })
+      .then((res) => {
+        if (!res.ok) {
+          return res.json().then((b) => Promise.reject(b.error || res.statusText));
+        }
+        return res.json();
+      })
+      .then((data) => setRecords(data.records || []))
+      .catch((err) => setError(String(err)))
+      .finally(() => setLoading(false));
+  }, [month]);
+
+  if (loading) return <div className="flex justify-center py-12"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>;
+  if (error) return <div className="rounded-md bg-destructive/10 text-destructive px-4 py-3 text-sm">{error}</div>;
+  if (records.length === 0) return <p className="text-muted-foreground text-sm py-6">No AWS billing data for this month.</p>;
+
+  // 1. Identify all unique services across the entire month (to build column headers)
+  const allServices = Array.from(new Set(records.map(r => r.service))).sort();
+
+  // 2. Pivot data: Group by date, with services as property keys
+  const dateMap = new Map<string, Record<string, number>>();
+  let totalMonthlyCost = 0;
+
+  records.forEach((r) => {
+    if (!dateMap.has(r.date)) {
+      dateMap.set(r.date, {});
+    }
+    const dayData = dateMap.get(r.date)!;
+    dayData[r.service] = (dayData[r.service] || 0) + r.costUsd;
+    totalMonthlyCost += r.costUsd;
+  });
+
+  const pivotedRecords = Array.from(dateMap.entries()).map(([date, services]) => {
+    const dailyTotal = Object.values(services).reduce((sum, val) => sum + val, 0);
+    const bedrockCost = services["Amazon Bedrock"] || 0;
+    const dailyTotalNoBedrock = dailyTotal - bedrockCost;
+    return { date, services, dailyTotal, dailyTotalNoBedrock };
+  });
+
+  // 3. Sort by date DESC
+  pivotedRecords.sort((a, b) => b.date.localeCompare(a.date));
+
+  return (
+    <div className="space-y-4 max-w-full overflow-hidden">
+      <div className="flex justify-between items-center bg-gray-50/50 p-4 rounded-md border shadow-sm">
+        <span className="font-semibold text-gray-700">Total AWS Monthly Cost ({month}):</span>
+        <span className="text-xl font-bold bg-blue-100 text-blue-700 px-3 py-1 rounded-full">{formatUsd(totalMonthlyCost)}</span>
+      </div>
+
+      {/* Scrollable Container Wrapper */}
+      <div className="border rounded-lg overflow-x-auto shadow-md bg-white">
+        <div className="max-h-[600px] overflow-y-auto min-w-full inline-block align-middle">
+          <Table className="border-collapse table-auto min-w-[1200px]">
+            <TableHeader className="bg-slate-100 sticky top-0 shadow-sm z-20">
+              <TableRow>
+                <TableHead className="font-bold py-4 sticky left-0 bg-slate-100 z-30 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
+                  Date
+                </TableHead>
+                {allServices.map(service => (
+                  <TableHead key={service} className="text-right font-bold whitespace-nowrap px-6 border-l min-w-[180px]">
+                    {service}
+                  </TableHead>
+                ))}
+                <TableHead className="text-right font-bold border-l bg-slate-200 min-w-[180px]">Total Daily</TableHead>
+                <TableHead className="text-right font-bold border-l bg-amber-100 text-amber-900 min-w-[200px]">Total (No Bedrock)</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {pivotedRecords.map((row, i) => (
+                <TableRow key={i} className="hover:bg-slate-50 transition-colors">
+                  <TableCell className="font-medium whitespace-nowrap sticky left-0 bg-white shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] z-10">
+                    {formatDate(row.date)}
+                  </TableCell>
+                  {allServices.map(service => (
+                    <TableCell key={service} className="text-right tabular-nums border-l px-6">
+                      {row.services[service] ? formatUsd(row.services[service]) : "—"}
+                    </TableCell>
+                  ))}
+                  <TableCell className="text-right font-bold text-gray-900 border-l bg-slate-50/50">
+                    {formatUsd(row.dailyTotal)}
+                  </TableCell>
+                  <TableCell className="text-right font-bold text-amber-700 border-l bg-amber-50/30">
+                    {formatUsd(row.dailyTotalNoBedrock)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground italic px-1">* Values shown represent total daily cost in USD per service. Use shift + mouse wheel to scroll horizontally.</p>
+    </div>
+  );
+}
+
 export default function CostsPage() {
   const [month, setMonth] = useState(MONTHS[0]);
   const [costType, setCostType] = useState("apify");
@@ -303,9 +407,10 @@ export default function CostsPage() {
                   </p>
                 </div>
                 <Tabs value={costType} onValueChange={setCostType} className="w-full sm:w-auto">
-                  <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="apify">Apify Scraping</TabsTrigger>
-                    <TabsTrigger value="aws">AWS Explorer</TabsTrigger>
+                  <TabsList className="grid w-full grid-cols-3">
+                    <TabsTrigger value="apify">Apify</TabsTrigger>
+                    <TabsTrigger value="aws">Bedrock</TabsTrigger>
+                    <TabsTrigger value="aws-all">All AWS</TabsTrigger>
                   </TabsList>
                 </Tabs>
               </div>
@@ -372,8 +477,10 @@ export default function CostsPage() {
                     </>
                   )}
                 </>
-              ) : (
+              ) : costType === "aws" ? (
                 <AWSCostTable month={month} />
+              ) : (
+                <AWSAllServicesTable month={month} />
               )}
             </CardContent>
           </Card>
