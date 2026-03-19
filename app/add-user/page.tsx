@@ -964,6 +964,7 @@
 
 import { useState, useEffect, memo, useCallback, useMemo } from "react";
 import { supabase } from '@/utils/supabase/client';
+import { getRoles, combineRoles } from "@/utils/roles";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -1042,13 +1043,27 @@ const SwapRoleDialog = memo(({ user, availableRoles, onUpdated, setMessage }: {
   onUpdated: () => void,
   setMessage: (m: string) => void
 }) => {
-  const [selectedRole, setSelectedRole] = useState(user.roles);
+  const currentRoles = getRoles(user.roles);
+  const [selectedRoles, setSelectedRoles] = useState<string[]>(currentRoles);
   const [isUpdating, setIsUpdating] = useState(false);
   const [open, setOpen] = useState(false);
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [step, setStep] = useState(1); // 1: Select Role, 2: Password Confirmation
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  const handleRoleToggle = (role: string) => {
+    setSelectedRoles(prev => {
+      if (prev.includes(role)) {
+        return prev.filter(r => r !== role);
+      }
+      // Max 2 roles allowed
+      if (prev.length >= 2) {
+        return prev;
+      }
+      return [...prev, role];
+    });
+  };
 
   const handleUpdate = async () => {
     if (step === 1) {
@@ -1063,14 +1078,15 @@ const SwapRoleDialog = memo(({ user, availableRoles, onUpdated, setMessage }: {
     setPasswordError("");
     setIsUpdating(true);
     try {
+      const combinedRole = combineRoles(selectedRoles);
       const { error } = await supabase
         .from("profiles")
-        .update({ roles: selectedRole })
+        .update({ roles: combinedRole })
         .eq("auth_id", user.auth_id);
 
       if (error) throw error;
 
-      setMessage(`✅ Role swapped for ${user.full_name} to ${selectedRole}`);
+      setMessage(`✅ Role swapped for ${user.full_name} to ${combinedRole}`);
       setOpen(false);
       onUpdated();
     } catch (err: any) {
@@ -1080,8 +1096,21 @@ const SwapRoleDialog = memo(({ user, availableRoles, onUpdated, setMessage }: {
     }
   };
 
+  // Reset state when dialog opens
+  const handleOpenChange = (isOpen: boolean) => {
+    setOpen(isOpen);
+    if (isOpen) {
+      setSelectedRoles(getRoles(user.roles));
+      setStep(1);
+      setConfirmPassword("");
+      setPasswordError("");
+    }
+  };
+
+  const combinedSelectedRole = combineRoles(selectedRoles);
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
         <Button
           variant="outline"
@@ -1099,7 +1128,7 @@ const SwapRoleDialog = memo(({ user, availableRoles, onUpdated, setMessage }: {
             Swap Employee Role
           </DialogTitle>
           <DialogDescription>
-            Moving <strong>{user.full_name}</strong> to a different position.
+            Moving <strong>{user.full_name}</strong> to a different position. Select up to 2 roles.
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-6">
@@ -1111,17 +1140,29 @@ const SwapRoleDialog = memo(({ user, availableRoles, onUpdated, setMessage }: {
                   <span className="font-bold text-gray-900">{user.roles}</span>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-semibold text-gray-700">Select New Role</label>
-                  <Select value={selectedRole} onValueChange={setSelectedRole}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Choose a new role..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {availableRoles.map((r) => (
-                        <SelectItem key={r} value={r}>{r}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <label className="text-sm font-semibold text-gray-700">Select Roles (max 2)</label>
+                  <div className="border rounded-md max-h-[200px] overflow-y-auto p-2 space-y-1">
+                    {availableRoles.map((r) => (
+                      <label
+                        key={r}
+                        className="flex items-center gap-2 p-2 rounded hover:bg-gray-50 cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedRoles.includes(r)}
+                          onChange={() => handleRoleToggle(r)}
+                          disabled={!selectedRoles.includes(r) && selectedRoles.length >= 2}
+                          className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-sm">{r}</span>
+                      </label>
+                    ))}
+                  </div>
+                  {selectedRoles.length > 0 && (
+                    <div className="text-xs text-blue-600 font-medium mt-2">
+                      Selected: {combinedSelectedRole}
+                    </div>
+                  )}
                 </div>
               </div>
             ) : (
@@ -1131,7 +1172,7 @@ const SwapRoleDialog = memo(({ user, availableRoles, onUpdated, setMessage }: {
                   <div className="flex items-center gap-2 text-sm font-medium">
                     <span className="text-gray-500">{user.roles}</span>
                     <Settings2 className="h-3 w-3 text-gray-400" />
-                    <span className="text-blue-700 font-bold">{selectedRole}</span>
+                    <span className="text-blue-700 font-bold">{combinedSelectedRole}</span>
                   </div>
                 </div>
                 <div className="space-y-2">
@@ -1187,7 +1228,7 @@ const SwapRoleDialog = memo(({ user, availableRoles, onUpdated, setMessage }: {
           </Button>
           <Button
             onClick={handleUpdate}
-            disabled={isUpdating || selectedRole === user.roles || (step === 2 && !confirmPassword)}
+            disabled={isUpdating || selectedRoles.length === 0 || (step === 2 && !confirmPassword)}
             className="bg-blue-600 hover:bg-blue-700 text-white"
           >
             {step === 1 ? "Confirm Role Swap" : (isUpdating ? "Processing Swap..." : "Finalize Swap")}

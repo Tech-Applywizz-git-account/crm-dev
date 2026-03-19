@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { supabase } from '@/utils/supabase/client';
-import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { getRoles } from "@/utils/roles";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -12,14 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { EditIcon, Eye, Search, ExternalLink, Bell, User, ChevronDown, ChevronRight, ChevronLeft, ChevronUp, Star, Settings, Phone, History as HistoryIcon, Trash2, Plus, Download, Tag, Loader2, Calendar, BarChart, ListOrdered, RefreshCw, Mail, Send, Flame, ArrowUp } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
+import { Eye, ExternalLink, ChevronDown, ChevronRight, ChevronLeft, ChevronUp, Star, Phone, History as HistoryIcon, Trash2, Plus, Download, Tag, Loader2, BarChart, ListOrdered, RefreshCw, Mail, Send, Flame } from "lucide-react";
 import { cn } from "@/lib/utils";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import dayjs from 'dayjs';
@@ -27,17 +20,31 @@ import relativeTime from 'dayjs/plugin/relativeTime';
 dayjs.extend(relativeTime);
 import isBetween from "dayjs/plugin/isBetween";
 import * as XLSX from "xlsx";
-import { useRouter } from "next/navigation";
 import { ZoomPhoneEmbedHandle } from "@/components/ZoomPhoneEmbed";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { Header } from "@/components/layout/header";
+import SalesClosureDialog from "@/app/sales/_components/SalesClosureDialog";
+import ActivityView from "@/app/sales/_components/ActivityView";
+import CallStatsView from "@/app/sales/_components/CallStatsView";
+import RenewalsView from "@/app/sales/_components/RenewalsView";
+import { EmailLogView } from "@/app/_components/EmailLogView";
+import { ZoomPhoneEmbed } from "@/components/ZoomPhoneEmbed";
 
 
 dayjs.extend(isBetween);
 
 
 type SalesStage = "Prospect" | "DNP" | "Out of TG" | "Not Interested" | "Conversation Done" | "sale done" | "Target";
+
+const ASSIGNED_HOT_LEADS_KEY = "crm_assigned_hot_leads";
+
+type AssignedHotLeadCacheRecord = {
+  id: string;
+  source?: string;
+  created_at: string;
+  hot_assigned_at: string;
+};
 
 const cleanLeadName = (name: string) => {
   if (!name) return "";
@@ -101,23 +108,6 @@ interface CallHistory {
   assigned_to?: string;
 }
 
-type PRPaidFlag = "Paid" | "Not paid";
-type PRRow = {
-  lead_id: string;
-  name: string;
-  email: string;
-  closed_at: string | null; // oldest closure date (YYYY-MM-DD or null)
-
-  resumePaid: PRPaidFlag;
-  resumeStatus: string | null;
-  resumePdf: string | null;
-
-  portfolioPaid: PRPaidFlag;
-  portfolioStatus: string | null;
-  portfolioLink: string | null;
-
-  githubPaid: PRPaidFlag; // no status/link available for github in resume_progress
-};
 interface Lead {
   id: string;
   business_id: string;
@@ -191,7 +181,6 @@ const LeadRow = React.memo(({
   userProfile,
   handleStageUpdate,
   handlePhoneClick,
-  isRightPanelCollapsed,
   onOpenHistory,
   onOpenMail,
   onUpdateAssignedTo,
@@ -206,7 +195,6 @@ const LeadRow = React.memo(({
   userProfile: Profile | null;
   handleStageUpdate: (id: string, stage: SalesStage) => void;
   handlePhoneClick: (phone: string) => void;
-  isRightPanelCollapsed: boolean;
   onOpenHistory: (lead: Lead) => void;
   onOpenMail: (lead: Lead) => void;
   onUpdateAssignedTo: (id: string, name: string, email: string) => void;
@@ -216,6 +204,7 @@ const LeadRow = React.memo(({
   onSelect: (id: string) => void;
   serialNumber: number;
 }) => {
+  const profileRoles = userProfile ? getRoles(userProfile.roles) : [];
   const leadScore = item.current_stage === "sale done" ? 100 : Math.max(2, 26 - (idx * 3));
 
   return (
@@ -223,9 +212,9 @@ const LeadRow = React.memo(({
       <TableCell className="px-4 py-3 align-top">
         <div className="flex items-center gap-3">
           <span className="text-sm font-bold text-slate-900 w-6">{serialNumber}</span>
-          <input 
-            type="checkbox" 
-            className="rounded mt-1 cursor-pointer" 
+          <input
+            type="checkbox"
+            className="rounded mt-1 cursor-pointer"
             checked={isSelected}
             onChange={() => onSelect(item.id)}
           />
@@ -238,19 +227,17 @@ const LeadRow = React.memo(({
             <div className="w-1.5 h-1.5 rounded-full bg-gray-300" />
           </div>
           <div className="flex flex-col">
-            <span
+            <div
               className="lead-name-link text-smooth hover:underline cursor-pointer text-[14px] font-semibold"
               onClick={() => window.open(`/leads/${item.business_id}`, "_blank")}
             >
               <div className="flex items-center gap-1.5">
                 {item.client_name}
                 {isHot && (
-                  <div className="relative inline-flex mb-1">
-                    <Flame className="w-4 h-4 text-orange-600 fill-orange-500 animate-hot-float drop-shadow-[0_0_8px_rgba(249,115,22,0.4)]" />
-                  </div>
+                  <span className="text-orange-500 text-[18px] animate-pulse ml-1" title="Hot Lead">🔥</span>
                 )}
               </div>
-            </span>
+            </div>
             <div className="flex items-center gap-2 mt-1">
               <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded uppercase tracking-wider">
                 {item.business_id}
@@ -303,7 +290,7 @@ const LeadRow = React.memo(({
         </Select>
       </TableCell>
       <TableCell className="py-3 align-top text-slate-700 font-medium whitespace-nowrap text-[13px]">
-        {["Admin", "Super Admin", "Sales Head"].includes(userProfile?.roles || "") ? (
+        {profileRoles.some(r => ["Admin", "Super Admin", "Sales Head", "Resume Head-Sales Associate"].includes(r)) ? (
           <Select
             value={item.assigned_to}
             onValueChange={(val) => {
@@ -366,7 +353,7 @@ const LeadRow = React.memo(({
           >
             <Eye className="w-3.5 h-3.5" />
           </div>
-          {userProfile?.roles === "Admin" && (
+          {userProfile && getRoles(userProfile.roles).includes("Admin") && (
             <div
               title="Delete"
               className="p-1.5 bg-red-50 text-red-600 rounded-md cursor-pointer hover:bg-red-600 hover:text-white transition-all shadow-sm"
@@ -392,7 +379,6 @@ const LeadsTable = React.memo(({
   totalRecords,
   setPage,
   setPageSize,
-  isRightPanelCollapsed,
   onOpenHistory,
   onOpenMail,
   onUpdateAssignedTo,
@@ -412,7 +398,6 @@ const LeadsTable = React.memo(({
   totalRecords: number;
   setPage: React.Dispatch<React.SetStateAction<number>>;
   setPageSize: React.Dispatch<React.SetStateAction<number>>;
-  isRightPanelCollapsed: boolean;
   onOpenHistory: (lead: Lead) => void;
   onOpenMail: (lead: Lead) => void;
   onUpdateAssignedTo: (id: string, name: string, email: string) => void;
@@ -431,8 +416,8 @@ const LeadsTable = React.memo(({
 
   const handleSelectLead = (id: string) => {
     onSelectedLeadsChange(
-      selectedLeads.includes(id) 
-        ? selectedLeads.filter(l => l !== id) 
+      selectedLeads.includes(id)
+        ? selectedLeads.filter(l => l !== id)
         : [...selectedLeads, id]
     );
   };
@@ -445,9 +430,9 @@ const LeadsTable = React.memo(({
               <TableHead className="px-4 align-middle h-12 w-20">
                 <div className="flex items-center gap-3">
                   <span className="text-[10px] font-bold text-slate-400 w-4">#</span>
-                  <input 
-                    type="checkbox" 
-                    className="rounded cursor-pointer" 
+                  <input
+                    type="checkbox"
+                    className="rounded cursor-pointer"
                     checked={leads.length > 0 && selectedLeads.length === leads.length}
                     onChange={toggleSelectAll}
                   />
@@ -488,7 +473,6 @@ const LeadsTable = React.memo(({
                   userProfile={userProfile}
                   handleStageUpdate={handleStageUpdate}
                   handlePhoneClick={handlePhoneClick}
-                  isRightPanelCollapsed={isRightPanelCollapsed}
                   onOpenHistory={onOpenHistory}
                   onOpenMail={onOpenMail}
                   onUpdateAssignedTo={onUpdateAssignedTo}
@@ -529,12 +513,10 @@ const LeadsTable = React.memo(({
 // 🚀 Memoized Sidebar Component
 const RightActionPanel = React.memo(({
   isCollapsed,
-  onAddLead,
-  userProfile
+  onAddLead
 }: {
   isCollapsed: boolean,
-  onAddLead: () => void,
-  userProfile: Profile | null
+  onAddLead: () => void
 }) => {
   if (isCollapsed) return null;
   return (
@@ -584,14 +566,6 @@ const RightActionPanel = React.memo(({
   );
 });
 
-
-import SalesClosureDialog from "@/app/sales/_components/SalesClosureDialog";
-import ActivityView from "@/app/sales/_components/ActivityView";
-import CallStatsView from "@/app/sales/_components/CallStatsView";
-import RenewalsView from "@/app/sales/_components/RenewalsView";
-import { EmailLogView } from "@/app/_components/EmailLogView";
-import { ZoomPhoneEmbed } from "@/components/ZoomPhoneEmbed";
-
 export default function SalesPage() {
   const [userEmail, setUserEmail] = useState<string>("");
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -620,28 +594,130 @@ export default function SalesPage() {
 
   // —— Email States ——
   // —— Hot Leads States ——
-  const [hotSources, setHotSources] = useState<string[]>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('hotSources');
-      return saved ? JSON.parse(saved) : [];
-    }
-    return [];
-  });
+  const [hotSources, setHotSources] = useState<string[]>([]);
+  const [dbHotLeadIds, setDbHotLeadIds] = useState<string[]>([]);
+  const [hotBucketLeadCount, setHotBucketLeadCount] = useState(0);
+  const [assignedHotLeadRecords, setAssignedHotLeadRecords] = useState<AssignedHotLeadCacheRecord[]>([]);
+  const [isHydrated, setIsHydrated] = useState(false);
 
   const isHotLead = useCallback((lead: Lead) => {
-    if (!lead.source || !hotSources.includes(lead.source)) return false;
-    const leadDate = dayjs(lead.created_at);
-    const ageInDays = dayjs().diff(leadDate, 'day');
-    return ageInDays >= 0 && ageInDays <= 3;
-  }, [hotSources]);
+    if (!lead?.id) return false;
+
+    // 1. Check the `is_hot` flag the server sends directly on each lead
+    if ((lead as any).is_hot === true) return true;
+
+    // 2. Check if the lead's ID appears in the dbHotLeadIds array from the server
+    const leadId = String(lead.id);
+    if (dbHotLeadIds.some(id => String(id) === leadId)) return true;
+
+    // 3. Fallback: check local assigned hot lead cache
+    if (assignedHotLeadRecords.some(r => String(r.id) === leadId)) return true;
+
+    return false;
+  }, [assignedHotLeadRecords, dbHotLeadIds]);
 
   const toggleHotSource = (source: string) => {
+    if (!source) return;
     setHotSources(prev => {
-      const next = prev.includes(source) ? prev.filter(s => s !== source) : [...prev, source];
+      const lowerSource = source.trim().toLowerCase();
+      const exists = prev.some(s => s.trim().toLowerCase() === lowerSource);
+      const next = exists
+        ? prev.filter(s => s.trim().toLowerCase() !== lowerSource)
+        : [...prev, source];
+
       localStorage.setItem('hotSources', JSON.stringify(next));
+      // Key sync for compatibility
+      localStorage.setItem('crm_hot_leads_sources', JSON.stringify(next));
       return next;
     });
   };
+
+  const syncHotSources = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const savedPrimary = localStorage.getItem('hotSources');
+      const savedFallback = localStorage.getItem('crm_hot_leads_sources');
+
+      const parseSources = (raw: string | null) => {
+        if (!raw) return [] as string[];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed.filter((s: any) => typeof s === 'string') : [];
+      };
+
+      const merged = Array.from(
+        new Map(
+          [...parseSources(savedPrimary), ...parseSources(savedFallback)].map((source) => [
+            source.trim().toLowerCase(),
+            source,
+          ])
+        ).values()
+      );
+
+      if (merged.length > 0) {
+        // Only update if changed to avoid re-render loops
+        setHotSources(prev => {
+          if (JSON.stringify(prev) === JSON.stringify(merged)) return prev;
+          return merged;
+        });
+      } else {
+        setHotSources(prev => prev.length > 0 ? [] : prev);
+      }
+    } catch (e) { }
+  }, []);
+
+  const syncAssignedHotLeadRecords = useCallback(() => {
+    if (typeof window === "undefined") return;
+
+    try {
+      const saved = localStorage.getItem(ASSIGNED_HOT_LEADS_KEY);
+      const parsed = saved ? JSON.parse(saved) : [];
+      const filtered: AssignedHotLeadCacheRecord[] = Array.isArray(parsed)
+        ? parsed.filter((item: any) => item && typeof item.id === "string" && typeof item.created_at === "string")
+        : [];
+
+      const activeRecords = filtered.filter((item) => {
+        const createdAt = new Date(item.created_at);
+        if (Number.isNaN(createdAt.getTime())) return false;
+        const ageInDays = Math.floor((Date.now() - createdAt.getTime()) / (1000 * 3600 * 24));
+        return ageInDays >= 0 && ageInDays <= 3;
+      });
+
+      setAssignedHotLeadRecords((prev) => {
+        if (JSON.stringify(prev) === JSON.stringify(activeRecords)) return prev;
+        return activeRecords;
+      });
+    } catch (error) {
+      console.error("Failed to sync assigned hot lead cache:", error);
+    }
+  }, []);
+
+  useEffect(() => {
+    setIsHydrated(true);
+    syncHotSources();
+    syncAssignedHotLeadRecords();
+
+    // 1. Storage event for cross-tab sync
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'hotSources' || e.key === 'crm_hot_leads_sources') {
+        syncHotSources();
+      }
+      if (e.key === ASSIGNED_HOT_LEADS_KEY) {
+        syncAssignedHotLeadRecords();
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+
+    // 2. Poll every 2 seconds as a foolproof fallback
+    const interval = setInterval(() => {
+      syncHotSources();
+      syncAssignedHotLeadRecords();
+    }, 2000);
+
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      clearInterval(interval);
+    };
+  }, [syncAssignedHotLeadRecords, syncHotSources]);
 
   const [showHotSourcesDialog, setShowHotSourcesDialog] = useState(false);
 
@@ -830,7 +906,7 @@ Team ApplyWizz`
     }
   };
 
-  const [salesClosedTotal, setSalesClosedTotal] = useState(0);
+  const [, setSalesClosedTotal] = useState(0);
 
   const [salesUsers, setSalesUsers] = useState<{ full_name: string; user_email: string }[]>([]);
 
@@ -841,7 +917,6 @@ Team ApplyWizz`
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
   const [followUpDialogOpen, setFollowUpDialogOpen] = useState(false);
-  const [searchTerm, setSearchTerm] = useState(""); // Committed search (after debounce)
   const [tempSearch, setTempSearch] = useState(""); // Immediate input state
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [sources, setSources] = useState<string[]>([]);
@@ -850,7 +925,6 @@ Team ApplyWizz`
   const [stageFilter, setStageFilter] = useState<string>("all");
   const [followUpData, setFollowUpData] = useState<FollowUp>({ follow_up_date: "", notes: "" });
   const [followUpSubmitted, setFollowUpSubmitted] = useState(false); // Track if follow-up was submitted
-  const [followUpsDialogOpen, setFollowUpsDialogOpen] = useState(false);
   const [followUpsData, setFollowUpsData] = useState<any[]>([]);
   const [followUpsFilter, setFollowUpsFilter] = useState<"today" | "all">("today");
   const [pendingStageUpdate, setPendingStageUpdate] = useState<{ leadId: string, stage: SalesStage } | null>(null);
@@ -1028,7 +1102,6 @@ Team ApplyWizz`
   };
 
 
-  const [isDateDropdownOpen, setIsDateDropdownOpen] = useState(false);
   const [onboardDialogOpen, setOnboardDialogOpen] = useState(false);
 
   // Client Info
@@ -1050,15 +1123,10 @@ Team ApplyWizz`
   const [linkedinValue, setLinkedinValue] = useState("");
   const [githubValue, setGithubValue] = useState("");
 
-  const [inputSearch, setInputSearch] = useState("");
-  const [isHoveringClear, setIsHoveringClear] = useState(false);
-
   // Calculated Fields
   const [autoTotal, setAutoTotal] = useState(0);
   const [totalSale, setTotalSale] = useState(0);
   const [nextDueDate, setNextDueDate] = useState("-");
-
-  const router = useRouter();
 
 
 
@@ -1217,156 +1285,35 @@ Team ApplyWizz`
 
   const fetchLeads = async (profile: Profile) => {
     try {
-      const savedHotSources: string[] = JSON.parse(localStorage.getItem('hotSources') || '[]');
-      const threeDaysAgo = dayjs().subtract(3, 'day').startOf('day').toISOString();
+      const response = await fetch("/api/sales-assigned-leads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          profile,
+          page,
+          pageSize,
+          sourceFilter,
+          ownerFilter,
+          stageFilter,
+          searchTerm: debouncedSearchTerm,
+        }),
+      });
 
-      // Base filters common to both queries
-      const applyBaseFilters = (q: any) => {
-        let qry = q.eq("status", "Assigned");
-        if (profile.roles === "Sales Associate") {
-          qry = qry.eq("assigned_to", profile.full_name);
-        }
-        if (sourceFilter !== "all") {
-          qry = qry.eq("source", sourceFilter);
-        }
-        if (ownerFilter !== "all" && ["Admin", "Super Admin", "Sales Head", "Marketing"].includes(profile.roles || "")) {
-          qry = qry.eq("assigned_to", ownerFilter);
-        }
-        if (stageFilter !== "all") {
-          qry = qry.eq("current_stage", stageFilter);
-        }
-        if (debouncedSearchTerm.trim()) {
-          const term = debouncedSearchTerm.trim();
-          const bidPart = term.toUpperCase().startsWith("AWL-") ? `business_id.eq.${term}` : `business_id.ilike.%${term}%`;
-          qry = qry.or(`name.ilike.%${term}%,phone.ilike.%${term}%,${bidPart},email.ilike.%${term}%,assigned_to.ilike.%${term}%`);
-        }
-        return qry;
-      };
-
-      // 1. Hot Leads Query
-      let hotQ = supabase.from("leads").select("*", { count: "exact" });
-      hotQ = applyBaseFilters(hotQ);
-      if (savedHotSources.length > 0) {
-        hotQ = hotQ.in("source", savedHotSources).gte("created_at", threeDaysAgo);
-      } else {
-        // If no hot sources, hot count is zero
-        hotQ = hotQ.eq("id", "00000000-0000-0000-0000-000000000000"); // Impossible ID
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result?.error || "Failed to fetch sales leads");
       }
 
-      // 2. Regular Leads Query (Not Hot)
-      let regQ = supabase.from("leads").select("*", { count: "exact" });
-      regQ = applyBaseFilters(regQ);
-      if (savedHotSources.length > 0) {
-        // NOT (source IN hotSources AND created_at >= threeDaysAgo) 
-        // equals (source NOT IN hotSources OR created_at < threeDaysAgo)
-        const hotSourcesStr = `("${savedHotSources.join('","')}")`;
-        regQ = regQ.or(`source.not.in.${hotSourcesStr},created_at.lt.${threeDaysAgo}`);
-      }
-
-      // Fetch counts in parallel
-      const [{ count: hotCount }, { count: regCount }] = await Promise.all([
-        hotQ.select("*", { count: "exact", head: true }),
-        regQ.select("*", { count: "exact", head: true })
-      ]);
-
-      const totalHot = hotCount || 0;
-      const totalReg = regCount || 0;
-      setTotalRecords(totalHot + totalReg);
-
-      // 3. Determine range and fetch actual data
-      const from = (page - 1) * pageSize;
-      const to = from + pageSize - 1;
-
-      let combinedData: any[] = [];
-
-      // Logic to fetch from hot leads
-      if (from < totalHot) {
-        const fetchHotTo = Math.min(to, totalHot - 1);
-        const { data: hotData } = await hotQ
-          .select("id, business_id, name, email, phone, assigned_to, current_stage, status, created_at, assigned_at, source")
-          .order("assigned_at", { ascending: false })
-          .range(from, fetchHotTo);
-        if (hotData) combinedData = [...combinedData, ...hotData];
-      }
-
-      // Logic to fetch from regular leads
-      if (combinedData.length < pageSize && (from + combinedData.length) < (totalHot + totalReg)) {
-        const needed = pageSize - combinedData.length;
-        const regFrom = Math.max(0, from - totalHot);
-        const regTo = regFrom + needed - 1;
-
-        const { data: regData } = await regQ
-          .select("id, business_id, name, email, phone, assigned_to, current_stage, status, created_at, assigned_at, source")
-          .order("assigned_at", { ascending: false })
-          .range(regFrom, regTo);
-        if (regData) combinedData = [...combinedData, ...regData];
-      }
-
-      const leadsData = combinedData.map((lead: any) => ({
-        id: lead.id,
-        business_id: lead.business_id,
-        client_name: lead.name,
-        email: lead.email,
-        phone: lead.phone,
-        assigned_to: lead.assigned_to,
-        current_stage: lead.current_stage,
-        call_history: [],
-        created_at: lead.created_at,
-        assigned_at: lead.assigned_at,
-        source: lead.source,
-      }));
-
-      setLeads(leadsData);
-
+      setLeads(Array.isArray(result?.leads) ? result.leads : []);
+      setDbHotLeadIds(Array.isArray(result?.hotLeadIds) ? result.hotLeadIds : []);
+      setTotalRecords(typeof result?.totalRecords === "number" ? result.totalRecords : 0);
+      setHotBucketLeadCount(typeof result?.hotBucketLeadCount === "number" ? result.hotBucketLeadCount : 0);
     } catch (err) {
+      setLeads([]);
+      setDbHotLeadIds([]);
+      setHotBucketLeadCount(0);
+      setTotalRecords(0);
       console.error("Prioritized pagination fetch error:", err);
-    }
-  };
-
-  const searchLeadsGlobally = async (term: string) => {
-    if (!term.trim()) {
-      if (userProfile) fetchLeads(userProfile); // Reset to normal view if empty
-      return;
-    }
-    try {
-      const bidPart = term.toUpperCase().startsWith("AWL-") ? `business_id.eq.${term}` : `business_id.ilike.%${term}%`;
-      const { data, error } = await supabase
-        .from("leads")
-        .select(`
-id, business_id, name, email, phone,
-  assigned_to, assigned_to_email, current_stage,
-  status, created_at, assigned_at, source
-    `)
-        .or(`name.ilike.%${term}%,email.ilike.%${term}%,phone.ilike.%${term}%,${bidPart},assigned_to.ilike.%${term}%,source.ilike.%${term}%`)
-        .eq("status", "Assigned")
-        .order("assigned_at", { ascending: false });
-
-      if (error) {
-        console.error("Global search error:", error);
-        return;
-      }
-
-      const leadsData = (data ?? []).map((lead: any) => ({
-        id: lead.id,
-        business_id: lead.business_id,
-        client_name: lead.name,
-        email: lead.email,
-        phone: lead.phone,
-        assigned_to: lead.assigned_to,
-        assigned_to_email: lead.assigned_to_email,
-        current_stage: lead.current_stage,
-        call_history: [],
-        created_at: lead.created_at,
-        assigned_at: lead.assigned_at,
-        updated_at: lead.updated_at,
-        source: lead.source,
-      }));
-
-      setLeads(leadsData);
-      setTotalRecords(leadsData.length);
-      setPage(1);
-    } catch (err) {
-      console.error("Global search failed:", err);
     }
   };
 
@@ -1378,9 +1325,7 @@ id, business_id, name, email, phone,
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
 
     searchTimeoutRef.current = setTimeout(() => {
-      setSearchTerm(val);
       setDebouncedSearchTerm(val);
-      // searchLeadsGlobally(val); // Removed as fetchLeads now handles searchTerm via useEffect
     }, 400);
   };
 
@@ -1444,7 +1389,8 @@ id, business_id, name, email, phone,
       .in("current_stage", ["DNP", "Conversation Done", "Target"]);
 
     // 🔒 Filter by name if Sales Associate
-    if (userProfile.roles === "Sales Associate") {
+    const userProfileRoles = getRoles(userProfile.roles);
+    if (userProfileRoles.includes("Sales Associate")) {
       leadsQuery = leadsQuery.eq("assigned_to", userProfile.full_name);
     }
 
@@ -1704,7 +1650,6 @@ id, business_id, name, email, phone,
     setFollowUpDialogOpen(true);
   };
 
-  const totalLeadsCount = filteredLeads.length;
   // KPI Stats removed - redundant on this page and causing high CPU usage.
   const fetchCallHistory = async (leadId: string) => {
     const lead = leads.find((l) => l.id === leadId);
@@ -1905,10 +1850,6 @@ id, business_id, name, email, phone,
     d === 0 ? 0 : d === 15 ? 0.5 : d === 30 ? 1 : d === 60 ? 2 : d === 90 ? 3 : 0;
 
   // 👉 ADD THIS derived constant (place near your other derived consts)
-  const applicationSaleValue = Number(
-    (saleData.base_value * cycleMultiplier(saleData.subscription_cycle)).toFixed(2)
-  );
-
   const sortedLeads = useMemo(() => {
     const leadsToSort = [...filteredLeads];
     const { key, direction } = sortConfig;
@@ -1952,9 +1893,10 @@ id, business_id, name, email, phone,
       .from("sales_closure")
       .select("lead_id", { count: "exact", head: true });
 
-    if (userProfile?.roles === "Sales Associate") {
+    const profileRoles = userProfile ? getRoles(userProfile.roles) : [];
+    if (profileRoles.includes("Sales Associate")) {
       q = q.eq("account_assigned_name", userProfile.full_name);
-    } else if (ownerFilter !== "all" && ["Admin", "Super Admin", "Sales", "Marketing", "Sales Head"].includes(userProfile?.roles || "")) {
+    } else if (ownerFilter !== "all" && profileRoles.some(r => ["Admin", "Super Admin", "Sales", "Marketing", "Sales Head"].includes(r))) {
       q = q.eq("account_assigned_name", ownerFilter);
     }
 
@@ -1977,9 +1919,10 @@ id, business_id, name, email, phone,
       .select("current_stage")
       .eq("status", "Assigned");
 
-    if (userProfile.roles === "Sales Associate") {
+    const profileRoles = getRoles(userProfile.roles);
+    if (profileRoles.includes("Sales Associate")) {
       q = q.eq("assigned_to", userProfile.full_name);
-    } else if (ownerFilter !== "all" && ["Admin", "Super Admin", "Sales", "Marketing", "Sales Head"].includes(userProfile.roles)) {
+    } else if (ownerFilter !== "all" && profileRoles.some(r => ["Admin", "Super Admin", "Sales", "Marketing", "Sales Head"].includes(r))) {
       q = q.eq("assigned_to", ownerFilter);
     }
 
@@ -2023,54 +1966,54 @@ id, business_id, name, email, phone,
   return (
     <ProtectedRoute allowedRoles={["Sales", "Sales Associate", "Super Admin", "Admin", "Marketing", "Sales Head"]}>
       <style jsx global>{`
-  .premium - font {
-  -webkit - font - smoothing: antialiased;
-  -moz - osx - font - smoothing: grayscale;
-}
+        .premium-font {
+          -webkit-font-smoothing: antialiased;
+          -moz-osx-font-smoothing: grayscale;
+        }
 
-        .text - brighter {
-  color: #0f172a!important; /* Slate 900 */
-}
+        .text-brighter {
+          color: #0f172a !important; /* Slate 900 */
+        }
 
-        .text - smooth {
-  letter - spacing: -0.01em;
-  line - height: 1.5;
-}
+        .text-smooth {
+          letter-spacing: -0.01em;
+          line-height: 1.5;
+        }
 
-        .sales - table - header {
-  background - color: #f8fafc!important; /* Slate 50 */
-  border - bottom: 2px solid #e2e8f0!important;
-}
+        .sales-table-header {
+          background-color: #f8fafc !important; /* Slate 50 */
+          border-bottom: 2px solid #e2e8f0 !important;
+        }
 
-        .lead - name - link {
-  color: #0284c7!important; /* Sky 600 */
-  font - weight: 500!important;
-  transition: all 0.2s ease;
-}
+        .lead-name-link {
+          color: #0284c7 !important; /* Sky 600 */
+          font-weight: 500 !important;
+          transition: all 0.2s ease;
+        }
 
-        .lead - name - link:hover {
-  color: #0369a1!important; /* Sky 700 */
-  text - decoration: underline;
-}
+        .lead-name-link:hover {
+          color: #0369a1 !important; /* Sky 700 */
+          text-decoration: underline;
+        }
 
         /* Global Table Text Enhancements */
-        .premium - font table td {
-  color: #334155!important; /* Slate 700 - Brighter than gray */
-  font - weight: 400;
-  -webkit - font - smoothing: antialiased;
-}
+        .premium-font table td {
+          color: #334155 !important; /* Slate 700 - Brighter than gray */
+          font-weight: 400;
+          -webkit-font-smoothing: antialiased;
+        }
 
-        .premium - font table td: nth - child(3) {
-  color: #0f172a!important; /* Slate 900 - Brighter for score */
-  font - weight: 600!important;
-}
+        .premium-font table td:nth-child(3) {
+          color: #0f172a !important; /* Slate 900 - Brighter for score */
+          font-weight: 600 !important;
+        }
 
-        .premium - font table thead th {
-  color: #475569!important; /* Slate 600 */
-  font - weight: 700!important;
-  letter - spacing: 0.05em;
-}
-`}</style>
+        .premium-font table thead th {
+          color: #475569 !important; /* Slate 600 */
+          font-weight: 700 !important;
+          letter-spacing: 0.05em;
+        }
+      `}</style>
       <SidebarProvider className="premium-font">
         <div className="flex min-h-screen w-full bg-[#f1f4f9]">
           <AppSidebar />
@@ -2079,264 +2022,263 @@ id, business_id, name, email, phone,
               searchTerm={tempSearch}
               onSearchChange={handleSearchChange}
             >
-              <div className="flex items-center gap-2 ml-4">
-                <Button variant="outline" size="sm" onClick={downloadAllTablesData} className="h-8 gap-2 border-gray-300 font-normal bg-white">
+              <div className="flex items-center gap-2 ml-4" suppressHydrationWarning>
+                <Button variant="outline" size="sm" onClick={downloadAllTablesData} className="h-8 gap-2 border-gray-300 font-normal bg-white" suppressHydrationWarning>
                   <Download className="w-4 h-4 text-gray-400" /> <span className="hidden lg:inline">Export All Data</span>
                 </Button>
 
-                <Button variant="outline" size="sm" onClick={() => setView("activity")} className="h-8 gap-2 border-gray-300 font-normal bg-white">
+                <Button variant="outline" size="sm" onClick={() => setView("activity")} className="h-8 gap-2 border-gray-300 font-normal bg-white" suppressHydrationWarning>
                   <ListOrdered className="w-4 h-4 text-gray-400" /> <span className="hidden lg:inline">Activity View</span>
                 </Button>
 
                 {["Admin", "Super Admin", "Sales Head"].includes(userProfile?.roles || "") && (
-                  <Button variant="outline" size="sm" onClick={() => setView("call_stats")} className="h-8 gap-2 border-gray-300 font-normal bg-white">
+                  <Button variant="outline" size="sm" onClick={() => setView("call_stats")} className="h-8 gap-2 border-gray-300 font-normal bg-white" suppressHydrationWarning>
                     <BarChart className="w-4 h-4 text-gray-400" /> <span className="hidden lg:inline">View Call Stats</span>
                   </Button>
                 )}
 
-                <Button variant="outline" size="sm" onClick={() => setView("renewals")} className="h-8 gap-2 border-orange-200 text-orange-600 font-medium bg-orange-50/50 hover:bg-orange-50">
+                <Button variant="outline" size="sm" onClick={() => setView("renewals")} className="h-8 gap-2 border-orange-200 text-orange-600 font-medium bg-orange-50/50 hover:bg-orange-50" suppressHydrationWarning>
                   <RefreshCw className="w-4 h-4 text-orange-500" /> <span className="hidden lg:inline">Renewals</span>
                 </Button>
 
-                <Button variant="outline" size="sm" onClick={() => setView("email_logs")} className="h-8 gap-2 border-blue-200 text-blue-600 font-medium bg-blue-50/50 hover:bg-blue-50">
+                <Button variant="outline" size="sm" onClick={() => setView("email_logs")} className="h-8 gap-2 border-blue-200 text-blue-600 font-medium bg-blue-50/50 hover:bg-blue-50" suppressHydrationWarning>
                   <Mail className="w-4 h-4 text-blue-500" /> <span className="hidden lg:inline">Email History</span>
                 </Button>
 
                 <Button variant="outline" size="sm" onClick={() => {
                   setEditingTemplate({ subject: "", body: "", is_global: false });
                   setShowTemplateDialog(true);
-                }} className="h-8 gap-2 border-purple-200 text-purple-600 font-medium bg-purple-50/50 hover:bg-purple-50">
+                }} className="h-8 gap-2 border-purple-200 text-purple-600 font-medium bg-purple-50/50 hover:bg-purple-50" suppressHydrationWarning>
                   <Plus className="w-4 h-4 text-purple-500" /> <span className="hidden lg:inline">Custom Template</span>
                 </Button>
               </div>
             </Header>
-            <div className="flex flex-1 overflow-hidden">
-              {/* Main Content Area */}
-              <div className="flex-1 flex flex-col overflow-y-auto px-6 py-4">
-                <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center gap-2">
-                    <h1 className="text-2xl font-semibold text-slate-800 tracking-tight">
-                      {view === "leads" ? "Manage Leads" :
-                        view === "call_stats" ? "Zoom Call Statistics" :
-                          view === "renewals" ? "Subscription Renewals" :
-                            view === "email_logs" ? "Communication History" :
-                              "Activity History"}
-                    </h1>
-                    <div className="text-gray-400 cursor-pointer hover:text-gray-600">
-                      <ExternalLink className="w-4 h-4" />
+            {!isHydrated ? null : (
+              <div className="flex flex-1 overflow-hidden" suppressHydrationWarning>
+                {/* Main Content Area */}
+                <div className="flex-1 flex flex-col overflow-y-auto px-6 py-4">
+                  <div className="flex items-center justify-between mb-6">
+                    <div className="flex items-center gap-2">
+                      <h1 className="text-2xl font-semibold text-slate-800 tracking-tight">
+                        {view === "leads" ? "Manage Leads" :
+                          view === "call_stats" ? "Zoom Call Statistics" :
+                            view === "renewals" ? "Subscription Renewals" :
+                              view === "email_logs" ? "Communication History" :
+                                "Activity History"}
+                      </h1>
+                      <div className="text-gray-400 cursor-pointer hover:text-gray-600">
+                        <ExternalLink className="w-4 h-4" />
+                      </div>
                     </div>
+
+                    {view !== "leads" && (
+                      <Button
+                        onClick={() => setView("leads")}
+                        variant="outline"
+                        size="sm"
+                        className="gap-2"
+                      >
+                        <ChevronLeft className="w-4 h-4" /> Back to Leads
+                      </Button>
+                    )}
                   </div>
 
-                  {view !== "leads" && (
-                    <Button
-                      onClick={() => setView("leads")}
-                      variant="outline"
-                      size="sm"
-                      className="gap-2"
-                    >
-                      <ChevronLeft className="w-4 h-4" /> Back to Leads
-                    </Button>
-                  )}
-                </div>
-
-                {view === "leads" && (
-                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4 mb-6">
-                    <Card className="border-none shadow-sm bg-white hover:shadow-md transition-shadow cursor-pointer" onClick={() => setStageFilter("all")}>
-                      <CardHeader className="p-3 pb-0">
-                        <CardTitle className="text-[10px] uppercase font-bold text-gray-500 tracking-wider h-8 flex items-center">
-                          Total Leads
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="p-3 pt-1">
-                        <div className="text-xl font-bold text-slate-800">
-                          {stageCounts['total'] || 0}
-                        </div>
-                        <div className="w-full h-1 mt-2 rounded-full opacity-50 bg-slate-400" />
-                      </CardContent>
-                    </Card>
-
-                    {salesStages.map((stage) => (
-                      <Card key={stage} className="border-none shadow-sm bg-white hover:shadow-md transition-shadow cursor-pointer" onClick={() => setStageFilter(stage)}>
+                  {view === "leads" && (
+                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4 mb-6">
+                      <Card className="border-none shadow-sm bg-white hover:shadow-md transition-shadow cursor-pointer" onClick={() => setStageFilter("all")}>
                         <CardHeader className="p-3 pb-0">
                           <CardTitle className="text-[10px] uppercase font-bold text-gray-500 tracking-wider h-8 flex items-center">
-                            {stage}
+                            Total Leads
                           </CardTitle>
                         </CardHeader>
                         <CardContent className="p-3 pt-1">
                           <div className="text-xl font-bold text-slate-800">
-                            {stageCounts[stage] || 0}
+                            {stageCounts['total'] || 0}
                           </div>
-                          <div className={cn("w-full h-1 mt-2 rounded-full opacity-50", getStageColor(stage).split(" ")[0])} />
+                          <div className="w-full h-1 mt-2 rounded-full opacity-50 bg-slate-400" />
                         </CardContent>
                       </Card>
-                    ))}
-                  </div>
-                )}
 
-                {view === "activity" ? (
-                  <ActivityView userProfile={userProfile} onBack={() => setView("leads")} />
-                ) : view === "call_stats" ? (
-                  <CallStatsView />
-                ) : view === "renewals" ? (
-                  <RenewalsView />
-                ) : view === "email_logs" ? (
-                  <EmailLogView filterEmail={["Admin", "Super Admin"].includes(userProfile?.roles || "") ? undefined : userEmail} />
-                ) : (
-                  <>
+                      {salesStages.map((stage) => (
+                        <Card key={stage} className="border-none shadow-sm bg-white hover:shadow-md transition-shadow cursor-pointer" onClick={() => setStageFilter(stage)}>
+                          <CardHeader className="p-3 pb-0">
+                            <CardTitle className="text-[10px] uppercase font-bold text-gray-500 tracking-wider h-8 flex items-center">
+                              {stage}
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="p-3 pt-1">
+                            <div className="text-xl font-bold text-slate-800">
+                              {stageCounts[stage] || 0}
+                            </div>
+                            <div className={cn("w-full h-1 mt-2 rounded-full opacity-50", getStageColor(stage).split(" ")[0])} />
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  )}
 
-                    {/* Filter Section - LeadSquared Style */}
-                    <div className="bg-white border rounded shadow-sm mb-4">
-                      {/* Integrated Header and Tag Row */}
-                      <div className="px-4 py-2 border-b flex items-center justify-between bg-white">
-                        <div className="flex items-center gap-3">
-                          <Button variant="outline" size="sm" className="h-8 gap-2 border-gray-300 font-normal bg-white">
-                            <Tag className="w-3.5 h-3.5 text-gray-500" /> Tags
-                          </Button>
-                          <div className="h-4 w-px bg-gray-200 mx-1" />
+                  {view === "activity" ? (
+                    <ActivityView userProfile={userProfile} onBack={() => setView("leads")} />
+                  ) : view === "call_stats" ? (
+                    <CallStatsView />
+                  ) : view === "renewals" ? (
+                    <RenewalsView />
+                  ) : view === "email_logs" ? (
+                    <EmailLogView filterEmail={["Admin", "Super Admin"].includes(userProfile?.roles || "") ? undefined : userEmail} />
+                  ) : (
+                    <>
+
+                      {/* Filter Section - LeadSquared Style */}
+                      <div className="bg-white border rounded shadow-sm mb-4">
+                        {/* Integrated Header and Tag Row */}
+                        <div className="px-4 py-2 border-b flex items-center justify-between bg-white">
+                          <div className="flex items-center gap-3">
+                            <Button variant="outline" size="sm" className="h-8 gap-2 border-gray-300 font-normal bg-white">
+                              <Tag className="w-3.5 h-3.5 text-gray-500" /> Tags
+                            </Button>
+                            <div className="h-4 w-px bg-gray-200 mx-1" />
+                            <Button
+                              variant="ghost"
+                              className="h-8 text-xs text-red-500 hover:text-red-600 p-0 px-2"
+                              onClick={() => {
+                                setStartDate(null);
+                                setEndDate(null);
+                                setStageFilter("all");
+                                setSourceFilter("all");
+                                setOwnerFilter("all");
+                                setDateFilterType("last_activity");
+                              }}
+                              suppressHydrationWarning
+                            >
+                              Reset Filters
+                            </Button>
+                            <div className="h-4 w-px bg-gray-200 mx-1" />
                           <Button
-                            variant="ghost"
-                            className="h-8 text-xs text-red-500 hover:text-red-600 p-0 px-2"
-                            onClick={() => { 
-                              setStartDate(null); 
-                              setEndDate(null); 
-                              setStageFilter("all"); 
-                              setSourceFilter("all"); 
-                              setOwnerFilter("all"); 
-                              setDateFilterType("last_activity");
-                            }}
-                          >
-                            Reset Filters
-                          </Button>
-                          <div className="h-4 w-px bg-gray-200 mx-1" />
-                          {/* <Button
                             variant="outline"
-                            size="sm"
-                            className={cn(
-                              "h-8 gap-2 border-orange-200 text-orange-600 font-medium bg-orange-50/50 hover:bg-orange-100",
-                              hotSources.length > 0 && "animate-pulse border-orange-400"
-                            )}
                             onClick={() => setShowHotSourcesDialog(true)}
+                            className="bg-white border-orange-200 text-orange-600 hover:bg-orange-50 hover:text-orange-700 h-10 px-4 min-w-[140px] shadow-sm transition-all"
+                            suppressHydrationWarning
                           >
-                            <Flame className={cn("w-3.5 h-3.5", hotSources.length > 0 ? "fill-orange-500" : "text-orange-400")} />
-                            Hot Bucket ({hotSources.length})
-                          </Button> */}
+                            <Flame className="w-4 h-4 mr-2 fill-orange-500" />
+                            Hot Bucket ({hotBucketLeadCount})
+                          </Button>
+                          </div>
+
+                          <div
+                            className="text-xs text-[#00a1e1] hover:underline cursor-pointer flex items-center gap-1 font-medium"
+                            onClick={() => setIsRightPanelCollapsed(!isRightPanelCollapsed)}
+                            suppressHydrationWarning
+                          >
+                            {isRightPanelCollapsed ? "Expand Panel" : "Collapse Panel"} <ChevronRight className={cn("w-3.5 h-3.5 transition-transform", isRightPanelCollapsed && "rotate-180")} />
+                          </div>
                         </div>
 
-                        <div
-                          className="text-xs text-[#00a1e1] hover:underline cursor-pointer flex items-center gap-1 font-medium"
-                          onClick={() => setIsRightPanelCollapsed(!isRightPanelCollapsed)}
-                        >
-                          {isRightPanelCollapsed ? "Expand Panel" : "Collapse Panel"} <ChevronRight className={cn("w-3.5 h-3.5 transition-transform", isRightPanelCollapsed && "rotate-180")} />
-                        </div>
-                      </div>
-
-                      {/* Balanced Filter Row */}
-                      <div className="p-3 flex flex-wrap items-center gap-x-8 gap-y-4 bg-[#f8f9fb]/50">
-                        <div className="flex flex-col gap-1.5 min-w-[160px]">
-                          <Label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider">Lead Stage</Label>
-                          <Select value={stageFilter} onValueChange={setStageFilter}>
-                            <SelectTrigger className="h-8 text-xs border-gray-300 bg-white shadow-none">
-                              <SelectValue placeholder="All" />
-                            </SelectTrigger>
-                            <SelectContent className="z-50">
-                              <SelectItem value="all">All</SelectItem>
-                              {salesStages.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        <div className="flex flex-col gap-1.5 min-w-[160px]">
-                          <Label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider">Lead Source</Label>
-                          <Select value={sourceFilter} onValueChange={setSourceFilter}>
-                            <SelectTrigger className="h-8 text-xs border-gray-300 bg-white shadow-none">
-                              <SelectValue placeholder="All" />
-                            </SelectTrigger>
-                            <SelectContent className="z-50">
-                              <SelectItem value="all">All</SelectItem>
-                              {sources.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        {["Admin", "Super Admin", "Sales", "Marketing", "Sales Head"].includes(userProfile?.roles || "") && (
+                        {/* Balanced Filter Row */}
+                        <div className="p-3 flex flex-wrap items-center gap-x-8 gap-y-4 bg-[#f8f9fb]/50">
                           <div className="flex flex-col gap-1.5 min-w-[160px]">
-                            <Label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider text-[#00a1e1]">Team View</Label>
-                            <Select value={ownerFilter} onValueChange={setOwnerFilter}>
-                              <SelectTrigger className="h-8 text-xs border-gray-300 bg-white shadow-none focus:ring-1 focus:ring-[#00a1e1]">
-                                <SelectValue placeholder="Select Person" />
+                            <Label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider">Lead Stage</Label>
+                            <Select value={stageFilter} onValueChange={setStageFilter}>
+                              <SelectTrigger className="h-8 text-xs border-gray-300 bg-white shadow-none">
+                                <SelectValue placeholder="All" />
                               </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="all">View All (Team)</SelectItem>
-                                {salesUsers.map(u => <SelectItem key={u.user_email} value={u.full_name}>{u.full_name}</SelectItem>)}
+                              <SelectContent className="z-50">
+                                <SelectItem value="all">All</SelectItem>
+                                {salesStages.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                               </SelectContent>
                             </Select>
                           </div>
-                        )}
 
-                        <div className="flex flex-col gap-1.5 flex-1 min-w-[320px]">
-                          <Label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider">Date Filters</Label>
-                          <div className="flex gap-2">
-                            <Select value={dateFilterType} onValueChange={setDateFilterType}>
-                              <SelectTrigger className="h-8 text-xs border-gray-300 bg-white shadow-none w-[110px] shrink-0">
-                                <SelectValue placeholder="Activity" />
+                          <div className="flex flex-col gap-1.5 min-w-[160px]">
+                            <Label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider">Lead Source</Label>
+                            <Select value={sourceFilter} onValueChange={setSourceFilter}>
+                              <SelectTrigger className="h-8 text-xs border-gray-300 bg-white shadow-none">
+                                <SelectValue placeholder="All" />
                               </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="last_activity">Activity</SelectItem>
-                                <SelectItem value="assigned_at">Assigned</SelectItem>
-                                <SelectItem value="created_at">Created</SelectItem>
+                              <SelectContent className="z-50">
+                                <SelectItem value="all">All</SelectItem>
+                                {sources.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                               </SelectContent>
                             </Select>
-                            <div className="flex items-center gap-1.5 flex-1">
-                              <Input
-                                type="date"
-                                value={startDate || ""}
-                                onChange={(e) => setStartDate(e.target.value)}
-                                className="h-8 text-[11px] border-gray-300 bg-white px-2 shadow-none flex-1"
-                              />
-                              <span className="text-gray-400 text-xs text-center min-w-[8px]">→</span>
-                              <Input
-                                type="date"
-                                value={endDate || ""}
-                                onChange={(e) => setEndDate(e.target.value)}
-                                className="h-8 text-[11px] border-gray-300 bg-white px-2 shadow-none flex-1"
-                              />
+                          </div>
+
+                          {["Admin", "Super Admin", "Sales", "Marketing", "Sales Head"].includes(userProfile?.roles || "") && (
+                            <div className="flex flex-col gap-1.5 min-w-[160px]">
+                              <Label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider text-[#00a1e1]">Team View</Label>
+                              <Select value={ownerFilter} onValueChange={setOwnerFilter}>
+                                <SelectTrigger className="h-8 text-xs border-gray-300 bg-white shadow-none focus:ring-1 focus:ring-[#00a1e1]">
+                                  <SelectValue placeholder="Select Person" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">View All (Team)</SelectItem>
+                                  {salesUsers.map(u => <SelectItem key={u.user_email} value={u.full_name}>{u.full_name}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          )}
+
+                          <div className="flex flex-col gap-1.5 flex-1 min-w-[320px]">
+                            <Label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider">Date Filters</Label>
+                            <div className="flex gap-2">
+                              <Select value={dateFilterType} onValueChange={setDateFilterType}>
+                                <SelectTrigger className="h-8 text-xs border-gray-300 bg-white shadow-none w-[110px] shrink-0">
+                                  <SelectValue placeholder="Activity" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="last_activity">Activity</SelectItem>
+                                  <SelectItem value="assigned_at">Assigned</SelectItem>
+                                  <SelectItem value="created_at">Created</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <div className="flex items-center gap-1.5 flex-1">
+                                <Input
+                                  type="date"
+                                  value={startDate || ""}
+                                  onChange={(e) => setStartDate(e.target.value)}
+                                  className="h-8 text-[11px] border-gray-300 bg-white px-2 shadow-none flex-1"
+                                />
+                                <span className="text-gray-400 text-xs text-center min-w-[8px]">→</span>
+                                <Input
+                                  type="date"
+                                  value={endDate || ""}
+                                  onChange={(e) => setEndDate(e.target.value)}
+                                  className="h-8 text-[11px] border-gray-300 bg-white px-2 shadow-none flex-1"
+                                />
+                              </div>
                             </div>
                           </div>
                         </div>
                       </div>
-                    </div>
 
-                    <LeadsTable
-                      leads={sortedLeads}
-                      sortConfig={sortConfig}
-                      handleSort={handleSort}
-                      handleStageUpdate={handleStageUpdate}
-                      handlePhoneClick={handlePhoneClick}
-                      userProfile={userProfile}
-                      page={page}
-                      pageSize={pageSize}
-                      totalRecords={totalRecords}
-                      setPage={setPage}
-                      setPageSize={setPageSize}
-                      isRightPanelCollapsed={isRightPanelCollapsed}
-                      onOpenHistory={handleOpenHistory}
-                      onOpenMail={handleOpenMail}
-                      onUpdateAssignedTo={handleUpdateAssignedTo}
-                      salesUsers={salesUsers}
-                      isHotLead={isHotLead}
-                      selectedLeads={selectedLeads}
-                      onSelectedLeadsChange={setSelectedLeads}
-                    />
-                  </>
-                )}
+                      <LeadsTable
+                        leads={sortedLeads}
+                        sortConfig={sortConfig}
+                        handleSort={handleSort}
+                        handleStageUpdate={handleStageUpdate}
+                        handlePhoneClick={handlePhoneClick}
+                        userProfile={userProfile}
+                        page={page}
+                        pageSize={pageSize}
+                        totalRecords={totalRecords}
+                        setPage={setPage}
+                        setPageSize={setPageSize}
+                        onOpenHistory={handleOpenHistory}
+                        onOpenMail={handleOpenMail}
+                        onUpdateAssignedTo={handleUpdateAssignedTo}
+                        salesUsers={salesUsers}
+                        isHotLead={isHotLead}
+                        selectedLeads={selectedLeads}
+                        onSelectedLeadsChange={setSelectedLeads}
+                      />
+                    </>
+                  )}
+                </div>
+
+                <RightActionPanel
+                  isCollapsed={isRightPanelCollapsed || view !== "leads"}
+                  onAddLead={() => setOnboardDialogOpen(true)}
+                />
               </div>
-
-              <RightActionPanel
-                isCollapsed={isRightPanelCollapsed || view !== "leads"}
-                onAddLead={() => setOnboardDialogOpen(true)}
-                userProfile={userProfile}
-              />
-            </div>
+            )}
           </div>
         </div>
       </SidebarProvider>
@@ -2800,22 +2742,25 @@ id, business_id, name, email, phone,
             {sources.length === 0 ? (
               <p className="text-center py-4 text-gray-400 text-sm">No lead sources found in history.</p>
             ) : (
-              sources.map(source => (
-                <div key={source} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded-md group">
-                  <span className="text-sm font-medium text-slate-700">{source}</span>
-                  <Button
-                    variant={hotSources.includes(source) ? "default" : "outline"}
-                    size="sm"
-                    className={cn(
-                      "h-7 text-[10px] uppercase font-bold",
-                      hotSources.includes(source) ? "bg-orange-500 hover:bg-orange-600 border-none" : "text-gray-400 border-gray-200"
-                    )}
-                    onClick={() => toggleHotSource(source)}
-                  >
-                    {hotSources.includes(source) ? "Active" : "Add"}
-                  </Button>
-                </div>
-              ))
+              sources.map(source => {
+                const isActive = hotSources.some(s => s.trim().toLowerCase() === source.trim().toLowerCase());
+                return (
+                  <div key={source} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded-md group">
+                    <span className="text-sm font-medium text-slate-700">{source}</span>
+                    <Button
+                      variant={isActive ? "default" : "outline"}
+                      size="sm"
+                      className={cn(
+                        "h-7 text-[10px] uppercase font-bold",
+                        isActive ? "bg-orange-500 hover:bg-orange-600 border-none" : "text-gray-400 border-gray-200"
+                      )}
+                      onClick={() => toggleHotSource(source)}
+                    >
+                      {isActive ? "Active" : "Add"}
+                    </Button>
+                  </div>
+                );
+              })
             )}
           </div>
           <DialogFooter>

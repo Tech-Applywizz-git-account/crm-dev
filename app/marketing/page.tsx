@@ -74,6 +74,27 @@ interface Lead {
   current_stage?: string;
 }
 
+const ASSIGNED_HOT_LEADS_KEY = "crm_assigned_hot_leads";
+
+type AssignedHotLeadCacheRecord = {
+  id: string;
+  source?: string;
+  created_at: string;
+  hot_assigned_at: string;
+};
+
+type HotLeadPayload = {
+  id: string;
+  business_id: string;
+  name: string;
+  email: string;
+  phone: string;
+  source: string;
+  city: string;
+  created_at: string;
+  current_stage?: string;
+};
+
 
 export default function MarketingPage() {
   const { loading, setLoading } = useContext(LoadingContext);
@@ -171,23 +192,117 @@ export default function MarketingPage() {
   // —— Hot Leads States ——
   const [hotSources, setHotSources] = useState<string[]>(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('hotSources');
-      return saved ? JSON.parse(saved) : [];
+      const primary = localStorage.getItem('hotSources');
+      const fallback = localStorage.getItem('crm_hot_leads_sources');
+
+      try {
+        const parseSources = (raw: string | null) => {
+          if (!raw) return [] as string[];
+          const parsed = JSON.parse(raw);
+          return Array.isArray(parsed) ? parsed.filter((s: any) => typeof s === "string") : [];
+        };
+
+        return Array.from(
+          new Map(
+            [...parseSources(primary), ...parseSources(fallback)].map((source) => [
+              source.trim().toLowerCase(),
+              source,
+            ])
+          ).values()
+        );
+      } catch {
+        return [];
+      }
     }
     return [];
   });
 
   const isHotLead = useCallback((lead: Lead) => {
-    if (!lead.source || !hotSources.includes(lead.source)) return false;
+    const normalizedLeadSource = String(lead.source || "").trim().toLowerCase();
+    const normalizedHotSources = hotSources.map((source) => String(source || "").trim().toLowerCase());
+    if (!normalizedLeadSource || !normalizedHotSources.includes(normalizedLeadSource)) return false;
     const leadDate = new Date(lead.created_at);
     const ageInDays = Math.floor((new Date().getTime() - leadDate.getTime()) / (1000 * 3600 * 24));
     return ageInDays >= 0 && ageInDays <= 3;
   }, [hotSources]);
 
+  const getEffectiveHotSources = () => {
+    if (typeof window === "undefined") return hotSources.map((source) => String(source || "").trim().toLowerCase());
+
+    try {
+      const parseSources = (raw: string | null) => {
+        if (!raw) return [] as string[];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed.filter((source: any) => typeof source === "string") : [];
+      };
+
+      const primary = parseSources(localStorage.getItem("hotSources"));
+      const fallback = parseSources(localStorage.getItem("crm_hot_leads_sources"));
+
+      return Array.from(
+        new Set(
+          [...hotSources, ...primary, ...fallback].map((source) => String(source || "").trim().toLowerCase()).filter(Boolean)
+        )
+      );
+    } catch {
+      return hotSources.map((source) => String(source || "").trim().toLowerCase());
+    }
+  };
+
+  const isLeadHotForAssignment = (lead: Lead, activeHotSources: string[]) => {
+    const normalizedLeadSource = String(lead.source || "").trim().toLowerCase();
+    if (!normalizedLeadSource || !activeHotSources.includes(normalizedLeadSource)) return false;
+    return true;
+  };
+
+  const syncAssignedHotLeadCache = useCallback((candidateLeads: Lead[]) => {
+    if (typeof window === "undefined" || candidateLeads.length === 0) return;
+
+    try {
+      const saved = localStorage.getItem(ASSIGNED_HOT_LEADS_KEY);
+      const parsed = saved ? JSON.parse(saved) : [];
+      const existingRecords: AssignedHotLeadCacheRecord[] = Array.isArray(parsed)
+        ? parsed.filter((item: any) => item && typeof item.id === "string" && typeof item.created_at === "string")
+        : [];
+
+      const nextMap = new Map(existingRecords.map((item) => [item.id, item]));
+
+      for (const lead of candidateLeads) {
+        if (!lead?.id) continue;
+
+        if (lead.created_at && isHotLead(lead)) {
+          nextMap.set(lead.id, {
+            id: lead.id,
+            source: lead.source,
+            created_at: lead.created_at,
+            hot_assigned_at: new Date().toISOString(),
+          });
+        } else {
+          nextMap.delete(lead.id);
+        }
+      }
+
+      const nextRecords = Array.from(nextMap.values()).filter((item) => {
+        const createdAt = new Date(item.created_at);
+        if (Number.isNaN(createdAt.getTime())) return false;
+        const ageInDays = Math.floor((Date.now() - createdAt.getTime()) / (1000 * 3600 * 24));
+        return ageInDays >= 0 && ageInDays <= 3;
+      });
+
+      localStorage.setItem(ASSIGNED_HOT_LEADS_KEY, JSON.stringify(nextRecords));
+    } catch (error) {
+      console.error("Failed to sync assigned hot leads cache:", error);
+    }
+  }, [isHotLead]);
+
   const toggleHotSource = (source: string) => {
     setHotSources(prev => {
-      const next = prev.includes(source) ? prev.filter(s => s !== source) : [...prev, source];
+      const normalizedSource = source.trim().toLowerCase();
+      const next = prev.some((s) => s.trim().toLowerCase() === normalizedSource)
+        ? prev.filter((s) => s.trim().toLowerCase() !== normalizedSource)
+        : [...prev, source];
       localStorage.setItem('hotSources', JSON.stringify(next));
+      localStorage.setItem('crm_hot_leads_sources', JSON.stringify(next));
       return next;
     });
   };
@@ -361,6 +476,22 @@ export default function MarketingPage() {
   const handleBulkAssign = async (assignedTo: string) => {
     setLoading(true);
     try {
+      const effectiveHotSources = getEffectiveHotSources();
+      const selectedLeadRows = leads.filter((lead) => selectedLeads.includes(lead.id));
+      const hotLeadsPayload: HotLeadPayload[] = selectedLeadRows
+        .filter((lead) => isLeadHotForAssignment(lead, effectiveHotSources))
+        .map((lead) => ({
+          id: lead.id,
+          business_id: lead.business_id,
+          name: lead.name,
+          email: lead.email,
+          phone: lead.phone,
+          source: lead.source,
+          city: lead.city,
+          created_at: lead.created_at,
+          current_stage: lead.current_stage,
+        }));
+
       const res = await fetch("/api/assign-leads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -368,11 +499,16 @@ export default function MarketingPage() {
           selectedLeads,
           assignedTo,
           assignedAt: new Date().toISOString(),
-          allLeads: leads,
+          hotLeads: hotLeadsPayload,
+          hotLeadIds: hotLeadsPayload.map((lead) => lead.id),
+          hotSources: effectiveHotSources,
+          selectedLeadRows,
         }),
       });
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || "Assignment failed");
+
+      syncAssignedHotLeadCache(selectedLeadRows);
 
       setAssignSuccessMessage(`Assigned ${selectedLeads.length} lead(s) to ${assignedTo}.`);
       setSuccessDialogOpen(true); //  Open dialog
@@ -388,6 +524,7 @@ export default function MarketingPage() {
 
     } catch (error) {
       console.error("Bulk assign error:", error);
+      alert(error instanceof Error ? error.message : "Failed to assign leads.");
     } finally {
       setLoading(false);
     }
@@ -567,6 +704,22 @@ export default function MarketingPage() {
   const handleIndividualAssign = async (leadId: string, assignedTo: string) => {
     setLoading(true, "Assigning... please wait");
     try {
+      const effectiveHotSources = getEffectiveHotSources();
+      const selectedLeadRow = leads.find((lead) => lead.id === leadId);
+      const hotLeadsPayload: HotLeadPayload[] = selectedLeadRow && isLeadHotForAssignment(selectedLeadRow, effectiveHotSources)
+        ? [{
+          id: selectedLeadRow.id,
+          business_id: selectedLeadRow.business_id,
+          name: selectedLeadRow.name,
+          email: selectedLeadRow.email,
+          phone: selectedLeadRow.phone,
+          source: selectedLeadRow.source,
+          city: selectedLeadRow.city,
+          created_at: selectedLeadRow.created_at,
+          current_stage: selectedLeadRow.current_stage,
+        }]
+        : [];
+
       const res = await fetch("/api/assign-leads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -574,10 +727,19 @@ export default function MarketingPage() {
           selectedLeads: [leadId],
           assignedAt: new Date().toISOString(),
           assignedTo,
+          hotLeads: hotLeadsPayload,
+          hotLeadIds: hotLeadsPayload.map((lead) => lead.id),
+          hotSources: effectiveHotSources,
+          selectedLeadRows: selectedLeadRow ? [selectedLeadRow] : [],
         }),
       });
 
-      if (!res.ok) throw new Error("Assignment failed");
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || "Assignment failed");
+
+      if (selectedLeadRow) {
+        syncAssignedHotLeadCache([selectedLeadRow]);
+      }
 
       setLeads((prev) =>
         prev.map((lead) =>
@@ -595,6 +757,7 @@ export default function MarketingPage() {
 
     } catch (error) {
       console.error("Individual assign error:", error);
+      alert(error instanceof Error ? error.message : "Failed to assign lead.");
     } finally {
       setLoading(false);
     }

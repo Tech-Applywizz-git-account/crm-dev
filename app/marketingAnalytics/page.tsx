@@ -102,26 +102,57 @@ export default function MarketingAnalyticsPage() {
     // —— Hot Leads States ——
     const [hotSources, setHotSources] = useState<string[]>(() => {
         if (typeof window !== 'undefined') {
-            const saved = localStorage.getItem('hotSources');
-            return saved ? JSON.parse(saved) : [];
+            const saved = localStorage.getItem('hotSources') || localStorage.getItem('crm_hot_leads_sources');
+            try {
+                const parsed = saved ? JSON.parse(saved) : [];
+                if (Array.isArray(parsed)) return parsed.filter((s: any) => typeof s === 'string');
+            } catch (e) {}
         }
         return [];
     });
 
     const isHotLead = useCallback((lead: Lead) => {
-        if (!lead.source || !hotSources.includes(lead.source)) return false;
+        if (!lead || !lead.source || !lead.created_at) return false;
+        const normalizedHotSources = hotSources.map((s: string) => String(s || "").trim().toLowerCase());
+        const leadSource = String(lead.source || "").trim().toLowerCase();
+        
+        if (!normalizedHotSources.includes(leadSource)) return false;
+        
         const leadDate = dayjs(lead.created_at);
-        const ageInDays = dayjs().diff(leadDate, 'day');
-        return ageInDays >= 0 && ageInDays <= 3;
+        if (!leadDate.isValid()) return false;
+        
+        const ageInHours = dayjs().diff(leadDate, 'hour');
+        return ageInHours >= 0 && ageInHours <= 72;
     }, [hotSources]);
 
     const toggleHotSource = (source: string) => {
+        if (!source) return;
         setHotSources(prev => {
-            const next = prev.includes(source) ? prev.filter(s => s !== source) : [...prev, source];
+            const lowerSource = source.trim().toLowerCase();
+            const exists = prev.some(s => s.trim().toLowerCase() === lowerSource);
+            const next = exists 
+                ? prev.filter(s => s.trim().toLowerCase() !== lowerSource) 
+                : [...prev, source];
+            
             localStorage.setItem('hotSources', JSON.stringify(next));
+            localStorage.setItem('crm_hot_leads_sources', JSON.stringify(next));
             return next;
         });
     };
+
+    useEffect(() => {
+        const handleStorage = (e: StorageEvent) => {
+            if (e.key === 'hotSources' || e.key === 'crm_hot_leads_sources') {
+                const saved = localStorage.getItem('hotSources') || localStorage.getItem('crm_hot_leads_sources');
+                try {
+                    const parsed = saved ? JSON.parse(saved) : [];
+                    if (Array.isArray(parsed)) setHotSources(parsed.filter((s: any) => typeof s === 'string'));
+                } catch (err) {}
+            }
+        };
+        window.addEventListener('storage', handleStorage);
+        return () => window.removeEventListener('storage', handleStorage);
+    }, []);
 
     const [showHotSourcesDialog, setShowHotSourcesDialog] = useState(false);
     const [dnpCount, setDnpCount] = useState(0);
@@ -243,7 +274,7 @@ export default function MarketingAnalyticsPage() {
             const { data, error } = await supabase
                 .from('profiles')
                 .select('auth_id, full_name, user_email')
-                .or('roles.eq.Sales,roles.eq.Sales Associate,roles.eq.Sales Head')
+                .or('roles.eq.Sales,roles.eq.Sales Associate,roles.eq.Sales Head,roles.eq.Resume Head-Sales Associate,roles.eq.Resume Associate-Sales Associate')
                 .eq('is_active', 'true');
 
             if (error) throw error;
@@ -502,6 +533,17 @@ export default function MarketingAnalyticsPage() {
 
         setLoading(true);
         try {
+            // Collect the full lead objects for selected leads
+            const selectedLeadRows = leads.filter(l => selectedLeads.includes(l.id));
+            // Collect hot lead IDs explicitly (leads matching hot sources)
+            const normalizedHotSources = hotSources.map(s => String(s || "").trim().toLowerCase());
+            const hotLeadIds = selectedLeadRows
+                .filter(l => {
+                    const src = String(l.source || "").trim().toLowerCase();
+                    return src && normalizedHotSources.includes(src);
+                })
+                .map(l => l.id);
+
             const res = await fetch("/api/assign-leads", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -509,6 +551,9 @@ export default function MarketingAnalyticsPage() {
                     selectedLeads,
                     assignedTo: selectedSalesMember,
                     assignedAt: new Date().toISOString(),
+                    hotSources,
+                    hotLeadIds,
+                    selectedLeadRows,
                 }),
             });
 
@@ -958,9 +1003,7 @@ export default function MarketingAnalyticsPage() {
                                                         <div className="flex items-center gap-2">
                                                             {lead.name}
                                                             {isHotLead(lead) && (
-                                                                <div className="relative">
-                                                                    <Flame className="w-4 h-4 text-orange-600 fill-orange-500 animate-hot-float drop-shadow-[0_0_8px_rgba(249,115,22,0.4)]" />
-                                                                </div>
+                                                                <span className="text-orange-500 text-sm animate-pulse ml-1" title="Hot Lead">🔥</span>
                                                             )}
                                                         </div>
                                                     </TableCell>
@@ -1169,17 +1212,20 @@ export default function MarketingAnalyticsPage() {
                             </DialogHeader>
                             <div className="grid gap-4 py-4 text-center">
                                 <div className="flex flex-wrap gap-2 justify-center">
-                                    {sources.map(s => s.name).map(source => (
-                                        <Badge
-                                            key={source}
-                                            variant={hotSources.includes(source) ? "default" : "outline"}
-                                            className={`cursor-pointer transition-all hover:scale-105 ${hotSources.includes(source) ? "bg-orange-500 hover:bg-orange-600" : "hover:border-orange-400"}`}
-                                            onClick={() => toggleHotSource(source)}
-                                        >
-                                            {source}
-                                            {hotSources.includes(source) && <XCircle className="w-3 h-3 ml-1" />}
-                                        </Badge>
-                                    ))}
+                                    {sources.map(s => s.name).map(source => {
+                                        const isActive = hotSources.some(s => s.trim().toLowerCase() === source.trim().toLowerCase());
+                                        return (
+                                            <Badge
+                                                key={source}
+                                                variant={isActive ? "default" : "outline"}
+                                                className={`cursor-pointer transition-all hover:scale-105 ${isActive ? "bg-orange-500 hover:bg-orange-600 border-none" : "hover:border-orange-400"}`}
+                                                onClick={() => toggleHotSource(source)}
+                                            >
+                                                {source}
+                                                {isActive && <XCircle className="w-3 h-3 ml-1" />}
+                                            </Badge>
+                                        );
+                                    })}
                                 </div>
                                 {sources.length === 0 && (
                                     <p className="text-sm text-muted-foreground text-center py-4 italic">
