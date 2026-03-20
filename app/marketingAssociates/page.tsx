@@ -539,7 +539,7 @@ export default function MarketingAssociatesPage() {
     const hotLeads = rows.filter(isHotLead);
     const regularLeads = rows.filter(l => !isHotLead(l));
 
-    if (!sortConfig) return [...hotLeads.sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()), ...regularLeads.sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())];
+    if (!sortConfig) return [...hotLeads.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()), ...regularLeads.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())];
     const { key, direction } = sortConfig;
     const dir = direction === "asc" ? 1 : -1;
 
@@ -823,14 +823,14 @@ export default function MarketingAssociatesPage() {
                         </SelectContent>
                       </Select>
 
-                      <Button
+                      {/* <Button
                         variant="outline"
                         onClick={() => setShowHotSourcesDialog(true)}
                         className={`gap-2 ${hotSources.length > 0 ? "border-orange-200 text-orange-600 hover:bg-orange-50" : ""}`}
                       >
                         <Flame className={`w-4 h-4 ${hotSources.length > 0 ? "fill-orange-500 text-orange-500 animate-pulse" : ""}`} />
                         Hot Bucket ({hotSources.length})
-                      </Button>
+                      </Button> */}
 
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>

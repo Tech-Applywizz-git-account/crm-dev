@@ -37,7 +37,6 @@ import {
     RefreshCw,
     TrendingUp,
     UserPlus,
-    Trash2,
     Flame
 } from "lucide-react";
 
@@ -75,10 +74,8 @@ export default function MarketingAnalyticsPage() {
 
     const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
     const [salesTeamMembers, setSalesTeamMembers] = useState<{ id: string; full_name: string; user_email?: string }[]>([]);
-    const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
     const [bulkAssignDialogOpen, setBulkAssignDialogOpen] = useState(false);
     const [selectedSalesMember, setSelectedSalesMember] = useState<string | null>(null);
-    const [leadToDelete, setLeadToDelete] = useState<string | null>(null);
     const [performanceRange, setPerformanceRange] = useState<string>("30");
     const [salesPerformances, setSalesPerformances] = useState<Record<string, {
         conversionRate: number;
@@ -102,7 +99,7 @@ export default function MarketingAnalyticsPage() {
     // —— Hot Leads States ——
     const [hotSources, setHotSources] = useState<string[]>(() => {
         if (typeof window !== 'undefined') {
-            const saved = localStorage.getItem('hotSources') || localStorage.getItem('crm_hot_leads_sources');
+            const saved = localStorage.getItem('hotSources');
             try {
                 const parsed = saved ? JSON.parse(saved) : [];
                 if (Array.isArray(parsed)) return parsed.filter((s: any) => typeof s === 'string');
@@ -135,15 +132,16 @@ export default function MarketingAnalyticsPage() {
                 : [...prev, source];
             
             localStorage.setItem('hotSources', JSON.stringify(next));
-            localStorage.setItem('crm_hot_leads_sources', JSON.stringify(next));
+            // Explicitly clear legacy keys if they exist locally
+            localStorage.removeItem('crm_hot_leads_sources');
             return next;
         });
     };
 
     useEffect(() => {
         const handleStorage = (e: StorageEvent) => {
-            if (e.key === 'hotSources' || e.key === 'crm_hot_leads_sources') {
-                const saved = localStorage.getItem('hotSources') || localStorage.getItem('crm_hot_leads_sources');
+            if (e.key === 'hotSources') {
+                const saved = localStorage.getItem('hotSources');
                 try {
                     const parsed = saved ? JSON.parse(saved) : [];
                     if (Array.isArray(parsed)) setHotSources(parsed.filter((s: any) => typeof s === 'string'));
@@ -488,6 +486,14 @@ export default function MarketingAnalyticsPage() {
         );
     };
 
+    const handleSelectAllSources = (checked: boolean) => {
+        if (checked) {
+            setSelectedSources(sources.map(s => s.name));
+        } else {
+            setSelectedSources([]);
+        }
+    };
+
     const handleSelectAll = (checked: boolean) => {
         if (checked) {
             setSelectedLeads(leads.map(lead => lead.id));
@@ -504,29 +510,7 @@ export default function MarketingAnalyticsPage() {
         }
     };
 
-    const handleDeleteLeads = async () => {
-        const idsToDelete = leadToDelete ? [leadToDelete] : selectedLeads;
-        if (idsToDelete.length === 0) return;
 
-        setLoading(true);
-        try {
-            const { error } = await supabase
-                .from("leads")
-                .delete()
-                .in("id", idsToDelete);
-
-            if (error) throw error;
-
-            setLeads(prev => prev.filter(lead => !idsToDelete.includes(lead.id)));
-            setSelectedLeads(prev => prev.filter(id => !idsToDelete.includes(id)));
-            setDeleteDialogOpen(false);
-            setLeadToDelete(null);
-        } catch (err) {
-            console.error("Error deleting leads:", err);
-        } finally {
-            setLoading(false);
-        }
-    };
 
     const handleBulkAssign = async () => {
         if (!selectedSalesMember || selectedLeads.length === 0) return;
@@ -690,7 +674,19 @@ export default function MarketingAnalyticsPage() {
                         )}
 
                         <div className="space-y-2">
-                            <Label className="text-[10px] text-muted-foreground uppercase font-bold">All Sources</Label>
+                            <div className="flex items-center justify-between">
+                                <Label className="text-[10px] text-muted-foreground uppercase font-bold">All Sources</Label>
+                                <div className="flex items-center space-x-2">
+                                    <Checkbox
+                                        id="select-all-sources"
+                                        checked={sources.length > 0 && selectedSources.length === sources.length}
+                                        onCheckedChange={(checked) => handleSelectAllSources(!!checked)}
+                                    />
+                                    <label htmlFor="select-all-sources" className="text-[10px] font-bold cursor-pointer uppercase select-none">
+                                        Select All
+                                    </label>
+                                </div>
+                            </div>
                             {sources.map(source => (
                                 <div key={source.name} className="flex items-center space-x-2 w-full group">
                                     <Checkbox
@@ -831,16 +827,6 @@ export default function MarketingAnalyticsPage() {
                                         onClick={handleBulkUnassign}
                                     >
                                         <XCircle className="w-4 h-4 mr-2" /> Unassign
-                                    </Button>
-                                    <Button
-                                        variant="destructive"
-                                        size="sm"
-                                        onClick={() => {
-                                            setLeadToDelete(null);
-                                            setDeleteDialogOpen(true);
-                                        }}
-                                    >
-                                        <Trash2 className="w-4 h-4 mr-2" /> Delete
                                     </Button>
                                 </div>
                             )}
@@ -1003,7 +989,9 @@ export default function MarketingAnalyticsPage() {
                                                         <div className="flex items-center gap-2">
                                                             {lead.name}
                                                             {isHotLead(lead) && (
-                                                                <span className="text-orange-500 text-sm animate-pulse ml-1" title="Hot Lead">🔥</span>
+                                                                <span title="Hot Lead">
+                                                                    <Flame className="w-4 h-4 text-orange-500 fill-orange-500 animate-pulse ml-1" />
+                                                                </span>
                                                             )}
                                                         </div>
                                                     </TableCell>
@@ -1043,19 +1031,7 @@ export default function MarketingAnalyticsPage() {
                                                             </div>
                                                         )}
                                                     </TableCell>
-                                                    <TableCell>
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="icon"
-                                                            className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
-                                                            onClick={() => {
-                                                                setLeadToDelete(lead.id);
-                                                                setDeleteDialogOpen(true);
-                                                            }}
-                                                        >
-                                                            <Trash2 className="h-4 w-4" />
-                                                        </Button>
-                                                    </TableCell>
+                                                    <TableCell></TableCell>
                                                 </TableRow>
                                             ))
                                         )}
@@ -1096,21 +1072,7 @@ export default function MarketingAnalyticsPage() {
                             </div>
                         </div>
                     </Card>
-                    {/* Deletion Confirmation Dialog */}
-                    <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-                        <DialogContent>
-                            <DialogHeader>
-                                <DialogTitle>Confirm Deletion</DialogTitle>
-                                <DialogDescription>
-                                    Are you sure you want to delete {leadToDelete ? "this lead" : `${selectedLeads.length} leads`}? This action cannot be undone.
-                                </DialogDescription>
-                            </DialogHeader>
-                            <DialogFooter>
-                                <Button variant="ghost" onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
-                                <Button variant="destructive" onClick={handleDeleteLeads}>Delete</Button>
-                            </DialogFooter>
-                        </DialogContent>
-                    </Dialog>
+
 
                     {/* Bulk Assignment Dialog */}
                     <Dialog open={bulkAssignDialogOpen} onOpenChange={setBulkAssignDialogOpen}>

@@ -234,7 +234,9 @@ const LeadRow = React.memo(({
               <div className="flex items-center gap-1.5">
                 {item.client_name}
                 {isHot && (
-                  <span className="text-orange-500 text-[18px] animate-pulse ml-1" title="Hot Lead">🔥</span>
+                  <span title="Hot Lead">
+                    <Flame className="w-4 h-4 text-orange-500 fill-orange-500 animate-pulse ml-1" />
+                  </span>
                 )}
               </div>
             </div>
@@ -353,14 +355,7 @@ const LeadRow = React.memo(({
           >
             <Eye className="w-3.5 h-3.5" />
           </div>
-          {userProfile && getRoles(userProfile.roles).includes("Admin") && (
-            <div
-              title="Delete"
-              className="p-1.5 bg-red-50 text-red-600 rounded-md cursor-pointer hover:bg-red-600 hover:text-white transition-all shadow-sm"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-            </div>
-          )}
+
         </div>
       </TableCell>
     </TableRow>
@@ -602,6 +597,14 @@ export default function SalesPage() {
 
   const isHotLead = useCallback((lead: Lead) => {
     if (!lead?.id) return false;
+    
+    // Normalize sources for strict lookup
+    const normalizedHotSources = hotSources.map(s => String(s || "").trim().toLowerCase());
+    const leadSource = String((lead as any).source || lead.source || "").trim().toLowerCase();
+    
+    // If the source is NOT in the active 'Hot Sources' list, it is NOT hot.
+    // This allows the Marketing team to revoke 'Hot' status dynamically across tabs.
+    if (!normalizedHotSources.includes(leadSource)) return false;
 
     // 1. Check the `is_hot` flag the server sends directly on each lead
     if ((lead as any).is_hot === true) return true;
@@ -610,11 +613,20 @@ export default function SalesPage() {
     const leadId = String(lead.id);
     if (dbHotLeadIds.some(id => String(id) === leadId)) return true;
 
-    // 3. Fallback: check local assigned hot lead cache
+    // 3. Fallback: check local assigned hot lead cache (already restricted by hotSources above)
     if (assignedHotLeadRecords.some(r => String(r.id) === leadId)) return true;
 
+    // 4. Source + Age Fallback (Consistency with Marketing Analytics)
+    if (lead.created_at) {
+        const leadDate = dayjs(lead.created_at);
+        if (leadDate.isValid()) {
+          const ageInHours = dayjs().diff(leadDate, 'hour');
+          if (ageInHours >= 0 && ageInHours <= 72) return true;
+        }
+    }
+
     return false;
-  }, [assignedHotLeadRecords, dbHotLeadIds]);
+  }, [assignedHotLeadRecords, dbHotLeadIds, hotSources]);
 
   const toggleHotSource = (source: string) => {
     if (!source) return;
@@ -626,8 +638,6 @@ export default function SalesPage() {
         : [...prev, source];
 
       localStorage.setItem('hotSources', JSON.stringify(next));
-      // Key sync for compatibility
-      localStorage.setItem('crm_hot_leads_sources', JSON.stringify(next));
       return next;
     });
   };
@@ -635,34 +645,22 @@ export default function SalesPage() {
   const syncHotSources = useCallback(() => {
     if (typeof window === 'undefined') return;
     try {
-      const savedPrimary = localStorage.getItem('hotSources');
-      const savedFallback = localStorage.getItem('crm_hot_leads_sources');
-
-      const parseSources = (raw: string | null) => {
-        if (!raw) return [] as string[];
-        const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? parsed.filter((s: any) => typeof s === 'string') : [];
-      };
-
-      const merged = Array.from(
-        new Map(
-          [...parseSources(savedPrimary), ...parseSources(savedFallback)].map((source) => [
-            source.trim().toLowerCase(),
-            source,
-          ])
-        ).values()
-      );
-
-      if (merged.length > 0) {
-        // Only update if changed to avoid re-render loops
-        setHotSources(prev => {
-          if (JSON.stringify(prev) === JSON.stringify(merged)) return prev;
-          return merged;
-        });
-      } else {
+      const saved = localStorage.getItem('hotSources');
+      if (!saved) {
         setHotSources(prev => prev.length > 0 ? [] : prev);
+        return;
       }
-    } catch (e) { }
+
+      const parsed = JSON.parse(saved);
+      const next = Array.isArray(parsed) ? parsed.filter((s: any) => typeof s === 'string') : [];
+
+      setHotSources(prev => {
+        if (JSON.stringify(prev) === JSON.stringify(next)) return prev;
+        return next;
+      });
+    } catch (e) {
+      console.error("Failed to sync hot sources:", e);
+    }
   }, []);
 
   const syncAssignedHotLeadRecords = useCallback(() => {
@@ -2152,16 +2150,15 @@ Team ApplyWizz`
                             >
                               Reset Filters
                             </Button>
-                            <div className="h-4 w-px bg-gray-200 mx-1" />
-                          <Button
-                            variant="outline"
-                            onClick={() => setShowHotSourcesDialog(true)}
-                            className="bg-white border-orange-200 text-orange-600 hover:bg-orange-50 hover:text-orange-700 h-10 px-4 min-w-[140px] shadow-sm transition-all"
-                            suppressHydrationWarning
-                          >
-                            <Flame className="w-4 h-4 mr-2 fill-orange-500" />
-                            Hot Bucket ({hotBucketLeadCount})
-                          </Button>
+                            {/* <Button
+                              variant="outline"
+                              onClick={() => setShowHotSourcesDialog(true)}
+                              className="bg-white border-orange-200 text-orange-600 hover:bg-orange-50 hover:text-orange-700 h-8 px-4 min-w-[140px] shadow-sm transition-all"
+                              suppressHydrationWarning
+                            >
+                              <Flame className={`w-3.5 h-3.5 mr-2 ${hotSources.length > 0 ? "fill-orange-500 text-orange-500 animate-pulse" : ""}`} />
+                              Hot Bucket ({hotBucketLeadCount})
+                            </Button> */}
                           </div>
 
                           <div
