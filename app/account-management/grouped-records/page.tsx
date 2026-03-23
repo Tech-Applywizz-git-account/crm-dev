@@ -42,6 +42,7 @@ export default function GroupedRecordsPage() {
   const [monthFilter, setMonthFilter] = useState<string>(
     new Date().toLocaleDateString("en-GB", { month: "long", year: "numeric" })
   );
+  const [ratingFilter, setRatingFilter] = useState<number | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -145,30 +146,46 @@ export default function GroupedRecordsPage() {
     fetchData();
   }, []);
 
+  const filteredByMonth = useMemo(() => {
+    return data.filter((client) => {
+      const date = new Date(client.onboarded_date);
+      return date.toLocaleDateString("en-GB", { month: "long", year: "numeric" }) === monthFilter;
+    });
+  }, [data, monthFilter]);
+
+  const stats = useMemo(() => {
+    const counts = {
+      all: filteredByMonth.length,
+      veryPoor: filteredByMonth.filter(c => c.feedback?.rating === 1).length,
+      poor: filteredByMonth.filter(c => c.feedback?.rating === 2).length,
+      average: filteredByMonth.filter(c => c.feedback?.rating === 3).length,
+      good: filteredByMonth.filter(c => c.feedback?.rating === 4).length,
+      excellent: filteredByMonth.filter(c => c.feedback?.rating === 5).length,
+    };
+    return counts;
+  }, [filteredByMonth]);
+
   const grouped = useMemo(() => {
     const groups: Record<string, ClientRecord[]> = {};
     
-    // Filter data by selected month
-    const filteredByMonth = data.filter((client) => {
-      const date = new Date(client.onboarded_date);
-      const mY = date.toLocaleDateString("en-GB", { month: "long", year: "numeric" });
-      return mY === monthFilter;
-    });
+    let filtered = filteredByMonth;
+    if (ratingFilter !== null) {
+      filtered = filtered.filter(c => c.feedback?.rating === ratingFilter);
+    }
 
-    filteredByMonth.forEach((client) => {
+    filtered.forEach((client) => {
       const date = new Date(client.onboarded_date);
       const fullDate = date.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
       if (!groups[fullDate]) groups[fullDate] = [];
       groups[fullDate].push(client);
     });
 
-    // Convert to sorted array
     return Object.entries(groups).sort((a, b) => {
       const dateA = new Date(a[1][0].onboarded_date);
       const dateB = new Date(b[1][0].onboarded_date);
       return dateB.getTime() - dateA.getTime();
     });
-  }, [data, monthFilter]);
+  }, [filteredByMonth, ratingFilter]);
 
   const availableMonths = useMemo(() => {
     const months = new Set<string>();
@@ -230,12 +247,80 @@ export default function GroupedRecordsPage() {
                 </Select>
               </div>
               <div className="bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-100 flex items-center gap-2">
-                <span className="text-xs font-semibold text-blue-700">Total:</span>
+                <span className="text-xs font-semibold text-blue-700">Displaying:</span>
                 <Badge variant="secondary" className="bg-blue-600 text-white font-bold h-5 px-1.5 text-[10px]">
-                  {data.filter(c => new Date(c.onboarded_date).toLocaleDateString("en-GB", { month: "long", year: "numeric" }) === monthFilter).length}
+                  {ratingFilter === null ? stats.all : stats[
+                    ratingFilter === 1 ? 'veryPoor' : 
+                    ratingFilter === 2 ? 'poor' : 
+                    ratingFilter === 3 ? 'average' : 
+                    ratingFilter === 4 ? 'good' : 'excellent'
+                  ]}
                 </Badge>
               </div>
             </div>
+          </div>
+
+          {/* Rating Filter Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-8">
+            <Card 
+              className={`cursor-pointer transition-all duration-200 border ${ratingFilter === null ? "border-slate-800 bg-slate-50 shadow-sm" : "border-slate-200 hover:border-slate-300"}`}
+              onClick={() => setRatingFilter(null)}
+            >
+              <CardContent className="p-3 flex flex-col items-center justify-center gap-1">
+                <span className="text-[10px] uppercase text-slate-500 tracking-wider">All Clients</span>
+                <span className="text-xl font-semibold text-slate-800 leading-none">{stats.all}</span>
+              </CardContent>
+            </Card>
+
+            <Card 
+              className={`cursor-pointer transition-all duration-200 border ${ratingFilter === 1 ? "border-slate-800 bg-slate-50 shadow-sm" : "border-slate-200 hover:border-slate-300"}`}
+              onClick={() => setRatingFilter(1)}
+            >
+              <CardContent className="p-3 flex flex-col items-center justify-center gap-1">
+                <span className="text-[10px] uppercase text-slate-500 tracking-wider">Very Poor</span>
+                <span className="text-xl font-semibold text-slate-800 leading-none">{stats.veryPoor}</span>
+              </CardContent>
+            </Card>
+
+            <Card 
+              className={`cursor-pointer transition-all duration-200 border ${ratingFilter === 2 ? "border-slate-800 bg-slate-50 shadow-sm" : "border-slate-200 hover:border-slate-300"}`}
+              onClick={() => setRatingFilter(2)}
+            >
+              <CardContent className="p-3 flex flex-col items-center justify-center gap-1">
+                <span className="text-[10px] uppercase text-slate-500 tracking-wider">Poor</span>
+                <span className="text-xl font-semibold text-slate-800 leading-none">{stats.poor}</span>
+              </CardContent>
+            </Card>
+
+            <Card 
+              className={`cursor-pointer transition-all duration-200 border ${ratingFilter === 3 ? "border-slate-800 bg-slate-50 shadow-sm" : "border-slate-200 hover:border-slate-300"}`}
+              onClick={() => setRatingFilter(3)}
+            >
+              <CardContent className="p-3 flex flex-col items-center justify-center gap-1">
+                <span className="text-[10px] uppercase text-slate-500 tracking-wider">Average</span>
+                <span className="text-xl font-semibold text-slate-800 leading-none">{stats.average}</span>
+              </CardContent>
+            </Card>
+
+            <Card 
+              className={`cursor-pointer transition-all duration-200 border ${ratingFilter === 4 ? "border-slate-800 bg-slate-50 shadow-sm" : "border-slate-200 hover:border-slate-300"}`}
+              onClick={() => setRatingFilter(4)}
+            >
+              <CardContent className="p-3 flex flex-col items-center justify-center gap-1">
+                <span className="text-[10px] uppercase text-slate-500 tracking-wider">Good</span>
+                <span className="text-xl font-semibold text-slate-800 leading-none">{stats.good}</span>
+              </CardContent>
+            </Card>
+
+            <Card 
+              className={`cursor-pointer transition-all duration-200 border ${ratingFilter === 5 ? "border-slate-800 bg-slate-50 shadow-sm" : "border-slate-200 hover:border-slate-300"}`}
+              onClick={() => setRatingFilter(5)}
+            >
+              <CardContent className="p-3 flex flex-col items-center justify-center gap-1">
+                <span className="text-[10px] uppercase text-slate-500 tracking-wider">Excellent</span>
+                <span className="text-xl font-semibold text-slate-800 leading-none">{stats.excellent}</span>
+              </CardContent>
+            </Card>
           </div>
 
           <div className="space-y-4">
