@@ -37,7 +37,6 @@ import {
     RefreshCw,
     TrendingUp,
     UserPlus,
-    Trash2,
     Flame
 } from "lucide-react";
 
@@ -75,10 +74,8 @@ export default function MarketingAnalyticsPage() {
 
     const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
     const [salesTeamMembers, setSalesTeamMembers] = useState<{ id: string; full_name: string; user_email?: string }[]>([]);
-    const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
     const [bulkAssignDialogOpen, setBulkAssignDialogOpen] = useState(false);
     const [selectedSalesMember, setSelectedSalesMember] = useState<string | null>(null);
-    const [leadToDelete, setLeadToDelete] = useState<string | null>(null);
     const [performanceRange, setPerformanceRange] = useState<string>("30");
     const [salesPerformances, setSalesPerformances] = useState<Record<string, {
         conversionRate: number;
@@ -103,25 +100,57 @@ export default function MarketingAnalyticsPage() {
     const [hotSources, setHotSources] = useState<string[]>(() => {
         if (typeof window !== 'undefined') {
             const saved = localStorage.getItem('hotSources');
-            return saved ? JSON.parse(saved) : [];
+            try {
+                const parsed = saved ? JSON.parse(saved) : [];
+                if (Array.isArray(parsed)) return parsed.filter((s: any) => typeof s === 'string');
+            } catch (e) {}
         }
         return [];
     });
 
     const isHotLead = useCallback((lead: Lead) => {
-        if (!lead.source || !hotSources.includes(lead.source)) return false;
+        if (!lead || !lead.source || !lead.created_at) return false;
+        const normalizedHotSources = hotSources.map((s: string) => String(s || "").trim().toLowerCase());
+        const leadSource = String(lead.source || "").trim().toLowerCase();
+        
+        if (!normalizedHotSources.includes(leadSource)) return false;
+        
         const leadDate = dayjs(lead.created_at);
-        const ageInDays = dayjs().diff(leadDate, 'day');
-        return ageInDays >= 0 && ageInDays <= 3;
+        if (!leadDate.isValid()) return false;
+        
+        const ageInHours = dayjs().diff(leadDate, 'hour');
+        return ageInHours >= 0 && ageInHours <= 72;
     }, [hotSources]);
 
     const toggleHotSource = (source: string) => {
+        if (!source) return;
         setHotSources(prev => {
-            const next = prev.includes(source) ? prev.filter(s => s !== source) : [...prev, source];
+            const lowerSource = source.trim().toLowerCase();
+            const exists = prev.some(s => s.trim().toLowerCase() === lowerSource);
+            const next = exists 
+                ? prev.filter(s => s.trim().toLowerCase() !== lowerSource) 
+                : [...prev, source];
+            
             localStorage.setItem('hotSources', JSON.stringify(next));
+            // Explicitly clear legacy keys if they exist locally
+            localStorage.removeItem('crm_hot_leads_sources');
             return next;
         });
     };
+
+    useEffect(() => {
+        const handleStorage = (e: StorageEvent) => {
+            if (e.key === 'hotSources') {
+                const saved = localStorage.getItem('hotSources');
+                try {
+                    const parsed = saved ? JSON.parse(saved) : [];
+                    if (Array.isArray(parsed)) setHotSources(parsed.filter((s: any) => typeof s === 'string'));
+                } catch (err) {}
+            }
+        };
+        window.addEventListener('storage', handleStorage);
+        return () => window.removeEventListener('storage', handleStorage);
+    }, []);
 
     const [showHotSourcesDialog, setShowHotSourcesDialog] = useState(false);
     const [dnpCount, setDnpCount] = useState(0);
@@ -243,7 +272,7 @@ export default function MarketingAnalyticsPage() {
             const { data, error } = await supabase
                 .from('profiles')
                 .select('auth_id, full_name, user_email')
-                .or('roles.eq.Sales,roles.eq.Sales Associate,roles.eq.Sales Head')
+                .or('roles.eq.Sales,roles.eq.Sales Associate,roles.eq.Sales Head,roles.eq.Resume Head-Sales Associate,roles.eq.Resume Associate-Sales Associate')
                 .eq('is_active', 'true');
 
             if (error) throw error;
@@ -457,6 +486,14 @@ export default function MarketingAnalyticsPage() {
         );
     };
 
+    const handleSelectAllSources = (checked: boolean) => {
+        if (checked) {
+            setSelectedSources(sources.map(s => s.name));
+        } else {
+            setSelectedSources([]);
+        }
+    };
+
     const handleSelectAll = (checked: boolean) => {
         if (checked) {
             setSelectedLeads(leads.map(lead => lead.id));
@@ -473,35 +510,24 @@ export default function MarketingAnalyticsPage() {
         }
     };
 
-    const handleDeleteLeads = async () => {
-        const idsToDelete = leadToDelete ? [leadToDelete] : selectedLeads;
-        if (idsToDelete.length === 0) return;
 
-        setLoading(true);
-        try {
-            const { error } = await supabase
-                .from("leads")
-                .delete()
-                .in("id", idsToDelete);
-
-            if (error) throw error;
-
-            setLeads(prev => prev.filter(lead => !idsToDelete.includes(lead.id)));
-            setSelectedLeads(prev => prev.filter(id => !idsToDelete.includes(id)));
-            setDeleteDialogOpen(false);
-            setLeadToDelete(null);
-        } catch (err) {
-            console.error("Error deleting leads:", err);
-        } finally {
-            setLoading(false);
-        }
-    };
 
     const handleBulkAssign = async () => {
         if (!selectedSalesMember || selectedLeads.length === 0) return;
 
         setLoading(true);
         try {
+            // Collect the full lead objects for selected leads
+            const selectedLeadRows = leads.filter(l => selectedLeads.includes(l.id));
+            // Collect hot lead IDs explicitly (leads matching hot sources)
+            const normalizedHotSources = hotSources.map(s => String(s || "").trim().toLowerCase());
+            const hotLeadIds = selectedLeadRows
+                .filter(l => {
+                    const src = String(l.source || "").trim().toLowerCase();
+                    return src && normalizedHotSources.includes(src);
+                })
+                .map(l => l.id);
+
             const res = await fetch("/api/assign-leads", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -509,6 +535,9 @@ export default function MarketingAnalyticsPage() {
                     selectedLeads,
                     assignedTo: selectedSalesMember,
                     assignedAt: new Date().toISOString(),
+                    hotSources,
+                    hotLeadIds,
+                    selectedLeadRows,
                 }),
             });
 
@@ -645,7 +674,19 @@ export default function MarketingAnalyticsPage() {
                         )}
 
                         <div className="space-y-2">
-                            <Label className="text-[10px] text-muted-foreground uppercase font-bold">All Sources</Label>
+                            <div className="flex items-center justify-between">
+                                <Label className="text-[10px] text-muted-foreground uppercase font-bold">All Sources</Label>
+                                <div className="flex items-center space-x-2">
+                                    <Checkbox
+                                        id="select-all-sources"
+                                        checked={sources.length > 0 && selectedSources.length === sources.length}
+                                        onCheckedChange={(checked) => handleSelectAllSources(!!checked)}
+                                    />
+                                    <label htmlFor="select-all-sources" className="text-[10px] font-bold cursor-pointer uppercase select-none">
+                                        Select All
+                                    </label>
+                                </div>
+                            </div>
                             {sources.map(source => (
                                 <div key={source.name} className="flex items-center space-x-2 w-full group">
                                     <Checkbox
@@ -786,16 +827,6 @@ export default function MarketingAnalyticsPage() {
                                         onClick={handleBulkUnassign}
                                     >
                                         <XCircle className="w-4 h-4 mr-2" /> Unassign
-                                    </Button>
-                                    <Button
-                                        variant="destructive"
-                                        size="sm"
-                                        onClick={() => {
-                                            setLeadToDelete(null);
-                                            setDeleteDialogOpen(true);
-                                        }}
-                                    >
-                                        <Trash2 className="w-4 h-4 mr-2" /> Delete
                                     </Button>
                                 </div>
                             )}
@@ -958,9 +989,9 @@ export default function MarketingAnalyticsPage() {
                                                         <div className="flex items-center gap-2">
                                                             {lead.name}
                                                             {isHotLead(lead) && (
-                                                                <div className="relative">
-                                                                    <Flame className="w-4 h-4 text-orange-600 fill-orange-500 animate-hot-float drop-shadow-[0_0_8px_rgba(249,115,22,0.4)]" />
-                                                                </div>
+                                                                <span title="Hot Lead">
+                                                                    <Flame className="w-4 h-4 text-orange-500 fill-orange-500 animate-pulse ml-1" />
+                                                                </span>
                                                             )}
                                                         </div>
                                                     </TableCell>
@@ -1000,19 +1031,7 @@ export default function MarketingAnalyticsPage() {
                                                             </div>
                                                         )}
                                                     </TableCell>
-                                                    <TableCell>
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="icon"
-                                                            className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
-                                                            onClick={() => {
-                                                                setLeadToDelete(lead.id);
-                                                                setDeleteDialogOpen(true);
-                                                            }}
-                                                        >
-                                                            <Trash2 className="h-4 w-4" />
-                                                        </Button>
-                                                    </TableCell>
+                                                    <TableCell></TableCell>
                                                 </TableRow>
                                             ))
                                         )}
@@ -1053,21 +1072,7 @@ export default function MarketingAnalyticsPage() {
                             </div>
                         </div>
                     </Card>
-                    {/* Deletion Confirmation Dialog */}
-                    <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-                        <DialogContent>
-                            <DialogHeader>
-                                <DialogTitle>Confirm Deletion</DialogTitle>
-                                <DialogDescription>
-                                    Are you sure you want to delete {leadToDelete ? "this lead" : `${selectedLeads.length} leads`}? This action cannot be undone.
-                                </DialogDescription>
-                            </DialogHeader>
-                            <DialogFooter>
-                                <Button variant="ghost" onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
-                                <Button variant="destructive" onClick={handleDeleteLeads}>Delete</Button>
-                            </DialogFooter>
-                        </DialogContent>
-                    </Dialog>
+
 
                     {/* Bulk Assignment Dialog */}
                     <Dialog open={bulkAssignDialogOpen} onOpenChange={setBulkAssignDialogOpen}>
@@ -1169,17 +1174,20 @@ export default function MarketingAnalyticsPage() {
                             </DialogHeader>
                             <div className="grid gap-4 py-4 text-center">
                                 <div className="flex flex-wrap gap-2 justify-center">
-                                    {sources.map(s => s.name).map(source => (
-                                        <Badge
-                                            key={source}
-                                            variant={hotSources.includes(source) ? "default" : "outline"}
-                                            className={`cursor-pointer transition-all hover:scale-105 ${hotSources.includes(source) ? "bg-orange-500 hover:bg-orange-600" : "hover:border-orange-400"}`}
-                                            onClick={() => toggleHotSource(source)}
-                                        >
-                                            {source}
-                                            {hotSources.includes(source) && <XCircle className="w-3 h-3 ml-1" />}
-                                        </Badge>
-                                    ))}
+                                    {sources.map(s => s.name).map(source => {
+                                        const isActive = hotSources.some(s => s.trim().toLowerCase() === source.trim().toLowerCase());
+                                        return (
+                                            <Badge
+                                                key={source}
+                                                variant={isActive ? "default" : "outline"}
+                                                className={`cursor-pointer transition-all hover:scale-105 ${isActive ? "bg-orange-500 hover:bg-orange-600 border-none" : "hover:border-orange-400"}`}
+                                                onClick={() => toggleHotSource(source)}
+                                            >
+                                                {source}
+                                                {isActive && <XCircle className="w-3 h-3 ml-1" />}
+                                            </Badge>
+                                        );
+                                    })}
                                 </div>
                                 {sources.length === 0 && (
                                     <p className="text-sm text-muted-foreground text-center py-4 italic">

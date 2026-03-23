@@ -25,7 +25,7 @@ export default function HotLeadsPage() {
     const fetchHotLeads = useCallback(async () => {
         setLoading(true);
         try {
-            const hotSourcesString = localStorage.getItem('hotSources');
+            const hotSourcesString = localStorage.getItem('crm_hot_leads_sources');
             const hotSources: string[] = hotSourcesString ? JSON.parse(hotSourcesString) : [];
 
             if (hotSources.length === 0) {
@@ -100,7 +100,10 @@ export default function HotLeadsPage() {
                                 ) : (
                                     leads.map((lead) => (
                                         <TableRow key={lead.id}>
-                                            <TableCell className="font-medium">{lead.name}</TableCell>
+                                            <TableCell className="font-medium flex items-center gap-2">
+                                                {lead.name}
+                                                <Flame className="w-4 h-4 text-orange-500 fill-orange-500" />
+                                            </TableCell>
                                             <TableCell>
                                               <span className="px-2 py-1 rounded-full bg-orange-100 text-orange-700 text-xs font-medium">
                                                 {lead.source}

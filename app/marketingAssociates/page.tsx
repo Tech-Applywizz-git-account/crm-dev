@@ -204,14 +204,35 @@ export default function MarketingAssociatesPage() {
   // —— Hot Leads States ——
   const [hotSources, setHotSources] = useState<string[]>(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('hotSources');
-      return saved ? JSON.parse(saved) : [];
+      const primary = localStorage.getItem('hotSources');
+      const fallback = localStorage.getItem('crm_hot_leads_sources');
+
+      try {
+        const parseSources = (raw: string | null) => {
+          if (!raw) return [] as string[];
+          const parsed = JSON.parse(raw);
+          return Array.isArray(parsed) ? parsed.filter((s: any) => typeof s === "string") : [];
+        };
+
+        return Array.from(
+          new Map(
+            [...parseSources(primary), ...parseSources(fallback)].map((source) => [
+              source.trim().toLowerCase(),
+              source,
+            ])
+          ).values()
+        );
+      } catch {
+        return [];
+      }
     }
     return [];
   });
 
   const isHotLead = useCallback((lead: Lead) => {
-    if (!lead.source || !hotSources.includes(lead.source)) return false;
+    const normalizedLeadSource = String(lead.source || "").trim().toLowerCase();
+    const normalizedHotSources = hotSources.map((source) => String(source || "").trim().toLowerCase());
+    if (!normalizedLeadSource || !normalizedHotSources.includes(normalizedLeadSource)) return false;
     const leadDate = dayjs(lead.created_at);
     const ageInDays = dayjs().diff(leadDate, 'day');
     return ageInDays >= 0 && ageInDays <= 3;
@@ -219,8 +240,12 @@ export default function MarketingAssociatesPage() {
 
   const toggleHotSource = (source: string) => {
     setHotSources(prev => {
-      const next = prev.includes(source) ? prev.filter(s => s !== source) : [...prev, source];
+      const normalizedSource = source.trim().toLowerCase();
+      const next = prev.some((s) => s.trim().toLowerCase() === normalizedSource)
+        ? prev.filter((s) => s.trim().toLowerCase() !== normalizedSource)
+        : [...prev, source];
       localStorage.setItem('hotSources', JSON.stringify(next));
+      localStorage.setItem('crm_hot_leads_sources', JSON.stringify(next));
       return next;
     });
   };
@@ -514,7 +539,7 @@ export default function MarketingAssociatesPage() {
     const hotLeads = rows.filter(isHotLead);
     const regularLeads = rows.filter(l => !isHotLead(l));
 
-    if (!sortConfig) return [...hotLeads.sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()), ...regularLeads.sort((a,b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())];
+    if (!sortConfig) return [...hotLeads.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()), ...regularLeads.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())];
     const { key, direction } = sortConfig;
     const dir = direction === "asc" ? 1 : -1;
 
@@ -798,14 +823,14 @@ export default function MarketingAssociatesPage() {
                         </SelectContent>
                       </Select>
 
-                      <Button
+                      {/* <Button
                         variant="outline"
                         onClick={() => setShowHotSourcesDialog(true)}
                         className={`gap-2 ${hotSources.length > 0 ? "border-orange-200 text-orange-600 hover:bg-orange-50" : ""}`}
                       >
                         <Flame className={`w-4 h-4 ${hotSources.length > 0 ? "fill-orange-500 text-orange-500 animate-pulse" : ""}`} />
                         Hot Bucket ({hotSources.length})
-                      </Button>
+                      </Button> */}
 
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>

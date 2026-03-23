@@ -5,6 +5,7 @@
 
 # next.js
 /.next/
+/tmp/next/
 /out/
 
 # production
@@ -38,3 +39,4 @@ yarn-error.log*
 next-env.d.ts
 
 certificates
+database

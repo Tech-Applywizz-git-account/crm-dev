@@ -2579,7 +2579,7 @@ export default function JobBoardClientsPage() {
   useEffect(() => {
     if (user === null) return;
     const allowed = ["Super Admin", "Resume Head", "Resume Associate"] as const;
-    if (!user || !allowed.includes(user.role as any)) {
+    if (!user || !allowed.some(role => user.roles.includes(role as any))) {
       router.push("/unauthorized");
       return;
     }

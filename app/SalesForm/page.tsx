@@ -121,7 +121,7 @@ export default function SalesFormPage() {
       "Marketing", "Account Management", "Finance",
       "Resume Head", "Technical Head",
     ];
-    if (!user || !allowed.includes(user.role)) {
+    if (!user || !allowed.some(role => user.roles.includes(role))) {
       router.push("/unauthorized");
       return;
     }

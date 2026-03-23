@@ -1035,8 +1035,7 @@ export default function FinancePage() {
   const expiredCount = sales.filter((sale) => sale.finance_status === "Paid").length;
 
   const totalAmount = (
-    parseFloat(subscriptionSaleValue)
-
+    parseFloat(subscriptionSaleValue || "0")
   );
 
   // Adjust the total based on the subscription cycle
@@ -1072,15 +1071,7 @@ export default function FinancePage() {
     validPortfolioValue + validLinkedinValue + validGithubValue +
     validCoursesValue + validCustomValue + validBadgeValue;
 
-  console.log("subscription_puls_addons", typeof subscription_puls_addons, subscription_puls_addons);
-  console.log("adjustedTotalAmount", typeof adjustedTotalAmount, adjustedTotalAmount);
-  console.log("resumeValue", typeof resumeValue, resumeValue);
-  console.log("portfolioValue", typeof portfolioValue, portfolioValue);
-  console.log("linkedinValue", typeof linkedinValue, linkedinValue);
-  console.log("githubValue", typeof githubValue, githubValue);
-  console.log("coursesValue", typeof coursesValue, coursesValue);
-  console.log("customValue", typeof customValue, customValue);
-  console.log("badgeValue", typeof badgeValue, badgeValue);
+
 
   const totalTLCount = tlActiveCounts.reduce((sum, tl) => sum + tl.count, 0);
 

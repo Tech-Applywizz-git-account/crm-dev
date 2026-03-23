@@ -460,6 +460,7 @@
 import { createContext, useContext, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/utils/supabase/client";
+import { getRoles } from "@/utils/roles";
 
 export type UserRole =
   | "Super Admin"
@@ -475,7 +476,9 @@ export type UserRole =
   | "Technical Associate"
   | "Resume Head"
   | "Resume Associate"
-  | "Sales Head";
+  | "Sales Head"
+  | "Resume Head-Sales Associate"
+  | "Resume Associate-Sales Associate";
 
 
 interface User {
@@ -483,6 +486,7 @@ interface User {
   name: string;
   email: string;
   role: UserRole;
+  roles: UserRole[];
   avatar?: string;
 }
 
@@ -530,6 +534,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         name: profile.full_name || user.user_metadata?.full_name || "User",
         email: user.email!,
         role: convertRole(profile.roles),
+        roles: convertRoles(profile.roles),
       };
 
       setUser(userData);
@@ -570,11 +575,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       name: profile.full_name || authData.user.user_metadata?.full_name || "User",
       email: authData.user.email!,
       role: convertRole(profile.roles),
+      roles: convertRoles(profile.roles),
     };
 
     setUser(userData);
 
-    switch (userData.role) {
+    // Route based on first role
+    const primaryRole = userData.roles[0];
+
+    switch (primaryRole) {
       case "Super Admin":
         router.push("/");
         break;
@@ -631,7 +640,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const hasAccess = (module: string): boolean => {
     if (!user) return false;
-    if (user.role === "Super Admin") return true;
+    // Super Admin has access to everything
+    if (user.roles.includes("Super Admin")) return true;
 
     // hasAccess
     const accessMap: Record<UserRole, string[]> = {
@@ -652,10 +662,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       "Technical Associate": ["technical-associate"],
       "Resume Head": ["resume", "onboard"],
       "Resume Associate": ["resume-associate"],
+      "Resume Head-Sales Associate": [
+        "admin", "marketing", "sales", "account-management", "finance", "finance-associates", "marketingAssociate",
+        "technical", "technical-associate", "resume", "resume-associate", "onboard"
+      ],
+      "Resume Associate-Sales Associate": [
+        "admin", "marketing", "sales", "account-management", "finance", "finance-associates", "marketingAssociate",
+        "technical", "technical-associate", "resume", "resume-associate", "onboard"
+      ],
     };
 
-
-    return accessMap[user.role]?.includes(module) || false;
+    // Check if ANY of the user's roles has access to the module
+    return user.roles.some(role => accessMap[role]?.includes(module) || false);
   };
 
   return (
@@ -693,8 +711,50 @@ function convertRole(role: string): UserRole {
     "Resume Head": "Resume Head",
     "Resume Associate": "Resume Associate",
     "Sales Head": "Sales Head",
+    "Head-Sales Associate": "Resume Head-Sales Associate",
+    "Associate": "Resume Associate-Sales Associate",
+    "Resume Head-Sales Associate": "Resume Head-Sales Associate",
+    "Resume Associate-Sales Associate": "Resume Associate-Sales Associate",
+    "Head-Sales Associate Resume Associate-Sales Associate": "Resume Associate-Sales Associate",
+    "Head-Sales Associate-Resume Associate-Sales Associate": "Resume Associate-Sales Associate",
   };
 
   return map[role] ?? "Super Admin";
+}
+
+/**
+ * Convert a role string (e.g., "Resume Head-Sales Associate") to an array of UserRole
+ */
+function convertRoles(roleString: string): UserRole[] {
+  const rolesArray = getRoles(roleString);
+  const map: Record<string, UserRole> = {
+    Admin: "Super Admin",
+    Marketing: "Marketing",
+    Sales: "Sales",
+    Finance: "Finance",
+    Accounts: "Account Management",
+    "Marketing Associate": "Marketing Associate",
+    "Sales Associate": "Sales Associate",
+    "Finance Associate": "Finance Associate",
+    "Accounts Associate": "Accounts Associate",
+    "Finance Team": "Finance",
+    "Sales Team": "Sales",
+    "Marketing Team": "Marketing",
+    "Account Management Team": "Account Management",
+    "Technical Head": "Technical Head",
+    "Technical Associate": "Technical Associate",
+    "Resume Head": "Resume Head",
+    "Resume Associate": "Resume Associate",
+    "Sales Head": "Sales Head",
+    "Head-Sales Associate": "Resume Head-Sales Associate",
+    "Associate": "Resume Associate-Sales Associate",
+    "Resume Head-Sales Associate": "Resume Head-Sales Associate",
+    "Resume Associate-Sales Associate": "Resume Associate-Sales Associate",
+    "Head-Sales Associate Resume Associate-Sales Associate": "Resume Associate-Sales Associate",
+    "Head-Sales Associate-Resume Associate-Sales Associate": "Resume Associate-Sales Associate",
+  };
+
+  const userRoles = rolesArray.map(r => map[r]).filter(Boolean) as UserRole[];
+  return userRoles.length > 0 ? userRoles : ["Super Admin"];
 }
 
