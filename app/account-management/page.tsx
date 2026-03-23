@@ -77,13 +77,27 @@ const formatDate = (dateString: string | undefined): string => {
   return isNaN(d.getTime()) ? "N/A" : d.toLocaleDateString();
 };
 
-function renderStars(rating: number) {
+const getRatingLabel = (rating: number) => {
+  switch (rating) {
+    case 1: return <span className="text-red-600 font-medium">Very Poor</span>;
+    case 2: return <span className="text-orange-600 font-medium">Poor</span>;
+    case 3: return <span className="text-yellow-600 font-medium">Average</span>;
+    case 4: return <span className="text-green-600 font-medium">Good</span>;
+    case 5: return <span className="text-emerald-600 font-medium">Excellent</span>;
+    default: return null;
+  }
+};
+
+function renderStars(rating: number, showLabel: boolean = false) {
   return (
-    <span className="flex">
-      {Array.from({ length: 5 }, (_, i) => (
-        <Star key={i} className={`h-4 w-4 ${i < rating ? "fill-current text-yellow-400" : "text-gray-300"}`} />
-      ))}
-    </span>
+    <div className="flex items-center gap-2">
+      <span className="flex">
+        {Array.from({ length: 5 }, (_, i) => (
+          <Star key={i} className={`h-4 w-4 ${i < rating ? "fill-current text-yellow-400" : "text-gray-300"}`} />
+        ))}
+      </span>
+      {showLabel && getRatingLabel(rating)}
+    </div>
   );
 }
 
@@ -112,6 +126,7 @@ export default function AccountManagementPage() {
 
   const [searchTerm, setSearchTerm] = useState("");
   const [followUpFilter, setFollowUpFilter] = useState<"All dates" | "Today">("All dates");
+  const [emotionFilter, setEmotionFilter] = useState<"All" | "Happy" | "Unhappy">("All");
   const [sortKey, setSortKey] = useState<"client_name" | "created_at" | null>(null);
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
 
@@ -377,11 +392,15 @@ export default function AccountManagementPage() {
       return clients.filter((client) => {
         const createdAt = new Date(client.created_at);
         const diffInDays = Math.floor((today.getTime() - createdAt.getTime()) / 86400000);
-        return diffInDays === 15 && bySearch(client);
+        const emotionMatch = emotionFilter === "All" || (emotionFilter === "Happy" ? client.feedback?.isHappy : !client.feedback?.isHappy && client.feedback);
+        return diffInDays === 15 && bySearch(client) && emotionMatch;
       });
     }
-    return clients.filter(bySearch);
-  }, [clients, searchTerm, followUpFilter]);
+    return clients.filter((client) => {
+      const emotionMatch = emotionFilter === "All" || (client.feedback && (emotionFilter === "Happy" ? client.feedback.isHappy : !client.feedback.isHappy));
+      return bySearch(client) && (emotionFilter === "All" ? true : emotionMatch);
+    });
+  }, [clients, searchTerm, followUpFilter, emotionFilter]);
 
   /** ===== Tab filtering ===== */
   const tabFiltered = useMemo(() => {
@@ -943,6 +962,17 @@ export default function AccountManagementPage() {
                       </Button>
                     )}
 
+                    <Select value={emotionFilter} onValueChange={(v) => setEmotionFilter(v as any)}>
+                      <SelectTrigger className="w-32">
+                        <SelectValue placeholder="Feedback" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="All">All Feedback</SelectItem>
+                        <SelectItem value="Happy">Happy</SelectItem>
+                        <SelectItem value="Unhappy">Unhappy</SelectItem>
+                      </SelectContent>
+                    </Select>
+
                     <Select value={followUpFilter} onValueChange={(v) => setFollowUpFilter(v as "All dates" | "Today")}>
                       <SelectTrigger className="w-40">
                         <SelectValue placeholder="Follow Up" />
@@ -952,6 +982,15 @@ export default function AccountManagementPage() {
                         <SelectItem value="Today">Due today (15th day)</SelectItem>
                       </SelectContent>
                     </Select>
+
+                    <Button 
+                      variant="outline" 
+                      className="gap-2 border-blue-200 text-blue-700 hover:bg-blue-50"
+                      onClick={() => window.open('/account-management/grouped-records', '_blank')}
+                    >
+                      <Calendar className="w-4 h-4" />
+                      Grouped Records
+                    </Button>
                   </div>
                 </div>
 
@@ -1199,7 +1238,7 @@ export default function AccountManagementPage() {
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
                               <span className="text-sm font-medium">Rating:</span>
-                              <div className="flex">{renderStars(clientFeedback.rating)}</div>
+                              <div className="flex">{renderStars(clientFeedback.rating, true)}</div>
                             </div>
                             <Badge variant={clientFeedback.isHappy ? "default" : "secondary"}>
                               {clientFeedback.isHappy ? "Happy" : "Needs Attention"}
@@ -1257,7 +1296,7 @@ export default function AccountManagementPage() {
                           <SelectItem key={rating} value={String(rating)}>
                             <div className="flex items-center gap-2">
                               <span>{rating}</span>
-                              <div className="flex">{renderStars(rating)}</div>
+                              <div className="flex">{renderStars(rating, true)}</div>
                             </div>
                           </SelectItem>
                         ))}

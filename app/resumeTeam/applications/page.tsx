@@ -559,16 +559,19 @@ export default function ApplicationsPage() {
 
   useEffect(() => {
     if (user === null) return;
-    const allowed = ["Super Admin", "Resume Head", "Resume Associate"] as const;
-    if (!user || !allowed.some(role => user.roles.includes(role as any))) {
+    const allowed = ["Super Admin", "Resume Head", "Resume Associate"];
+    const isAllowed = user.roles.some(role => 
+      allowed.includes(role) || 
+      role.includes("Resume Head") || 
+      role.includes("Resume Associate")
+    );
+    if (!user || !isAllowed) {
       router.push("/unauthorized");
       return;
     }
     Promise.all([fetchTeamMembers(), fetchData(1, limit, "", false, "__all__")]).finally(() =>
       setLoading(false)
     );
-
-
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
@@ -585,17 +588,22 @@ export default function ApplicationsPage() {
     try {
       const { data, error } = await supabase
         .from("profiles")
-        .select("user_id,full_name,user_email,roles")
-        .in("roles", ["Resume Head", "Resume Associate"]);
-
+        .select("user_id,full_name,user_email,roles");
 
       if (!error && data) {
-        members = (data as any[]).map((d) => ({
-          id: d.user_id,
-          name: d.full_name ?? null,
-          email: d.user_email ?? null,
-          role: d.roles ?? null,
-        }));
+        members = (data as any[])
+          .filter(d => 
+            d.roles && (
+              d.roles.includes("Resume Head") || 
+              d.roles.includes("Resume Associate")
+            )
+          )
+          .map((d) => ({
+            id: d.user_id,
+            name: d.full_name ?? null,
+            email: d.user_email ?? null,
+            role: d.roles ?? null,
+          }));
       }
     } catch {
       // ignore
