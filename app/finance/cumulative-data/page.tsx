@@ -52,6 +52,11 @@ export default function CumulativeDataPage() {
   const [editingClient, setEditingClient] = useState<RenewalRecord | null>(null);
   const [tempNote, setTempNote] = useState("");
 
+  const [dateFilter, setDateFilter] = useState({
+    from: new Date(Date.now() - 7 * 86400000).toISOString().split("T")[0],
+    to: new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0],
+  });
+
   useEffect(() => {
     fetchData();
   }, []);
@@ -141,20 +146,27 @@ export default function CumulativeDataPage() {
       const groups: Record<string, DateGroup> = {};
 
       processedRecords.forEach(rec => {
-        // Add to Due Date group
+        // 1. Group by Due Date (Where they were SUPPOSED to renew)
         if (!groups[rec.dueDate]) groups[rec.dueDate] = { date: rec.dueDate, totalDue: 0, renewedCount: 0, notRenewedCount: 0, clients: [] };
         
-        const dueEntry = { ...rec, type: "Due" as const };
-        groups[rec.dueDate].clients.push(dueEntry);
+        groups[rec.dueDate].clients.push({ ...rec, type: "Due" });
         groups[rec.dueDate].totalDue++;
-        if (rec.isRenewed) groups[rec.dueDate].renewedCount++;
-        else groups[rec.dueDate].notRenewedCount++;
+        
+        // If they paid ON their due date, they count as Renewed today
+        if (rec.paidDate === rec.dueDate) {
+          groups[rec.dueDate].renewedCount++;
+        } else {
+          // If they paid later or haven't paid, they are currently Pending for THIS due date group
+          groups[rec.dueDate].notRenewedCount++;
+        }
 
-        // If paid on a different date, add to Paid Date group
+        // 2. Group by Paid Date (Where they ACTUALLY renewed, if different from due date)
         if (rec.paidDate && rec.paidDate !== rec.dueDate) {
           if (!groups[rec.paidDate]) groups[rec.paidDate] = { date: rec.paidDate, totalDue: 0, renewedCount: 0, notRenewedCount: 0, clients: [] };
-          const paidEntry = { ...rec, type: "Paid" as const };
-          groups[rec.paidDate].clients.push(paidEntry);
+          
+          groups[rec.paidDate].clients.push({ ...rec, type: "Paid" });
+          groups[rec.paidDate].totalDue++;
+          groups[rec.paidDate].renewedCount++; // They are a success for this payment date group
         }
       });
 
@@ -185,11 +197,30 @@ export default function CumulativeDataPage() {
     }
   };
 
+  const dateFilteredGroups = useMemo(() => {
+    return allGroups.filter(g => {
+      const gDate = g.date;
+      return gDate >= dateFilter.from && gDate <= dateFilter.to;
+    });
+  }, [allGroups, dateFilter]);
+
+  const rangeSummary = useMemo(() => {
+    let total = 0;
+    let renewed = 0;
+    let pending = 0;
+    dateFilteredGroups.forEach(g => {
+      total += g.totalDue;
+      renewed += g.renewedCount;
+      pending += g.notRenewedCount;
+    });
+    return { total, renewed, pending };
+  }, [dateFilteredGroups]);
+
   const filteredGroups = useMemo(() => {
-    if (!searchTerm.trim()) return allGroups;
+    if (!searchTerm.trim()) return dateFilteredGroups;
     const term = searchTerm.toLowerCase();
 
-    return allGroups.map(group => ({
+    return dateFilteredGroups.map(group => ({
       ...group,
       clients: group.clients.filter(c => 
         c.name.toLowerCase().includes(term) || 
@@ -197,7 +228,7 @@ export default function CumulativeDataPage() {
         c.lead_id.toLowerCase().includes(term)
       )
     })).filter(group => group.clients.length > 0);
-  }, [allGroups, searchTerm]);
+  }, [dateFilteredGroups, searchTerm]);
 
   if (loading) return <FullScreenLoader />;
 
@@ -205,19 +236,70 @@ export default function CumulativeDataPage() {
     <ProtectedRoute allowedRoles={["Finance", "Super Admin"]}>
       <DashboardLayout>
         <div className="p-8">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
+          <div className="flex flex-col gap-8 mb-10">
             <div>
               <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Cumulative Renewal Records</h1>
               <p className="text-slate-500 mt-1 text-base">Daily summary of due and processed renewals</p>
             </div>
-            <div className="relative w-full md:w-80">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
-              <Input 
-                placeholder="Search clients..." 
-                className="pl-9 h-10 bg-white border-slate-200 shadow-sm rounded-lg text-sm focus:ring-2 focus:ring-blue-500 transition-all"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
+            
+            <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
+              {/* Filters Section (Now on Left) */}
+              <div className="flex flex-col sm:flex-row items-end gap-3 p-1.5 bg-slate-50/50 rounded-2xl border border-slate-100">
+                <div className="space-y-1.5 px-2 pb-1">
+                  <Label className="text-[10px] font-semibold text-slate-400 uppercase ml-1 block">From Date</Label>
+                  <div className="relative group/date">
+                    <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 group-hover/date:text-blue-500 transition-colors pointer-events-none" />
+                    <Input 
+                      type="date" 
+                      value={dateFilter.from}
+                      onChange={(e) => setDateFilter(prev => ({ ...prev, from: e.target.value }))}
+                      onClick={(e) => e.currentTarget.showPicker?.()}
+                      className="pl-9 h-10 w-40 bg-white border-slate-200 rounded-xl text-sm shadow-sm focus:ring-blue-500 cursor-pointer appearance-none [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1.5 px-2 pb-1">
+                  <Label className="text-[10px] font-semibold text-slate-400 uppercase ml-1 block">To Date</Label>
+                  <div className="relative group/date">
+                    <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 group-hover/date:text-blue-500 transition-colors pointer-events-none" />
+                    <Input 
+                      type="date" 
+                      value={dateFilter.to}
+                      onChange={(e) => setDateFilter(prev => ({ ...prev, to: e.target.value }))}
+                      onClick={(e) => e.currentTarget.showPicker?.()}
+                      className="pl-9 h-10 w-40 bg-white border-slate-200 rounded-xl text-sm shadow-sm focus:ring-blue-500 cursor-pointer appearance-none [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1.5 px-2 pb-1">
+                  <Label className="text-[10px] font-semibold text-slate-400 uppercase ml-1 block">Search Clients</Label>
+                  <div className="relative w-full sm:w-64">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
+                    <Input 
+                      placeholder="Name, email, or ID..." 
+                      className="pl-9 h-10 bg-white border-slate-200 shadow-sm rounded-xl text-sm focus:ring-2 focus:ring-blue-500 transition-all"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Counts Section (Now on Right) */}
+              <div className="flex flex-wrap items-center gap-3">
+                  <div className="bg-white px-5 py-3 rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center min-w-[100px]">
+                    <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest leading-none mb-2">Total</span>
+                    <span className="text-xl font-semibold text-slate-800 leading-none">{rangeSummary.total}</span>
+                  </div>
+                  <div className="bg-emerald-50 px-5 py-3 rounded-2xl border border-emerald-100 shadow-sm flex flex-col items-center min-w-[100px]">
+                    <span className="text-[10px] font-semibold text-emerald-600 uppercase tracking-widest leading-none mb-2">Renewed</span>
+                    <span className="text-xl font-semibold text-emerald-700 leading-none">{rangeSummary.renewed}</span>
+                  </div>
+                  <div className="bg-rose-50 px-5 py-3 rounded-2xl border border-rose-100 shadow-sm flex flex-col items-center min-w-[100px]">
+                    <span className="text-[10px] font-semibold text-rose-600 uppercase tracking-widest leading-none mb-2">Pending</span>
+                    <span className="text-xl font-semibold text-rose-700 leading-none">{rangeSummary.pending}</span>
+                  </div>
+              </div>
             </div>
           </div>
 
@@ -234,23 +316,23 @@ export default function CumulativeDataPage() {
                               <Calendar className="w-5 h-5 text-blue-600" />
                             </div>
                             <div>
-                               <span className="text-xl font-bold text-slate-800">{new Date(group.date).toLocaleDateString("en-GB", { day: 'numeric', month: 'long', year: 'numeric' })}</span>
+                               <span className="text-xl font-semibold text-slate-800">{new Date(group.date).toLocaleDateString("en-GB", { day: 'numeric', month: 'long', year: 'numeric' })}</span>
                                <div className="text-[10px] font-medium text-slate-500 uppercase tracking-wider">Organizational Status</div>
                             </div>
                           </div>
                           
                           <div className="flex flex-wrap items-center gap-2">
                              <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-100 shadow-sm">
-                               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Due:</span>
-                               <span className="text-base font-black text-slate-700">{group.totalDue}</span>
+                               <span className="text-[10px] font-medium text-slate-400 uppercase tracking-tighter">Total Clients:</span>
+                               <span className="text-base font-semibold text-slate-700">{group.totalDue}</span>
                              </div>
                              <div className="flex items-center gap-1.5 bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-100 shadow-sm">
-                               <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-tighter">Renewed:</span>
-                               <span className="text-base font-black text-emerald-700">{group.renewedCount}</span>
+                               <span className="text-[10px] font-medium text-emerald-600 uppercase tracking-tighter">Renewed:</span>
+                               <span className="text-base font-semibold text-emerald-700">{group.renewedCount}</span>
                              </div>
                              <div className="flex items-center gap-1.5 bg-rose-50 px-3 py-1.5 rounded-lg border border-rose-100 shadow-sm">
-                               <span className="text-[10px] font-bold text-rose-600 uppercase tracking-tighter">Pending:</span>
-                               <span className="text-base font-black text-rose-700">{group.notRenewedCount}</span>
+                               <span className="text-[10px] font-medium text-rose-600 uppercase tracking-tighter">Pending:</span>
+                               <span className="text-base font-semibold text-rose-700">{group.notRenewedCount}</span>
                              </div>
                              <ChevronDown className="w-5 h-5 text-slate-300 group-data-[state=open]:rotate-180 transition-transform duration-300 ml-1" />
                           </div>
@@ -262,20 +344,20 @@ export default function CumulativeDataPage() {
                       <Table>
                         <TableHeader className="bg-slate-50/50">
                           <TableRow className="hover:bg-transparent border-slate-100">
-                            <TableHead className="w-[50px] text-[10px] font-black uppercase text-slate-400 pl-8">#</TableHead>
-                            <TableHead className="w-[calc((100%-50px)/6)] text-[10px] font-black uppercase text-slate-400">Client Details</TableHead>
-                            <TableHead className="w-[calc((100%-50px)/6)] text-[10px] font-black uppercase text-slate-400">Due Date</TableHead>
-                            <TableHead className="w-[calc((100%-50px)/6)] text-[10px] font-black uppercase text-slate-400">Status</TableHead>
-                            <TableHead className="w-[calc((100%-50px)/6)] text-[10px] font-black uppercase text-slate-400">Ownership</TableHead>
-                            <TableHead className="w-[calc((100%-50px)/6)] text-[10px] font-black uppercase text-slate-400">Feedback</TableHead>
-                            <TableHead className="w-[calc((100%-50px)/6)] text-[10px] font-black uppercase text-slate-400 pr-8">Notes (Followup / Specs / Issues)</TableHead>
+                            <TableHead className="w-[50px] text-[10px] font-medium uppercase text-slate-400 pl-8">#</TableHead>
+                            <TableHead className="w-[calc((100%-50px)/6)] text-[10px] font-medium uppercase text-slate-400">Client Details</TableHead>
+                            <TableHead className="w-[calc((100%-50px)/6)] text-[10px] font-medium uppercase text-slate-400">Renewal Cycle Dates</TableHead>
+                            <TableHead className="w-[calc((100%-50px)/6)] text-[10px] font-medium uppercase text-slate-400">Status</TableHead>
+                            <TableHead className="w-[calc((100%-50px)/6)] text-[10px] font-medium uppercase text-slate-400">Ownership</TableHead>
+                            <TableHead className="w-[calc((100%-50px)/6)] text-[10px] font-medium uppercase text-slate-400">Feedback</TableHead>
+                            <TableHead className="w-[calc((100%-50px)/6)] text-[10px] font-medium uppercase text-slate-400 pr-8">Notes (Followup / Specs / Issues)</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {group.clients.map((client, cIdx) => (
                             <TableRow key={`${client.lead_id}-${cIdx}`} className="group/row border-slate-50 hover:bg-slate-50/20 transition-colors">
                               <TableCell className="w-[50px] pl-8 py-5">
-                                <span className="text-xs font-bold text-slate-400">{cIdx + 1}</span>
+                                <span className="text-xs font-semibold text-slate-400">{cIdx + 1}</span>
                               </TableCell>
                               <TableCell className="w-[calc((100%-50px)/6)] py-5">
                                 <div className="space-y-1">
@@ -283,7 +365,7 @@ export default function CumulativeDataPage() {
                                     href={`/leads/${client.lead_id}`} 
                                     target="_blank" 
                                     rel="noopener noreferrer"
-                                    className="text-sm font-bold text-blue-600 hover:text-blue-800 hover:underline leading-tight"
+                                    className="text-sm font-semibold text-blue-600 hover:text-blue-800 hover:underline leading-tight"
                                   >
                                     {client.name}
                                   </a>
@@ -294,17 +376,33 @@ export default function CumulativeDataPage() {
                                 </div>
                               </TableCell>
                               <TableCell className="w-[calc((100%-50px)/6)]">
-                                <div className="text-sm font-bold text-slate-700">
-                                  {new Date(client.dueDate).toLocaleDateString("en-GB")}
+                                <div className="space-y-1.5">
+                                  <div className="flex flex-col">
+                                    <span className="text-[9px] font-medium text-slate-400 uppercase tracking-tighter">Scheduled Due</span>
+                                    <span className="text-sm font-medium text-slate-700 leading-none">{new Date(client.dueDate).toLocaleDateString("en-GB")}</span>
+                                  </div>
+                                  {client.paidDate && (
+                                    <div className="flex flex-col">
+                                      <span className="text-[9px] font-medium text-emerald-500 uppercase tracking-tighter">Actual Renewal</span>
+                                      <span className={`text-sm font-medium leading-none ${client.paidDate !== client.dueDate ? 'text-amber-600' : 'text-emerald-700'}`}>
+                                        {new Date(client.paidDate).toLocaleDateString("en-GB")}
+                                      </span>
+                                    </div>
+                                  )}
+                                  {!client.paidDate && (
+                                    <div className="flex flex-col">
+                                      <span className="text-[9px] font-medium text-rose-400 uppercase tracking-tighter italic">Not Renewed Yet</span>
+                                    </div>
+                                  )}
                                 </div>
                               </TableCell>
                               <TableCell className="w-[calc((100%-50px)/6)]">
                                 {client.isRenewed ? (
-                                  <Badge className="bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border-emerald-100 text-[9px] font-black tracking-widest px-2 py-0.5 shadow-sm">
+                                  <Badge className="bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border-emerald-100 text-[9px] font-semibold tracking-widest px-2 py-0.5 shadow-sm">
                                     RENEWED
                                   </Badge>
                                 ) : (
-                                  <Badge variant="outline" className="text-rose-600 border-rose-100 bg-rose-50/30 text-[9px] font-black tracking-widest px-2 py-0.5 shadow-sm">
+                                  <Badge variant="outline" className="text-rose-600 border-rose-100 bg-rose-50/30 text-[9px] font-semibold tracking-widest px-2 py-0.5 shadow-sm">
                                     PENDING
                                   </Badge>
                                 )}
@@ -312,12 +410,12 @@ export default function CumulativeDataPage() {
                               <TableCell className="w-[calc((100%-50px)/6)]">
                                 <div className="space-y-1.5">
                                   <div className="flex flex-col">
-                                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Account Manager</span>
-                                    <span className="text-xs font-bold text-slate-800 leading-none">{client.assignedTo}</span>
+                                    <span className="text-[9px] font-semibold text-slate-400 uppercase tracking-tighter">Account Manager</span>
+                                    <span className="text-xs font-medium text-slate-800 leading-none">{client.assignedTo}</span>
                                   </div>
                                   <div className="flex flex-col">
-                                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Team Leader</span>
-                                    <span className="text-xs font-bold text-blue-700/80 leading-none">{client.assignedTL}</span>
+                                    <span className="text-[9px] font-semibold text-slate-400 uppercase tracking-tighter">Team Leader</span>
+                                    <span className="text-xs font-medium text-blue-700/80 leading-none">{client.assignedTL}</span>
                                   </div>
                                 </div>
                               </TableCell>
@@ -329,12 +427,12 @@ export default function CumulativeDataPage() {
                                         <Star key={i} className={`w-3 h-3 ${i < client.feedback!.rating ? "fill-yellow-400 text-yellow-400" : "text-slate-200"}`} />
                                       ))}
                                     </div>
-                                    <span className={`text-[10px] font-bold uppercase tracking-wide ${client.feedback.emotion === 'happy' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                    <span className={`text-[10px] font-semibold uppercase tracking-wide ${client.feedback.emotion === 'happy' ? 'text-emerald-600' : 'text-rose-600'}`}>
                                       {client.feedback.emotion}
                                     </span>
                                   </div>
                                 ) : (
-                                  <span className="text-[10px] font-bold text-slate-300 uppercase italic">No Feedback</span>
+                                  <span className="text-[10px] font-semibold text-slate-300 uppercase italic">No Feedback</span>
                                 )}
                               </TableCell>
                               <TableCell className="w-[calc((100%-50px)/6)] pr-8">
@@ -349,7 +447,7 @@ export default function CumulativeDataPage() {
                                       setEditingClient(client);
                                       setTempNote(client.notes);
                                     }}
-                                    className="h-8 px-2.5 text-[10px] font-black uppercase tracking-wider text-blue-600 border-blue-100 hover:bg-blue-600 hover:text-white transition-all shadow-sm shrink-0"
+                                    className="h-8 px-2.5 text-[10px] font-semibold uppercase tracking-wider text-blue-600 border-blue-100 hover:bg-blue-600 hover:text-white transition-all shadow-sm shrink-0"
                                   >
                                     <Edit2 className="w-3 h-3 mr-1.5" /> Edit
                                   </Button>
@@ -371,11 +469,11 @@ export default function CumulativeDataPage() {
         <Dialog open={!!editingClient} onOpenChange={(open) => !open && setEditingClient(null)}>
           <DialogContent className="sm:max-w-md bg-white rounded-3xl">
             <DialogHeader>
-              <DialogTitle className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-slate-500">Client Specific Notes</DialogTitle>
+              <DialogTitle className="text-2xl font-semibold bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-slate-500">Client Specific Notes</DialogTitle>
               <CardDescription>Followup calls, client specifications or issues for {editingClient?.name}</CardDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
-              <Label className="font-bold text-slate-700">Detailed Record</Label>
+              <Label className="font-semibold text-slate-700">Detailed Record</Label>
               <Textarea 
                 value={tempNote} 
                 onChange={(e) => setTempNote(e.target.value)}
@@ -384,8 +482,8 @@ export default function CumulativeDataPage() {
               />
             </div>
             <div className="flex justify-end gap-3 mt-4">
-              <Button variant="outline" onClick={() => setEditingClient(null)} className="rounded-xl font-bold border-slate-100">Discard</Button>
-              <Button onClick={handleUpdateNote} className="bg-blue-600 hover:bg-blue-700 rounded-xl font-bold px-8 shadow-md">Commit Change</Button>
+              <Button variant="outline" onClick={() => setEditingClient(null)} className="rounded-xl font-semibold border-slate-100">Discard</Button>
+              <Button onClick={handleUpdateNote} className="bg-blue-600 hover:bg-blue-700 rounded-xl font-semibold px-8 shadow-md">Commit Change</Button>
             </div>
           </DialogContent>
         </Dialog>
