@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { supabase } from "@/utils/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, RefreshCw, ExternalLink, ArrowLeft, Star, Share2, Mail, Phone, MapPin, Plus, ChevronDown, MoreHorizontal, Send, FileText, CheckCircle2, Bell, Clock, Trash2 } from "lucide-react";
+import { Loader2, RefreshCw, ExternalLink, ArrowLeft, Star, Share2, Mail, Phone, MapPin, Plus, ChevronDown, MoreHorizontal, Send, FileText, CheckCircle2, Bell, Clock, Trash2, Flame } from "lucide-react";
 import { useAuth } from "@/components/providers/auth-provider";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
@@ -19,6 +19,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import dayjs from "dayjs";
 
 interface Lead {
   id: string;
@@ -260,6 +261,23 @@ export default function LeadProfilePage() {
     // Remove stars and common emoji characters usually used as tags
     return name.replace(/[⭐*🌟✨]/g, '').trim();
   };
+
+  // —— Hot Lead Recognition ——
+  const isHotLead = useCallback(() => {
+    if (!lead || !lead.source) return false;
+    const hotSources = (() => {
+      if (typeof window !== 'undefined') {
+        const saved = localStorage.getItem('hotSources');
+        return saved ? JSON.parse(saved) : [];
+      }
+      return [];
+    })();
+
+    if (!hotSources.includes(lead.source)) return false;
+    const leadDate = new Date(lead.created_at);
+    const ageInDays = Math.floor((new Date().getTime() - leadDate.getTime()) / (1000 * 3600 * 24));
+    return ageInDays >= 0 && ageInDays <= 3;
+  }, [lead]);
 
   const upcomingRenewalDate = useMemo(() => {
     if (!saleHistory.length) return null;
@@ -1282,7 +1300,12 @@ ApplyWizz Team`
                 <div className="flex justify-between items-start">
                   <div className="flex gap-2 items-center min-w-0">
                     <Star className="w-4 h-4 text-yellow-500 fill-yellow-500 flex-shrink-0" />
-                    <h2 className="text-xl font-semibold text-white truncate" title={lead.name}>{lead.name}</h2>
+                    <h2 className="text-xl font-semibold text-white truncate flex items-center gap-2" title={lead.name}>
+                      {lead.name}
+                      {lead.status === "Assigned" && isHotLead() && (
+                        <Flame className="w-5 h-5 text-orange-500 fill-orange-500 animate-bounce" />
+                      )}
+                    </h2>
                   </div>
                   <Share2 className="w-4 h-4 text-white/70 cursor-pointer hover:text-white flex-shrink-0" />
                 </div>

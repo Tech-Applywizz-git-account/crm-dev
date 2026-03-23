@@ -7,12 +7,23 @@
 
 # next.js
 /.next/
+/tmp/next/
 /out/
 
 # production
 /build
 
-
+# temp files
+check_mardhavan.js
+tmp_check_columns.js
+tmp_check_data.js
+tmp_check_data.ts
+tmp_check_emails.js
+tmp_check_leads_columns.js
+tmp_check_names.js
+tmp_check_profiles_columns.js
+tmp_check_profiles.js
+tmp_check_stages.js
 # debug
 npm-debug.log*
 yarn-debug.log*
@@ -30,3 +41,4 @@ yarn-error.log*
 next-env.d.ts
 
 certificates
+database

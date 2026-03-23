@@ -145,8 +145,8 @@ export default function FinanceAssociatesPage() {
       .not("application_sale_value", "is", null); // Ensures application_sale_value is not null
 
 
-    // Only apply TL filters if not Super Admin
-    if (user.role !== "Super Admin" && user.role !== "Finance") {
+    // Only apply TL filters if not Super Admin or Finance
+    if (!user.roles.includes("Super Admin") && !user.roles.includes("Finance")) {
       const { name, email } = user;
       salesQuery = salesQuery
         .eq("associates_tl_email", email)

@@ -4093,7 +4093,7 @@ export default function TechnicalTeamPage() {
       "Technical Head",
       "Technical Associate",
     ] as const;
-    if (!user || !allowed.includes(user.role as any)) {
+    if (!user || !allowed.some(role => user.roles.includes(role as any))) {
       router.push("/unauthorized");
       return;
     }
