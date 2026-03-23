@@ -40,11 +40,17 @@ export async function POST(req: Request) {
     // ── Helper: apply user-specific filters to a leads query ─────────
     const applyLeadFilters = (q: any) => {
       let qry = q.eq("status", "Assigned");
+      const normalizedRoles = profileRoles.map((r: string) => r.toLowerCase().trim());
 
-      if (
-        profileRoles.includes("Sales Associate") ||
-        profileRoles.includes("Resume Associate-Sales Associate")
-      ) {
+      // Define who only sees their own leads
+      const isSalesAssociate = normalizedRoles.some(r => r.includes("sales associate") || r.includes("resume associate"));
+      
+      // Define who sees everything
+      const hasElevatedPrivilege = normalizedRoles.some(r => 
+        ["admin", "super admin", "sales head", "marketing", "resume head", "accounts"].includes(r)
+      );
+
+      if (isSalesAssociate && !hasElevatedPrivilege) {
         qry = qry.eq("assigned_to", profile.full_name);
       }
 
@@ -52,18 +58,7 @@ export async function POST(req: Request) {
         qry = qry.eq("source", sourceFilter);
       }
 
-      if (
-        ownerFilter !== "all" &&
-        profileRoles.some((role: string) =>
-          [
-            "Admin",
-            "Super Admin",
-            "Sales Head",
-            "Marketing",
-            "Resume Head-Sales Associate",
-          ].includes(role)
-        )
-      ) {
+      if (ownerFilter !== "all" && hasElevatedPrivilege) {
         qry = qry.eq("assigned_to", ownerFilter);
       }
 

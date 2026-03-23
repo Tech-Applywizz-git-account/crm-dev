@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { User, DollarSign, TrendingUp, TrendingDown, Pause } from "lucide-react";
+import { User, DollarSign, TrendingUp, TrendingDown, Pause, Star } from "lucide-react";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
@@ -57,6 +57,11 @@ interface SalesClosure {
   oldest_sale_done_at?: string; // 🆕
   application_sale_value: number;
   associates_tl_email?: string;
+  feedback?: {
+    isHappy: boolean;
+    rating: number;
+    notes: string;
+  };
 }
 
 
@@ -194,6 +199,7 @@ export default function FinancePage() {
 
   const [searchTerm, setSearchTerm] = useState("");
   const [followUpFilter, setFollowUpFilter] = useState<"All dates" | "Today" | "Upcoming (7 Days)">("Today");
+  const [emotionFilter, setEmotionFilter] = useState<"All" | "Happy" | "Unhappy">("All");
   const [showCloseDialog, setShowCloseDialog] = useState(false);
   const [closingNote, setClosingNote] = useState("");
 
@@ -325,6 +331,7 @@ export default function FinancePage() {
   };
 
   async function fetchSalesData() {
+    // 1. Fetch sales closure records
     const { data: rows, error } = await supabase
       .from("sales_closure")
       .select("*")
@@ -335,7 +342,28 @@ export default function FinancePage() {
       return;
     }
 
-    setAllSales(rows);
+    // 2. Fetch feedback for all lead IDs
+    const leadIdsAll = rows.map(r => r.lead_id);
+    const { data: feedbackRows, error: fbFetchErr } = await supabase
+      .from("client_feedback")
+      .select("lead_id, client_emotion, rating, notes")
+      .in("lead_id", leadIdsAll)
+      .order("id", { ascending: false });
+
+    const latestFbMap = new Map();
+    if (!fbFetchErr && feedbackRows) {
+      for (const fb of feedbackRows) {
+        if (!latestFbMap.has(fb.lead_id)) {
+          latestFbMap.set(fb.lead_id, {
+            isHappy: fb.client_emotion === "happy",
+            rating: parseInt(String(fb.rating || "0"), 10),
+            notes: fb.notes || "",
+          });
+        }
+      }
+    }
+
+    setAllSales(rows.map(r => ({ ...r, feedback: latestFbMap.get(r.lead_id) })));
     const onboardedRows = rows.filter((r) => r.onboarded_date);
 
     const latestMap = new Map<string, SalesClosure>();
@@ -429,10 +457,10 @@ export default function FinancePage() {
     );
 
     // Main table → only show paid
-    setSales(paidApplications);
+    setSales(paidApplications.map(r => ({ ...r, feedback: latestFbMap.get(r.lead_id) })));
 
     // Store unpaid for the dialog box
-    setUnpaidApplications(unpaidApplications);
+    setUnpaidApplications(unpaidApplications.map(r => ({ ...r, feedback: latestFbMap.get(r.lead_id) })));
   }
 
   const [searchStore, setSearchStore] = useState("");
@@ -578,6 +606,8 @@ export default function FinancePage() {
         const matchesStatus =
           statusFilter === "All" || sale.finance_status === statusFilter;
 
+        const emotionMatch = emotionFilter === "All" || (sale.feedback && (emotionFilter === "Happy" ? sale.feedback.isHappy : !sale.feedback.isHappy));
+
         if (followUpFilter === "Today") {
           if (!sale.onboarded_date || !sale.subscription_cycle) return false;
 
@@ -593,7 +623,7 @@ export default function FinancePage() {
 
           const isDueTodayOrOverdue = due.getTime() <= today.getTime();
 
-          return isDueTodayOrOverdue && matchesSearch && matchesStatus;
+          return isDueTodayOrOverdue && matchesSearch && matchesStatus && emotionMatch;
         }
 
         if (followUpFilter === "Upcoming (7 Days)") {
@@ -614,10 +644,10 @@ export default function FinancePage() {
           // Within next 7 days and NOT overdue
           const isUpcoming = due.getTime() > today.getTime() && due.getTime() <= sevenDaysFromNow.getTime();
 
-          return isUpcoming && matchesSearch && matchesStatus;
+          return isUpcoming && matchesSearch && matchesStatus && emotionMatch;
         }
 
-        return matchesSearch && matchesStatus;
+        return matchesSearch && matchesStatus && emotionMatch;
       })
       .sort((a, b) => {
         const dateA = new Date(a.onboarded_date || a.closed_at || "");
@@ -817,10 +847,32 @@ export default function FinancePage() {
         return "bg-yellow-100 text-yellow-800";
       case "Got Placed":
         return "bg-blue-100 text-blue-800";
-      default:
-        return "bg-gray-100 text-gray-800";
     }
   };
+
+  const getRatingLabel = (rating: number) => {
+    switch (rating) {
+      case 1: return <span className="text-red-600 font-medium">Very Poor</span>;
+      case 2: return <span className="text-orange-600 font-medium">Poor</span>;
+      case 3: return <span className="text-yellow-600 font-medium">Average</span>;
+      case 4: return <span className="text-green-600 font-medium">Good</span>;
+      case 5: return <span className="text-emerald-600 font-medium">Excellent</span>;
+      default: return null;
+    }
+  };
+
+  function renderStars(rating: number, showLabel: boolean = false) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="flex">
+          {Array.from({ length: 5 }, (_, i) => (
+            <Star key={i} className={`h-4 w-4 ${i < rating ? "fill-current text-yellow-400" : "text-gray-300"}`} />
+          ))}
+        </span>
+        {showLabel && getRatingLabel(rating)}
+      </div>
+    );
+  }
 
 
   const handleRefresh = async () => {
@@ -1323,6 +1375,17 @@ export default function FinancePage() {
                 </SelectContent>
               </Select>
 
+              <Select value={emotionFilter} onValueChange={(v) => setEmotionFilter(v as any)}>
+                <SelectTrigger className="w-32">
+                  <SelectValue placeholder="Feedback" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="All">All Feedback</SelectItem>
+                  <SelectItem value="Happy">Happy</SelectItem>
+                  <SelectItem value="Unhappy">Unhappy</SelectItem>
+                </SelectContent>
+              </Select>
+
               {activeTabView !== "main" ? (
                 <Button
                   className="bg-gray-700 hover:bg-gray-600 text-white"
@@ -1338,17 +1401,23 @@ export default function FinancePage() {
                   >
                     Not Onboarded Clients
                   </Button>
-                  <Button
+                  {/* <Button
                     className="bg-blue-600 hover:bg-blue-700 text-white gap-2"
                     onClick={() => setActiveTabView("renewals")}
                   >
                     <RefreshCw className="w-4 h-4" /> Renewal Clients
-                  </Button>
+                  </Button> */}
                   <Button
                     className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2"
                     onClick={() => setActiveTabView("email_logs")}
                   >
                     <Mail className="w-4 h-4" /> Email History
+                  </Button>
+                  <Button
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2"
+                    onClick={() => window.open('/finance/cumulative-data', '_blank')}
+                  >
+                    <Star className="w-4 h-4" /> Cumulative Data
                   </Button>
 
                   <Button
@@ -1573,6 +1642,7 @@ export default function FinancePage() {
                     </TableHead>
                     {/* <TableHead>Stage</TableHead> */}
 
+                    <TableHead>Feedback</TableHead>
                     <TableHead
                       className="cursor-pointer items-center gap-1"
                       onClick={() => handleSort("oldest_sale_done_at")}
@@ -1685,6 +1755,19 @@ export default function FinancePage() {
                             {sale.oldest_sale_done_at
                               ? new Date(sale.oldest_sale_done_at).toLocaleDateString("en-GB")
                               : "-"}
+                          </TableCell>
+
+                          <TableCell>
+                            {sale.feedback ? (
+                              <div className="flex flex-col gap-1">
+                                {renderStars(sale.feedback.rating)}
+                                <span className={`text-xs font-semibold ${sale.feedback.isHappy ? "text-green-600" : "text-red-600"}`}>
+                                  {sale.feedback.isHappy ? "Happy" : "Unhappy"}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-gray-400 text-xs italic">No feedback yet</span>
+                            )}
                           </TableCell>
 
                           <TableCell className="flex items-center gap-2">
