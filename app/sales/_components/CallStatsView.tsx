@@ -15,6 +15,7 @@ interface MemberStats {
     inbound: number;
     connected: number;
     notConnected: number;
+    totalDuration: number;
     totalDurationFormatted: string;
 }
 
@@ -114,22 +115,36 @@ export default function CallStatsView({ date = new Date().toISOString().split("T
                         <table className="w-full text-sm text-left">
                             <thead className="bg-[#f8f9fb] border-b text-gray-600 font-semibold text-xs tracking-wider uppercase">
                                 <tr>
-                                    <th className="px-4 py-3 border-r border-[#e5e7eb]">Team Member</th>
+                                    <th className="px-4 py-3 border-r border-[#e5e7eb] cursor-pointer hover:bg-gray-100" onClick={() => {
+                                        const sorted = [...stats.members].sort((a, b) => b.totalDuration - a.totalDuration);
+                                        setStats({ ...stats, members: sorted });
+                                    }}>Team Member</th>
                                     <th className="px-4 py-3 border-r border-[#e5e7eb] text-center">Extension</th>
                                     <th className="px-4 py-3 border-r border-[#e5e7eb] text-center">Total Calls</th>
                                     <th className="px-4 py-3 border-r border-[#e5e7eb] text-center">Outbound</th>
                                     <th className="px-4 py-3 border-r border-[#e5e7eb] text-center">Inbound</th>
                                     <th className="px-4 py-3 border-r border-[#e5e7eb] text-center">Connected / Answered</th>
                                     <th className="px-4 py-3 border-r border-[#e5e7eb] text-center">Not Connected / Cancelled</th>
-                                    <th className="px-4 py-3 text-center">Total Duration (HH:MM:SS)</th>
+                                    <th className="px-4 py-3 text-center cursor-pointer hover:bg-gray-100" onClick={() => {
+                                        const sorted = [...stats.members].sort((a, b) => b.totalDuration - a.totalDuration);
+                                        setStats({ ...stats, members: sorted });
+                                    }}>Total Duration (HH:MM:SS)</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y text-gray-700">
-                                {stats.members.map((member, idx) => (
-                                    <tr key={idx} className="hover:bg-gray-50/50">
-                                        <td className="px-4 py-3 border-r border-[#e5e7eb] font-medium text-gray-900">
-                                            {member.name}
-                                        </td>
+                                {stats.members
+                                    .sort((a, b) => b.totalDuration - a.totalDuration)
+                                    .map((member, idx) => (
+                                        <tr key={idx} className="hover:bg-gray-50/50">
+                                            <td className="px-4 py-3 border-r border-[#e5e7eb] font-medium text-gray-900">
+                                                <a
+                                                    href={`/sales/user-call-history?extension=${member.extension}&name=${encodeURIComponent(member.name)}&email=${member.email}`}
+                                                    target="_blank"
+                                                    className="text-blue-600 hover:underline hover:text-blue-800"
+                                                >
+                                                    {member.name}
+                                                </a>
+                                            </td>
                                         <td className="px-4 py-3 border-r border-[#e5e7eb] text-center font-mono text-xs text-gray-500">
                                             {member.extension || "-"}
                                         </td>
