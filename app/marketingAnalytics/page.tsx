@@ -1027,7 +1027,7 @@ export default function MarketingAnalyticsPage() {
                                                         <div className="font-medium text-xs">{lead.assigned_to || "—"}</div>
                                                         {lead.assigned_at && (
                                                             <div className="text-muted-foreground text-[10px]">
-                                                                {dayjs(lead.assigned_at).add(5, 'hour').add(30, 'minute').format("DD-MM-YYYY HH:mm")} IST
+                                                                {dayjs(lead.assigned_at).format("DD-MM-YYYY HH:mm")} IST
                                                             </div>
                                                         )}
                                                     </TableCell>
