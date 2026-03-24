@@ -292,7 +292,7 @@ const LeadRow = React.memo(({
         </Select>
       </TableCell>
       <TableCell className="py-3 align-top text-slate-700 font-medium whitespace-nowrap text-[13px]">
-        {profileRoles.some(r => ["Admin", "Super Admin", "Sales Head", "Resume Head-Sales Associate"].includes(r)) ? (
+        {profileRoles.some(r => ["Admin", "Super Admin", "Sales Head", "Resume Head-Sales Associate", "Resume Head-Sales Associate"].includes(r)) || profileRoles.includes("Sales Head") ? (
           <Select
             value={item.assigned_to}
             onValueChange={(val) => {
@@ -583,6 +583,8 @@ export default function SalesPage() {
   };
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [activityUpdate, setActivityUpdate] = useState("");
+  const [isSavingActivity, setIsSavingActivity] = useState(false);
   const [view, setView] = useState<"leads" | "activity" | "call_stats" | "renewals" | "email_logs">("leads");
   const [showSalesDialog, setShowSalesDialog] = useState(false);
   const [salesDialogMode, setSalesDialogMode] = useState<"all" | "first">("first");
@@ -1386,9 +1388,9 @@ Team ApplyWizz`
       .select("id, business_id, name, email, phone, assigned_to, current_stage")
       .in("current_stage", ["DNP", "Conversation Done", "Target"]);
 
-    // 🔒 Filter by name if Sales Associate
+    // 🔒 Filter by name if Sales Associate or composite roles
     const userProfileRoles = getRoles(userProfile.roles);
-    if (userProfileRoles.includes("Sales Associate")) {
+    if (userProfileRoles.some(r => ["Sales Associate", "Resume Associate-Sales Associate", "Resume Head-Sales Associate"].includes(r))) {
       leadsQuery = leadsQuery.eq("assigned_to", userProfile.full_name);
     }
 
@@ -1484,6 +1486,36 @@ Team ApplyWizz`
     } catch (err: any) {
       console.error("Error updating assigned_to:", err.message);
       alert("Failed to update assignment.");
+    }
+  };
+
+  const handleSaveActivity = async () => {
+    if (!activityUpdate.trim() || !selectedLead || !userEmail) return;
+    setIsSavingActivity(true);
+
+    try {
+      const { error } = await supabase.from("call_history").insert([{
+        lead_id: selectedLead.business_id,
+        email: selectedLead.email,
+        phone: selectedLead.phone,
+        assigned_to: userProfile?.full_name || userEmail || "Unknown",
+        current_stage: selectedLead.current_stage,
+        followup_date: new Date().toISOString().split("T")[0],
+        call_started_at: new Date().toISOString(),
+        notes: activityUpdate.trim()
+      }]);
+
+      if (error) throw error;
+
+      setActivityUpdate("");
+      // Refresh the history for this lead
+      handleOpenHistory(selectedLead);
+      alert("Executive update logged successfully.");
+    } catch (err: any) {
+      console.error(err);
+      alert("Failed to save activity update: " + err.message);
+    } finally {
+      setIsSavingActivity(false);
     }
   };
 
@@ -1680,14 +1712,18 @@ Team ApplyWizz`
     const { data, error } = await supabase
       .from("profiles")
       .select("full_name, user_email")
-      .in("roles", ["Sales", "Sales Associate", "Sale Associate", "Admin", "Super Admin", "Sales Head"]);
+      .in("roles", ["Sales", "Sales Associate", "Sale Associate", "Admin", "Super Admin", "Sales Head", "Resume Associate-Sales Associate", "Resume Head-Sales Associate"]);
 
     if (error) {
       console.error("Error fetching sales users:", error);
       return [];
     }
 
-    setSalesUsers(data || []);
+    const sortedUsers = (data || []).sort((a: any, b: any) =>
+      a.full_name.localeCompare(b.full_name)
+    );
+
+    setSalesUsers(sortedUsers);
   };
 
   async function handleOnboardClientSubmit() {
@@ -1887,12 +1923,14 @@ Team ApplyWizz`
   }, [filteredLeads, sortConfig, isHotLead]);
 
   const fetchSalesClosureCount = async () => {
+    if (!userProfile) return;
+
     let q = supabase
       .from("sales_closure")
       .select("lead_id", { count: "exact", head: true });
 
-    const profileRoles = userProfile ? getRoles(userProfile.roles) : [];
-    if (profileRoles.includes("Sales Associate")) {
+    const profileRoles = getRoles(userProfile.roles);
+    if (profileRoles.some(r => ["Sales Associate", "Resume Associate-Sales Associate", "Resume Head-Sales Associate"].includes(r))) {
       q = q.eq("account_assigned_name", userProfile.full_name);
     } else if (ownerFilter !== "all" && profileRoles.some(r => ["Admin", "Super Admin", "Sales", "Marketing", "Sales Head"].includes(r))) {
       q = q.eq("account_assigned_name", ownerFilter);
@@ -1918,7 +1956,7 @@ Team ApplyWizz`
       .eq("status", "Assigned");
 
     const profileRoles = getRoles(userProfile.roles);
-    if (profileRoles.includes("Sales Associate")) {
+    if (profileRoles.some(r => ["Sales Associate", "Resume Associate-Sales Associate", "Resume Head-Sales Associate"].includes(r))) {
       q = q.eq("assigned_to", userProfile.full_name);
     } else if (ownerFilter !== "all" && profileRoles.some(r => ["Admin", "Super Admin", "Sales", "Marketing", "Sales Head"].includes(r))) {
       q = q.eq("assigned_to", ownerFilter);
@@ -2029,7 +2067,7 @@ Team ApplyWizz`
                   <ListOrdered className="w-4 h-4 text-gray-400" /> <span className="hidden lg:inline">Activity View</span>
                 </Button>
 
-                {["Admin", "Super Admin", "Sales Head"].includes(userProfile?.roles || "") && (
+                {["Admin", "Super Admin", "Sales Head", "Resume Head-Sales Associate"].includes(userProfile?.roles || "") && (
                   <Button variant="outline" size="sm" onClick={() => setView("call_stats")} className="h-8 gap-2 border-gray-300 font-normal bg-white" suppressHydrationWarning>
                     <BarChart className="w-4 h-4 text-gray-400" /> <span className="hidden lg:inline">View Call Stats</span>
                   </Button>
@@ -2446,7 +2484,51 @@ Team ApplyWizz`
               Complete history of interactions from both Sales and Finance teams.
             </DialogDescription>
           </DialogHeader>
-          <div className="mt-4 max-h-[60vh] overflow-y-auto space-y-4 pr-2">
+
+          {/* New Strategic Update Section - Role Restricted */}
+          { (userProfile?.roles?.split(",").map((r: string) => r.trim()) || []).some((r: string) => [
+            "Admin",
+            "Super Admin",
+            "Sales",
+            "Sales Head",
+            "Sales Associate",
+            "Resume Associate-Sales Associate",
+            "Resume Head-Sales Associate"
+          ].includes(r)) && (
+            <div className="mt-4 p-4 border rounded-xl bg-gradient-to-br from-indigo-50/50 to-white shadow-sm border-indigo-100">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center text-[10px] font-bold text-white uppercase shadow-sm">
+                  {userProfile?.full_name?.charAt(0) || "U"}
+                </div>
+                <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Log Strategic Interaction</span>
+              </div>
+              <div className="space-y-3">
+                <Textarea
+                  rows={3}
+                  placeholder="Log recent conversation details, client sentiment, or strategic updates here..."
+                  className="text-xs font-medium border-slate-200 focus:ring-indigo-500 rounded-lg shadow-inner bg-white/80"
+                  value={activityUpdate}
+                  onChange={(e) => setActivityUpdate(e.target.value)}
+                />
+                <div className="flex justify-between items-center">
+                  <span className="text-[9px] text-slate-400 font-bold uppercase tracking-tight tabular-nums">
+                    {activityUpdate.length} chars
+                  </span>
+                  <Button
+                    size="sm"
+                    disabled={!activityUpdate.trim() || isSavingActivity}
+                    className="h-8 bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 rounded-md shadow-md active:scale-95 transition-all"
+                    onClick={handleSaveActivity}
+                  >
+                    {isSavingActivity ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-2" /> : <Send className="w-3.5 h-3.5 mr-2" />}
+                    Save Update
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-6 max-h-[50vh] overflow-y-auto space-y-4 pr-2">
             {isChecking ? (
               <div className="flex justify-center p-8"><Loader2 className="animate-spin h-8 w-8 text-blue-500" /></div>
             ) : selectedLead?.call_history && selectedLead.call_history.length > 0 ? (
