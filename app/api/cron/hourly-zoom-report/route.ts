@@ -98,6 +98,16 @@ export async function GET(req: NextRequest) {
 
         const { searchParams } = new URL(req.url);
         const force = searchParams.get("force") === "true";
+        const requesterEmail = searchParams.get("email")?.toLowerCase();
+
+        // 1. Authorization Workflow Check
+        // Manual force triggers only work for dinesh@applywizz.com
+        if (force && requesterEmail !== "dinesh@applywizz.com") {
+            return NextResponse.json(
+                { success: false, message: "Only dinesh@applywizz.com can manually trigger this workflow." },
+                { status: 403 }
+            );
+        }
 
         /* -----------------------------------------------
            CURRENT TIME
@@ -122,14 +132,12 @@ export async function GET(req: NextRequest) {
         const isReportHour = currentHour >= 20 || currentHour < 6;
 
         if (!isReportHour && !force) {
-
             return NextResponse.json({
                 success: true,
                 message: "Outside reporting window (8 PM - 6 AM IST). Skip sending notification.",
                 currentIstHour: currentHour,
                 currentIstMinute: currentMinute
             });
-
         }
 
         /* -----------------------------------------------
@@ -167,12 +175,24 @@ export async function GET(req: NextRequest) {
         const shiftStartUtc = new Date(shiftStartIst.getTime() - (5.5 * 60 * 60 * 1000));
         const shiftFromIso = shiftStartUtc.toISOString().replace(/\.\d{3}Z$/, "Z");
 
-        const [calls, prevCalls, shiftCallsData, { data: agents }] = await Promise.all([
+        // Wrapper to safely fetch agents without breaking Promise.all
+        const fetchAgentsSafely = async () => {
+            try {
+                return await supabaseAdmin.rpc('get_sales_team_names');
+            } catch (e: any) {
+                console.error("[Zoom Hourly Cron] RPC get_sales_team_names Error:", e);
+                return { data: [], error: e };
+            }
+        };
+
+        const [calls, prevCalls, shiftCallsData, agentsResponse] = await Promise.all([
             fetchZoomCalls(fromIso, toIso, token),
             fetchZoomCalls(prevFromIso, prevToIso, token),
             fetchZoomCalls(shiftFromIso, toIso, token),
-            supabaseAdmin.rpc('get_sales_team_names')
+            fetchAgentsSafely()
         ]);
+
+        const agents = (agentsResponse as any)?.data || [];
 
         /* -----------------------------------------------
            MEMBER STATS
@@ -198,18 +218,35 @@ export async function GET(req: NextRequest) {
             });
         }
 
-        // 1. Process shift calls for cumulative total
-        shiftCallsData.forEach(log => {
+        // 1. Process shift calls for cumulative totals
+        shiftCallsData.forEach((log: any) => {
             const isOutbound = log.direction === "outbound";
             const memberName = isOutbound ? (log.caller_name || "Unknown") : (log.callee_name || "Unknown");
             const memberKey = memberName;
+            
             if (memberStats[memberKey]) {
-                memberStats[memberKey].shiftDuration += (Number(log.duration) || 0);
+                const stats = memberStats[memberKey];
+                stats.shiftDuration += (Number(log.duration) || 0);
+                
+                // Cumulative counts
+                if (!stats.shiftTotal) {
+                    stats.shiftTotal = 0;
+                    stats.shiftOutbound = 0;
+                    stats.shiftInbound = 0;
+                    stats.shiftConnected = 0;
+                }
+                
+                stats.shiftTotal++;
+                if (isOutbound) stats.shiftOutbound++; else stats.shiftInbound++;
+                
+                const result = (log.call_result || "").toLowerCase();
+                const isAnswered = result === "answered" || result === "connected";
+                if (isAnswered) stats.shiftConnected++;
             }
         });
 
         // 2. Process previous hour for delta comparison
-        prevCalls.forEach(log => {
+        prevCalls.forEach((log: any) => {
             const isOutbound = log.direction === "outbound";
             const memberName = isOutbound ? (log.caller_name || "Unknown") : (log.callee_name || "Unknown");
             
@@ -234,7 +271,7 @@ export async function GET(req: NextRequest) {
         });
 
         // 3. Process current hour
-        calls.forEach(log => {
+        calls.forEach((log: any) => {
             const isOutbound = log.direction === "outbound";
             const memberName = isOutbound ? (log.caller_name || "Unknown") : (log.callee_name || "Unknown");
             
@@ -279,9 +316,9 @@ export async function GET(req: NextRequest) {
 
             total: calls.length,
 
-            outbound: calls.filter(c => c.direction === "outbound").length,
+            outbound: calls.filter((c: any) => c.direction === "outbound").length,
 
-            inbound: calls.filter(c => c.direction === "inbound").length,
+            inbound: calls.filter((c: any) => c.direction === "inbound").length,
 
             connected: Object.values(memberStats)
                 .reduce((sum: number, m: any) => sum + m.connected, 0),
@@ -289,7 +326,7 @@ export async function GET(req: NextRequest) {
             notConnected: Object.values(memberStats)
                 .reduce((sum: number, m: any) => sum + m.notConnected, 0),
 
-            duration: calls.reduce((sum, c) =>
+            duration: calls.reduce((sum: number, c: any) =>
                 sum + (Number(c.duration) || 0), 0),
             
             shiftDuration: Object.values(memberStats)
@@ -300,31 +337,47 @@ export async function GET(req: NextRequest) {
            TEAMS MESSAGE
         ----------------------------------------------- */
 
+        // Calculate shift-wide totals for the Grand Total row
+        const shiftTotals = {
+            total: Object.values(memberStats).reduce((sum, m) => sum + (m.shiftTotal || 0), 0),
+            outbound: Object.values(memberStats).reduce((sum, m) => sum + (m.shiftOutbound || 0), 0),
+            inbound: Object.values(memberStats).reduce((sum, m) => sum + (m.shiftInbound || 0), 0),
+            connected: Object.values(memberStats).reduce((sum, m) => sum + (m.shiftConnected || 0), 0),
+            duration: totals.duration, // keeps hourly for this specific stat
+            shiftDuration: totals.shiftDuration
+        };
+
         const currentConnRate =
-            totals.total > 0
-                ? ((totals.connected / totals.total) * 100).toFixed(1)
+            shiftTotals.total > 0
+                ? ((shiftTotals.connected / shiftTotals.total) * 100).toFixed(1)
                 : "0";
 
         let rowsText = "";
         Object.values(memberStats)
-            .sort((a: any, b: any) => b.total - a.total)
+            .sort((a: any, b: any) => (b.shiftTotal || 0) - (a.shiftTotal || 0))
             .forEach((m: any) => {
-                const deltaSeconds = m.duration - m.prevDuration;
                 rowsText +=
-                    `| ${m.name.padEnd(20)} | ${m.total.toString().padStart(5)} | ${m.connected.toString().padStart(5)} | ${m.notConnected.toString().padStart(5)} | ${formatDurationHHMMSS(m.duration)} | ${formatDelta(deltaSeconds).padEnd(12)} | ${formatDurationHHMMSS(m.shiftDuration)} |\n`;
+                    `| ${m.name.padEnd(20)} | ${m.extension.toString().padStart(4)} | ${(m.shiftTotal || 0).toString().padStart(5)} | ${(m.shiftOutbound || 0).toString().padStart(4)} | ${(m.shiftInbound || 0).toString().padStart(3)} | ${(m.shiftConnected || 0).toString().padStart(5)} | ${formatDurationHHMMSS(m.duration)} | ${formatDurationHHMMSS(m.shiftDuration)} |\n`;
             });
+
+        const hourlyStartIst = new Date(startRange.getTime() + (5.5 * 60 * 60 * 1000));
+        const hourlyEndIst = new Date(endRange.getTime() + (5.5 * 60 * 60 * 1000));
+        const formatTime = (d: Date) => d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
 
         const finalDetailedReport =
             `📡 **Zoom Hourly Activity**\n` +
             `📅 **Date:** ${nowIst.toLocaleDateString("en-GB")} | 🕒 **Time:** ${nowIst.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })} IST\n\n` +
-            `| Team Member | Total | Conn | Miss | Hourly Dur | Δ vs Last Hr | Total Dur |\n` +
-            `|:----------------|:----:|:----:|:----:|:-----------|:------------|:----------|\n` +
+            `📊 **Reporting Context:**\n` +
+            `- **Hourly Dur:** Last 60 mins (${formatTime(hourlyStartIst)} - ${formatTime(hourlyEndIst)})\n` +
+            `- **Shift Totals:** Cumulative activity since **8:00 PM IST**\n\n` +
+            `| Team Member | Ext | Total | Out | In | Conn | Hourly Dur | Shift Dur |\n` +
+            `|:------------|:---:|:-----:|:---:|:--:|:----:|:-----------|:----------|\n` +
             `${rowsText}` +
-            `| **GRAND TOTAL** | **${totals.total}** | **${totals.connected}** | **${totals.notConnected}** | **${formatDurationHHMMSS(totals.duration)}** | | **${formatDurationHHMMSS(totals.shiftDuration)}** |\n\n` +
-            `✅ **Connection Rate:** ${currentConnRate}%\n` +
+            `| **GRAND TOTAL** | | **${shiftTotals.total}** | **${shiftTotals.outbound}** | **${shiftTotals.inbound}** | **${shiftTotals.connected}** | **${formatDurationHHMMSS(shiftTotals.duration)}** | **${formatDurationHHMMSS(shiftTotals.shiftDuration)}** |\n\n` +
+            `✅ **Shift Connection Rate:** ${currentConnRate}%\n` +
             `🔗 https://applywizz-crm-tool.vercel.app/sales`;
 
-        await sendTeamsNotification(finalDetailedReport);
+        const notified = await sendTeamsNotification(finalDetailedReport, true, requesterEmail || "");
 
         /* -----------------------------------------------
            RESPONSE
@@ -334,7 +387,7 @@ export async function GET(req: NextRequest) {
             success: true,
             hourSent: currentHour,
             callsProcessed: calls.length,
-            teamsNotified: true
+            teamsNotified: notified
         });
 
     }

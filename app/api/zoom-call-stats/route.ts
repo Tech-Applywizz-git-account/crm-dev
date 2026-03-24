@@ -72,27 +72,30 @@ function formatDuration(totalSeconds: number): string {
 export async function GET(request: NextRequest) {
     try {
         const { searchParams } = new URL(request.url);
-        const dateStr = searchParams.get("date") || new Date().toISOString().split("T")[0];
+        
+        // Support both old 'date' param and new range params
+        const startDate = searchParams.get("startDate") || searchParams.get("date") || new Date().toISOString().split("T")[0];
+        const endDate = searchParams.get("endDate") || searchParams.get("date") || startDate;
 
-        console.log("[Zoom Stats] Fetching stats for date:", dateStr);
+        console.log(`[Zoom Stats] Fetching stats from ${startDate} to ${endDate}`);
 
         const accessToken = await getZoomAccessToken();
 
-        // Convert the requested date (starting 8:00 PM IST) to the next day 8:00 AM IST
-        // This targets the specific "Night Shift" window for that date.
-        const fromDate = new Date(dateStr + "T20:00:00+05:30").toISOString().replace(/\.\d{3}Z$/, "Z");
+        // Convert the requested range to IST night shift bounds
+        // Starts at 8:00 PM IST of the startDate
+        const fromDate = new Date(startDate + "T20:00:00+05:30").toISOString().replace(/\.\d{3}Z$/, "Z");
 
-        // Calculate the next day for the 8:00 AM cutoff
-        const nextDay = new Date(dateStr);
-        nextDay.setDate(nextDay.getDate() + 1);
-        const nextDayStr = nextDay.toISOString().split('T')[0];
-        const toDate = new Date(nextDayStr + "T08:00:00+05:30").toISOString().replace(/\.\d{3}Z$/, "Z");
+        // Ends at 8:00 AM IST of the day AFTER the endDate
+        const nextDayOfEnd = new Date(endDate);
+        nextDayOfEnd.setDate(nextDayOfEnd.getDate() + 1);
+        const nextDayOfEndStr = nextDayOfEnd.toISOString().split('T')[0];
+        const toDate = new Date(nextDayOfEndStr + "T08:00:00+05:30").toISOString().replace(/\.\d{3}Z$/, "Z");
 
-        // Fetch call logs for the specific date using the exact IST bounds
+        // Fetch call logs for the range using exact IST bounds
         const callLogsUrl = "https://api.zoom.us/v2/phone/call_history?from=" + fromDate + "&to=" + toDate + "&page_size=300&type=all";
         const callLogs = await fetchZoomPages(callLogsUrl, "call_logs", accessToken);
 
-        console.log("[Zoom Stats] Total call logs for " + dateStr + ": " + callLogs.length);
+        console.log(`[Zoom Stats] Total call logs (range): ${callLogs.length}`);
 
         // Build stats per team member (by extension/caller)
         const memberStats = new Map<string, {
@@ -185,7 +188,8 @@ export async function GET(request: NextRequest) {
 
         return NextResponse.json({
             success: true,
-            date: dateStr,
+            startDate,
+            endDate,
             members,
             totals,
             totalLogs: callLogs.length,
