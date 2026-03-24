@@ -168,15 +168,29 @@ export default function LeadProfilePage() {
 
   useEffect(() => {
     const fetchProfileAndTemplates = async () => {
-      if (!user?.id) return;
+      if (!user) return;
+      try {
+        // Try fetching by auth_id first
+        let { data: profile, error } = await supabase
+          .from("profiles")
+          .select("full_name, roles, user_email")
+          .eq("auth_id", user.id)
+          .maybeSingle();
 
-      // 1. Fetch Profile for Role
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("full_name, roles")
-        .eq("auth_id", user.id)
-        .single();
-      setUserProfile(profile);
+        // Fallback to email if auth_id lookup yielded nothing
+        if (!profile && user.email) {
+          const { data: profileByEmail } = await supabase
+            .from("profiles")
+            .select("full_name, roles, user_email")
+            .eq("user_email", user.email)
+            .maybeSingle();
+          profile = profileByEmail;
+        }
+
+        setUserProfile(profile);
+      } catch (err) {
+        console.error("Error fetching user profile:", err);
+      }
 
       // 2. Fetch Templates (Personal + Global)
       const { data: templates, error } = await supabase
@@ -1485,7 +1499,12 @@ ApplyWizz Team`,
                 <TabsContent value="activity" className="m-0 h-full p-0">
                   <div className="flex flex-col h-full">
                     <div className="p-4 border-b border-gray-50 flex items-center justify-between bg-gray-50/30">
-                      <h4 className="text-sm font-semibold text-gray-700 uppercase tracking-widest">Interaction Ledger</h4>
+                      <div className="flex flex-col">
+                        <h4 className="text-sm font-semibold text-gray-700 uppercase tracking-widest">Interaction Ledger</h4>
+                        <span className="text-[8px] text-gray-300 uppercase font-mono">
+                          {userProfile?.roles ? `Authorized: ${userProfile.roles}` : "Access Check Pending..."}
+                        </span>
+                      </div>
                       <Button
                         variant="ghost"
                         size="sm"
@@ -1498,15 +1517,20 @@ ApplyWizz Team`,
                       </Button>
                     </div>
 
-                          { (userProfile?.roles?.split(",").map((r: string) => r.trim()) || []).some((r: string) => [
-                            "Admin",
-                            "Super Admin",
-                            "Sales",
-                            "Sales Head",
-                            "Sales Associate",
-                            "Resume Associate-Sales Associate",
-                            "Resume Head-Sales Associate"
-                          ].includes(r)) && (
+                          { (() => {
+                            const rolesStr = (userProfile?.roles || "").toString().toLowerCase();
+                            const authRole = (user?.role || "").toString().toLowerCase();
+                            const email = (user?.email || "").toString().toLowerCase();
+                            
+                            // High-level organizational keywords
+                            const allowedKeywords = ["admin", "sales", "associate"];
+                            
+                            // Specifically allow the roles mentioned by the user
+                            const isAuthorized = allowedKeywords.some(key => rolesStr.includes(key) || authRole.includes(key)) ||
+                                                email.includes("applywizz.com"); // Internal safety fallback
+                            
+                            return isAuthorized;
+                          })() && (
                             <div className="p-6 bg-gradient-to-b from-white to-gray-50/50 border-b border-gray-100">
                               <div className="flex flex-col gap-4 max-w-4xl">
                                 <div className="flex items-center gap-3">

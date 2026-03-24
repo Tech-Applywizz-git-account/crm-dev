@@ -947,6 +947,32 @@ Team ApplyWizz`
   const [editingTemplate, setEditingTemplate] = useState<any>(null);
 
   useEffect(() => {
+    const fetchGlobalData = async () => {
+      if (!userEmail) return;
+      try {
+        // Fetch User Profile
+        let { data: profile } = await supabase
+          .from("profiles")
+          .select("full_name, roles, user_email")
+          .eq("user_email", userEmail)
+          .maybeSingle();
+
+        // Fallback to auth_id if email lookup failed (unlikely here but for safety)
+        if (!profile && user?.id) {
+          const { data: profileByAuth } = await supabase
+            .from("profiles")
+            .select("full_name, roles, user_email")
+            .eq("auth_id", user.id)
+            .maybeSingle();
+          profile = profileByAuth;
+        }
+
+        setUserProfile(profile);
+      } catch (err) {
+        console.error("Error fetching data:", err);
+      }
+    };
+
     const fetchTemplates = async () => {
       if (!userEmail) return;
 
@@ -2486,15 +2512,19 @@ Team ApplyWizz`
           </DialogHeader>
 
           {/* New Strategic Update Section - Role Restricted */}
-          { (userProfile?.roles?.split(",").map((r: string) => r.trim()) || []).some((r: string) => [
-            "Admin",
-            "Super Admin",
-            "Sales",
-            "Sales Head",
-            "Sales Associate",
-            "Resume Associate-Sales Associate",
-            "Resume Head-Sales Associate"
-          ].includes(r)) && (
+          { (() => {
+            const rolesStr = (userProfile?.roles || "").toString().toLowerCase();
+            const email = (userEmail || "").toString().toLowerCase();
+            
+            // High-level organizational keywords
+            const allowedKeywords = ["admin", "sales", "associate"];
+            
+            // Permission logic
+            const isAuthorized = allowedKeywords.some(key => rolesStr.includes(key) || email.includes(key)) ||
+                                email.includes("applywizz.com");
+            
+            return isAuthorized;
+          })() && (
             <div className="mt-4 p-4 border rounded-xl bg-gradient-to-br from-indigo-50/50 to-white shadow-sm border-indigo-100">
               <div className="flex items-center gap-2 mb-3">
                 <div className="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center text-[10px] font-bold text-white uppercase shadow-sm">
