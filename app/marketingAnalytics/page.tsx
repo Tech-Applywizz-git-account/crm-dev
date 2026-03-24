@@ -37,7 +37,10 @@ import {
     RefreshCw,
     TrendingUp,
     UserPlus,
-    Flame
+    Flame,
+    Trash2,
+    Trash,
+    AlertTriangle
 } from "lucide-react";
 
 dayjs.extend(isBetween);
@@ -84,6 +87,8 @@ export default function MarketingAnalyticsPage() {
         salesDone: number;
         revenue: number;
     }>>({});
+    const [deleteLeadsDialogOpen, setDeleteLeadsDialogOpen] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
 
     // Pagination state
     const [currentPage, setCurrentPage] = useState(1);
@@ -591,6 +596,34 @@ export default function MarketingAnalyticsPage() {
         }
     };
 
+    const handleBulkDelete = async () => {
+        if (selectedLeads.length === 0) return;
+        
+        setIsDeleting(true);
+        try {
+            const { error } = await supabase
+                .from("leads")
+                .delete()
+                .in("id", selectedLeads);
+
+            if (error) throw error;
+
+            // Update local state
+            setLeads(prev => prev.filter(lead => !selectedLeads.includes(lead.id)));
+            setTotalLeadsCount(prev => prev - selectedLeads.length);
+            setSelectedLeads([]);
+            setDeleteLeadsDialogOpen(false);
+            
+            // Re-fetch to update all stats/charts
+            fetchLeads(currentPage);
+        } catch (err) {
+            console.error("Bulk delete error:", err);
+            alert("Failed to delete leads. Please try again.");
+        } finally {
+            setIsDeleting(false);
+        }
+    };
+
 
     const getProbabilityScoreBadge = (extraData: any) => {
         const score = extraData?.probability_score ?? extraData?.Form2?.probability_score ?? extraData?.Form1?.probability_score;
@@ -827,6 +860,14 @@ export default function MarketingAnalyticsPage() {
                                         onClick={handleBulkUnassign}
                                     >
                                         <XCircle className="w-4 h-4 mr-2" /> Unassign
+                                    </Button>
+                                    <Button
+                                        variant="destructive"
+                                        size="sm"
+                                        className="bg-red-600 hover:bg-red-700"
+                                        onClick={() => setDeleteLeadsDialogOpen(true)}
+                                    >
+                                        <Trash2 className="w-4 h-4 mr-2" /> Delete ({selectedLeads.length})
                                     </Button>
                                 </div>
                             )}
@@ -1197,6 +1238,56 @@ export default function MarketingAnalyticsPage() {
                             </div>
                             <DialogFooter>
                                 <Button onClick={() => setShowHotSourcesDialog(false)} className="w-full">Done</Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
+
+                    {/* Delete Confirmation Dialog */}
+                    <Dialog open={deleteLeadsDialogOpen} onOpenChange={setDeleteLeadsDialogOpen}>
+                        <DialogContent className="sm:max-w-[450px]">
+                            <DialogHeader>
+                                <DialogTitle className="flex items-center gap-2 text-red-600">
+                                    <AlertTriangle className="w-5 h-5" />
+                                    Confirm Permanent Deletion
+                                </DialogTitle>
+                                <DialogDescription className="text-base pt-2">
+                                    Are you sure you want to delete <span className="font-bold text-slate-900">{selectedLeads.length} selected leads</span>?
+                                </DialogDescription>
+                            </DialogHeader>
+                            
+                            <div className="bg-red-50 p-4 rounded-lg border border-red-100 flex gap-3 my-2">
+                                <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+                                <div className="space-y-1">
+                                    <p className="text-sm font-bold text-red-700">CAUTION: DATA RECOVERY NOT POSSIBLE</p>
+                                    <p className="text-xs text-red-600 leading-relaxed">
+                                        These leads will be permanently erased from our database. This action cannot be undone and these leads won't be recovered back.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <DialogFooter className="gap-2 sm:gap-0">
+                                <Button 
+                                    variant="ghost" 
+                                    onClick={() => setDeleteLeadsDialogOpen(false)}
+                                    disabled={isDeleting}
+                                >
+                                    Cancel
+                                </Button>
+                                <Button 
+                                    variant="destructive" 
+                                    className="bg-red-600 hover:bg-red-700 font-bold"
+                                    onClick={handleBulkDelete}
+                                    disabled={isDeleting}
+                                >
+                                    {isDeleting ? (
+                                        <>
+                                            <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                                            Deleting...
+                                        </>
+                                    ) : (
+                                        "Yes, Delete Permanently"
+                                    )}
+                                </Button>
                             </DialogFooter>
                         </DialogContent>
                     </Dialog>
