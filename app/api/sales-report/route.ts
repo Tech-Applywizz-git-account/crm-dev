@@ -7,7 +7,38 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
  * Fetches comprehensive sales, revenue, client details, and activity
  * for a specific salesperson identified by their email ID.
  */
+
+const ALLOWED_ORIGINS = [
+    'http://localhost:3000',
+    'http://localhost:8000',
+    'http://localhost:5173',
+];
+
+export async function OPTIONS(request: NextRequest) {
+    const origin = request.headers.get('origin');
+
+    if (origin && ALLOWED_ORIGINS.includes(origin)) {
+        return new NextResponse(null, {
+            status: 204,
+            headers: {
+                'Access-Control-Allow-Origin': origin,
+                'Access-Control-Allow-Methods': 'GET, OPTIONS',
+                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+            },
+        });
+    }
+
+    return new NextResponse(null, { status: 204 });
+}
+
 export async function GET(request: NextRequest) {
+    const origin = request.headers.get('origin');
+    const corsHeaders: Record<string, string> = {};
+
+    if (origin && ALLOWED_ORIGINS.includes(origin)) {
+        corsHeaders['Access-Control-Allow-Origin'] = origin;
+    }
+
     try {
         const { searchParams } = new URL(request.url);
         const emailInput = searchParams.get('email');
@@ -15,7 +46,10 @@ export async function GET(request: NextRequest) {
         if (!emailInput) {
             return NextResponse.json(
                 { error: 'Salesperson email is required' },
-                { status: 400 }
+                { 
+                    status: 400,
+                    headers: corsHeaders
+                }
             );
         }
 
@@ -115,13 +149,18 @@ export async function GET(request: NextRequest) {
                 clients: leads || [],
                 activity: activity || []
             }
+        }, {
+            headers: corsHeaders
         });
 
     } catch (error: any) {
         console.error('API Error in sales-report:', error);
         return NextResponse.json(
             { error: error.message || 'Internal server error' },
-            { status: 500 }
+            { 
+                status: 500,
+                headers: corsHeaders
+            }
         );
     }
 }
