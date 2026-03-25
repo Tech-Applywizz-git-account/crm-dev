@@ -20,7 +20,9 @@ export default function ProtectedRoute({
       return;
     }
 
-    if (!allowedRoles.includes(user.role)) {
+    // Check if ANY of the user's roles match allowedRoles
+    const hasAllowedRole = allowedRoles.some(role => user.roles.includes(role as any));
+    if (!hasAllowedRole) {
       router.push("/unauthorized");
     }
   }, [user]);

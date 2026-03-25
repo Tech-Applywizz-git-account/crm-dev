@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { Edit, Phone, History, Eye, Loader2, MessageSquare, RefreshCw } from "lucide-react";
+import { Edit, Phone, History, Eye, Loader2, MessageSquare, RefreshCw, Star } from "lucide-react";
 import { ZoomPhoneEmbed, ZoomPhoneEmbedHandle } from "@/components/ZoomPhoneEmbed";
 import { useRef } from "react";
 import dayjs from "dayjs";
@@ -51,6 +51,11 @@ interface SalesClosure {
   };
   oldest_closed_at?: string;
   account_assigned_name?: string;
+  feedback?: {
+    isHappy: boolean;
+    rating: number;
+    notes: string;
+  };
 }
 
 interface CallHistoryEntry {
@@ -69,6 +74,7 @@ export default function FinanceAssociatesPage() {
   const [statusFilter, setStatusFilter] = useState<FinanceStatus | "All">("All");
   const [actionSelections, setActionSelections] = useState<Record<string, string>>({});
   const [followUpFilter, setFollowUpFilter] = useState<"All" | "Today" | "Upcoming7Days">("Today");
+  const [emotionFilter, setEmotionFilter] = useState<"All" | "Happy" | "Unhappy">("All");
   const [showCloseDialog, setShowCloseDialog] = useState(false);
   const [selectedSaleId, setSelectedSaleId] = useState<string | null>(null);
   const [closingNote, setClosingNote] = useState("");
@@ -145,8 +151,8 @@ export default function FinanceAssociatesPage() {
       .not("application_sale_value", "is", null); // Ensures application_sale_value is not null
 
 
-    // Only apply TL filters if not Super Admin
-    if (user.role !== "Super Admin" && user.role !== "Finance") {
+    // Only apply TL filters if not Super Admin or Finance
+    if (!user.roles.includes("Super Admin") && !user.roles.includes("Finance")) {
       const { name, email } = user;
       salesQuery = salesQuery
         .eq("associates_tl_email", email)
@@ -158,6 +164,27 @@ export default function FinanceAssociatesPage() {
     if (salesError) {
       console.error("Failed to fetch sales data:", salesError);
       return;
+    }
+
+    // 2. Fetch feedback for all lead IDs
+    const leadIdsAll = salesData.map(r => r.lead_id);
+    const { data: feedbackRows, error: fbErr } = await supabase
+      .from("client_feedback")
+      .select("lead_id, client_emotion, rating, notes")
+      .in("lead_id", leadIdsAll)
+      .order("id", { ascending: false });
+
+    const latestFbMap = new Map();
+    if (!fbErr && feedbackRows) {
+      for (const fb of feedbackRows) {
+        if (!latestFbMap.has(fb.lead_id)) {
+          latestFbMap.set(fb.lead_id, {
+            isHappy: fb.client_emotion === "happy",
+            rating: parseInt(String(fb.rating || "0"), 10),
+            notes: fb.notes || "",
+          });
+        }
+      }
     }
 
 
@@ -214,6 +241,7 @@ export default function FinanceAssociatesPage() {
       leads: leadMap.get(sale.lead_id) || { name: "-", phone: "-" },
       associates_tl_name: sale.associates_tl_name || "-", // Ensure associates_tl_name is included
       oldest_closed_at: oldestDatesMap.get(sale.lead_id) || sale.closed_at,
+      feedback: latestFbMap.get(sale.lead_id),
     }));
 
     // ----------------------------------------------
@@ -486,6 +514,30 @@ export default function FinanceAssociatesPage() {
     return true; // ✅ success indicator
   };
 
+  const getRatingLabel = (rating: number) => {
+    switch (rating) {
+      case 1: return <span className="text-red-600 font-medium">Very Poor</span>;
+      case 2: return <span className="text-orange-600 font-medium">Poor</span>;
+      case 3: return <span className="text-yellow-600 font-medium">Average</span>;
+      case 4: return <span className="text-green-600 font-medium">Good</span>;
+      case 5: return <span className="text-emerald-600 font-medium">Excellent</span>;
+      default: return null;
+    }
+  };
+
+  function renderStars(rating: number, showLabel: boolean = false) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="flex">
+          {Array.from({ length: 5 }, (_, i) => (
+            <Star key={i} className={`h-4 w-4 ${i < rating ? "fill-current text-yellow-400" : "text-gray-300"}`} />
+          ))}
+        </span>
+        {showLabel && getRatingLabel(rating)}
+      </div>
+    );
+  }
+
 
   // const filteredSales = sales
   //   .filter((sale) => {
@@ -525,6 +577,8 @@ export default function FinanceAssociatesPage() {
     const matchesStatus =
       statusFilter === "All" || sale.finance_status === statusFilter;
 
+    const emotionMatch = emotionFilter === "All" || (sale.feedback && (emotionFilter === "Happy" ? sale.feedback.isHappy : !sale.feedback.isHappy));
+
     const onboardedDate = sale.onboarded_date ? new Date(sale.onboarded_date) : null;
     const today = new Date();
     const subscriptionCycle = sale.subscription_cycle || 0;
@@ -535,6 +589,7 @@ export default function FinanceAssociatesPage() {
       : null;
 
     const matchesFollowUp =
+      emotionMatch && (
       followUpFilter === "All" ||
       (followUpFilter === "Today" && diffInDays !== null && diffInDays >= subscriptionCycle) ||
       (followUpFilter === "Upcoming7Days" && (() => {
@@ -546,7 +601,7 @@ export default function FinanceAssociatesPage() {
         const sevenDaysLater = new Date(todayStart);
         sevenDaysLater.setDate(sevenDaysLater.getDate() + 7);
         return renewalDate >= todayStart && renewalDate <= sevenDaysLater;
-      })());
+      })()) );
 
     return matchesSearch && matchesStatus && matchesFollowUp;
   });
@@ -1052,7 +1107,16 @@ export default function FinanceAssociatesPage() {
                   <SelectItem value="Paused">Paused</SelectItem>
                   <SelectItem value="Closed">Closed</SelectItem>
                   <SelectItem value="Got Placed">Got Placed</SelectItem>
-
+                </SelectContent>
+              </Select>
+              <Select value={emotionFilter} onValueChange={(v) => setEmotionFilter(v as any)}>
+                <SelectTrigger className="w-32">
+                  <SelectValue placeholder="Feedback" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="All">All Feedback</SelectItem>
+                  <SelectItem value="Happy">Happy</SelectItem>
+                  <SelectItem value="Unhappy">Unhappy</SelectItem>
                 </SelectContent>
               </Select>
               <Button onClick={() => setShowCSVDialog(true)}>Upload CSV</Button>
@@ -1132,6 +1196,7 @@ export default function FinanceAssociatesPage() {
                   {renderSortableHeader("Subscription", "subscription_cycle")}
                   {renderSortableHeader("Status", "finance_status")}
                   {renderSortableHeader("Sale Date", "sale_date")}
+                  <TableHead>Feedback</TableHead>
                   {renderSortableHeader("Onboarded / last payment at", "onboarded_date")}
                   {renderSortableHeader("Deadline", "renewal_date")}
                   {renderSortableHeader("Renewal date", "renewal_date")}
@@ -1207,6 +1272,19 @@ export default function FinanceAssociatesPage() {
                         {sale.oldest_closed_at
                           ? new Date(sale.oldest_closed_at).toLocaleDateString("en-GB")
                           : "-"}
+                      </TableCell>
+
+                      <TableCell>
+                        {sale.feedback ? (
+                          <div className="flex flex-col gap-1">
+                            {renderStars(sale.feedback.rating)}
+                            <span className={`text-xs font-semibold ${sale.feedback.isHappy ? "text-green-600" : "text-red-600"}`}>
+                              {sale.feedback.isHappy ? "Happy" : "Unhappy"}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-gray-400 text-xs italic">No feedback yet</span>
+                        )}
                       </TableCell>
 
                       {/* <TableCell>{sale.onboarded_date ? new Date(sale.onboarded_date).toLocaleDateString("en-GB") : "-"}</TableCell> */}

@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { supabase } from '@/utils/supabase/client';
-import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { getRoles } from "@/utils/roles";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -12,14 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { EditIcon, Eye, Search, ExternalLink, Bell, User, ChevronDown, ChevronRight, ChevronLeft, ChevronUp, Star, Settings, Phone, History as HistoryIcon, Trash2, Plus, Download, Tag, Loader2, Calendar, BarChart, ListOrdered, RefreshCw, Mail, Send } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
+import { Eye, ExternalLink, ChevronDown, ChevronRight, ChevronLeft, ChevronUp, Star, Phone, History as HistoryIcon, Trash2, Plus, Download, Tag, Loader2, BarChart, ListOrdered, RefreshCw, Mail, Send, Flame } from "lucide-react";
 import { cn } from "@/lib/utils";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import dayjs from 'dayjs';
@@ -27,17 +20,31 @@ import relativeTime from 'dayjs/plugin/relativeTime';
 dayjs.extend(relativeTime);
 import isBetween from "dayjs/plugin/isBetween";
 import * as XLSX from "xlsx";
-import { useRouter } from "next/navigation";
 import { ZoomPhoneEmbedHandle } from "@/components/ZoomPhoneEmbed";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { Header } from "@/components/layout/header";
+import SalesClosureDialog from "@/app/sales/_components/SalesClosureDialog";
+import ActivityView from "@/app/sales/_components/ActivityView";
+import CallStatsView from "@/app/sales/_components/CallStatsView";
+import RenewalsView from "@/app/sales/_components/RenewalsView";
+import { EmailLogView } from "@/app/_components/EmailLogView";
+import { ZoomPhoneEmbed } from "@/components/ZoomPhoneEmbed";
 
 
 dayjs.extend(isBetween);
 
 
 type SalesStage = "Prospect" | "DNP" | "Out of TG" | "Not Interested" | "Conversation Done" | "sale done" | "Target";
+
+const ASSIGNED_HOT_LEADS_KEY = "crm_assigned_hot_leads";
+
+type AssignedHotLeadCacheRecord = {
+  id: string;
+  source?: string;
+  created_at: string;
+  hot_assigned_at: string;
+};
 
 const cleanLeadName = (name: string) => {
   if (!name) return "";
@@ -101,23 +108,6 @@ interface CallHistory {
   assigned_to?: string;
 }
 
-type PRPaidFlag = "Paid" | "Not paid";
-type PRRow = {
-  lead_id: string;
-  name: string;
-  email: string;
-  closed_at: string | null; // oldest closure date (YYYY-MM-DD or null)
-
-  resumePaid: PRPaidFlag;
-  resumeStatus: string | null;
-  resumePdf: string | null;
-
-  portfolioPaid: PRPaidFlag;
-  portfolioStatus: string | null;
-  portfolioLink: string | null;
-
-  githubPaid: PRPaidFlag; // no status/link available for github in resume_progress
-};
 interface Lead {
   id: string;
   business_id: string;
@@ -185,31 +175,50 @@ const getStageColor = (stage: SalesStage) => {
   }
 };
 
-// 🚀 Memoized Row Component to prevent full-table re-renders
 const LeadRow = React.memo(({
   item,
   idx,
   userProfile,
   handleStageUpdate,
   handlePhoneClick,
-  isRightPanelCollapsed,
-  onOpenHistory
+  onOpenHistory,
+  onOpenMail,
+  onUpdateAssignedTo,
+  salesUsers,
+  isHot,
+  isSelected,
+  onSelect,
+  serialNumber
 }: {
-  item: Lead,
-  idx: number,
-  userProfile: Profile | null,
-  handleStageUpdate: (id: string, stage: SalesStage) => void,
-  handlePhoneClick: (phone: string) => void,
-  isRightPanelCollapsed: boolean,
-  onOpenHistory: (lead: Lead) => void,
-  onOpenMail: (lead: Lead) => void
+  item: Lead;
+  idx: number;
+  userProfile: Profile | null;
+  handleStageUpdate: (id: string, stage: SalesStage) => void;
+  handlePhoneClick: (phone: string) => void;
+  onOpenHistory: (lead: Lead) => void;
+  onOpenMail: (lead: Lead) => void;
+  onUpdateAssignedTo: (id: string, name: string, email: string) => void;
+  salesUsers: { full_name: string; user_email: string }[];
+  isHot: boolean;
+  isSelected: boolean;
+  onSelect: (id: string) => void;
+  serialNumber: number;
 }) => {
+  const profileRoles = userProfile ? getRoles(userProfile.roles) : [];
   const leadScore = item.current_stage === "sale done" ? 100 : Math.max(2, 26 - (idx * 3));
 
   return (
-    <TableRow className="group hover:bg-[#f5faff] transition-colors border-b last:border-0 min-h-[56px]">
+    <TableRow className={cn("group hover:bg-[#f5faff] transition-colors border-b last:border-0 min-h-[56px]", isSelected && "bg-blue-50/50")}>
       <TableCell className="px-4 py-3 align-top">
-        <input type="checkbox" className="rounded mt-1" />
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-bold text-slate-900 w-6">{serialNumber}</span>
+          <input
+            type="checkbox"
+            className="rounded mt-1 cursor-pointer"
+            checked={isSelected}
+            onChange={() => onSelect(item.id)}
+          />
+        </div>
       </TableCell>
       <TableCell className="py-3 align-top min-w-[220px]">
         <div className="flex items-start gap-2">
@@ -218,12 +227,19 @@ const LeadRow = React.memo(({
             <div className="w-1.5 h-1.5 rounded-full bg-gray-300" />
           </div>
           <div className="flex flex-col">
-            <span
+            <div
               className="lead-name-link text-smooth hover:underline cursor-pointer text-[14px] font-semibold"
               onClick={() => window.open(`/leads/${item.business_id}`, "_blank")}
             >
-              {item.client_name}
-            </span>
+              <div className="flex items-center gap-1.5">
+                {item.client_name}
+                {isHot && (
+                  <span title="Hot Lead">
+                    <Flame className="w-4 h-4 text-orange-500 fill-orange-500 animate-pulse ml-1" />
+                  </span>
+                )}
+              </div>
+            </div>
             <div className="flex items-center gap-2 mt-1">
               <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded uppercase tracking-wider">
                 {item.business_id}
@@ -276,7 +292,26 @@ const LeadRow = React.memo(({
         </Select>
       </TableCell>
       <TableCell className="py-3 align-top text-slate-700 font-medium whitespace-nowrap text-[13px]">
-        {item.assigned_to || "—"}
+        {profileRoles.some(r => ["Admin", "Super Admin", "Sales Head", "Resume Head-Sales Associate", "Resume Head-Sales Associate"].includes(r)) || profileRoles.includes("Sales Head") ? (
+          <Select
+            value={item.assigned_to}
+            onValueChange={(val) => {
+              const u = salesUsers.find(x => x.full_name === val);
+              if (u) onUpdateAssignedTo(item.id, u.full_name, u.user_email);
+            }}
+          >
+            <SelectTrigger className="h-7 w-fit border-none shadow-none bg-transparent hover:bg-slate-100 p-1 focus:ring-0">
+              <SelectValue placeholder="Assign To" />
+            </SelectTrigger>
+            <SelectContent>
+              {salesUsers.map(u => (
+                <SelectItem key={u.user_email} value={u.full_name}>{u.full_name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          item.assigned_to || "—"
+        )}
       </TableCell>
       <TableCell className="py-3 align-top text-gray-500 whitespace-nowrap text-[11px] pt-4">
         {item.created_at ? dayjs(item.created_at).fromNow(true) : "—"}
@@ -320,21 +355,13 @@ const LeadRow = React.memo(({
           >
             <Eye className="w-3.5 h-3.5" />
           </div>
-          {userProfile?.roles === "Admin" && (
-            <div
-              title="Delete"
-              className="p-1.5 bg-red-50 text-red-600 rounded-md cursor-pointer hover:bg-red-600 hover:text-white transition-all shadow-sm"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-            </div>
-          )}
+
         </div>
       </TableCell>
     </TableRow>
   );
 });
 
-// 🚀 Memoized Table Component
 const LeadsTable = React.memo(({
   leads,
   sortConfig,
@@ -347,33 +374,64 @@ const LeadsTable = React.memo(({
   totalRecords,
   setPage,
   setPageSize,
-  isRightPanelCollapsed,
   onOpenHistory,
-  onOpenMail
+  onOpenMail,
+  onUpdateAssignedTo,
+  salesUsers,
+  isHotLead,
+  selectedLeads,
+  onSelectedLeadsChange,
 }: {
-  leads: Lead[],
-  sortConfig: { key: keyof Lead | null, direction: "asc" | "desc" },
-  handleSort: (key: keyof Lead) => void,
-  handleStageUpdate: (id: string, stage: SalesStage) => void,
-  handlePhoneClick: (phone: string) => void,
-  userProfile: Profile | null,
-  page: number,
-  pageSize: number,
-  totalRecords: number,
-  setPage: React.Dispatch<React.SetStateAction<number>>,
-  setPageSize: React.Dispatch<React.SetStateAction<number>>,
-  isRightPanelCollapsed: boolean,
-  onOpenHistory: (lead: Lead) => void,
-  onOpenMail: (lead: Lead) => void
+  leads: Lead[];
+  sortConfig: { key: keyof Lead | null; direction: "asc" | "desc" };
+  handleSort: (key: keyof Lead) => void;
+  handleStageUpdate: (id: string, stage: SalesStage) => void;
+  handlePhoneClick: (phone: string) => void;
+  userProfile: Profile | null;
+  page: number;
+  pageSize: number;
+  totalRecords: number;
+  setPage: React.Dispatch<React.SetStateAction<number>>;
+  setPageSize: React.Dispatch<React.SetStateAction<number>>;
+  onOpenHistory: (lead: Lead) => void;
+  onOpenMail: (lead: Lead) => void;
+  onUpdateAssignedTo: (id: string, name: string, email: string) => void;
+  salesUsers: { full_name: string; user_email: string }[];
+  isHotLead: (lead: Lead) => boolean;
+  selectedLeads: string[];
+  onSelectedLeadsChange: (ids: string[]) => void;
 }) => {
+  const toggleSelectAll = () => {
+    if (selectedLeads.length === leads.length && leads.length > 0) {
+      onSelectedLeadsChange([]);
+    } else {
+      onSelectedLeadsChange(leads.map(l => l.id));
+    }
+  };
+
+  const handleSelectLead = (id: string) => {
+    onSelectedLeadsChange(
+      selectedLeads.includes(id)
+        ? selectedLeads.filter(l => l !== id)
+        : [...selectedLeads, id]
+    );
+  };
   return (
     <div className="bg-white border rounded shadow-sm overflow-hidden flex flex-col min-h-[400px]">
       <div className="overflow-x-auto">
         <Table className="text-sm">
           <TableHeader className="sales-table-header">
             <TableRow className="hover:bg-transparent border-b">
-              <TableHead className="w-10 px-4 align-middle h-12">
-                <input type="checkbox" className="rounded" />
+              <TableHead className="px-4 align-middle h-12 w-20">
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] font-bold text-slate-400 w-4">#</span>
+                  <input
+                    type="checkbox"
+                    className="rounded cursor-pointer"
+                    checked={leads.length > 0 && selectedLeads.length === leads.length}
+                    onChange={toggleSelectAll}
+                  />
+                </div>
               </TableHead>
               <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider min-w-[220px] align-middle h-12">Lead Details & ID</TableHead>
               <TableHead className="font-bold text-slate-700 uppercase text-[11px] tracking-wider align-middle h-12">Source</TableHead>
@@ -410,9 +468,14 @@ const LeadsTable = React.memo(({
                   userProfile={userProfile}
                   handleStageUpdate={handleStageUpdate}
                   handlePhoneClick={handlePhoneClick}
-                  isRightPanelCollapsed={isRightPanelCollapsed}
                   onOpenHistory={onOpenHistory}
                   onOpenMail={onOpenMail}
+                  onUpdateAssignedTo={onUpdateAssignedTo}
+                  salesUsers={salesUsers}
+                  isHot={isHotLead(item)}
+                  isSelected={selectedLeads.includes(item.id)}
+                  onSelect={handleSelectLead}
+                  serialNumber={(page - 1) * pageSize + idx + 1}
                 />
               ))
             )}
@@ -445,12 +508,10 @@ const LeadsTable = React.memo(({
 // 🚀 Memoized Sidebar Component
 const RightActionPanel = React.memo(({
   isCollapsed,
-  onAddLead,
-  userProfile
+  onAddLead
 }: {
   isCollapsed: boolean,
-  onAddLead: () => void,
-  userProfile: Profile | null
+  onAddLead: () => void
 }) => {
   if (isCollapsed) return null;
   return (
@@ -500,14 +561,6 @@ const RightActionPanel = React.memo(({
   );
 });
 
-
-import SalesClosureDialog from "@/app/sales/_components/SalesClosureDialog";
-import ActivityView from "@/app/sales/_components/ActivityView";
-import CallStatsView from "@/app/sales/_components/CallStatsView";
-import RenewalsView from "@/app/sales/_components/RenewalsView";
-import { EmailLogView } from "@/app/_components/EmailLogView";
-import { ZoomPhoneEmbed } from "@/components/ZoomPhoneEmbed";
-
 export default function SalesPage() {
   const [userEmail, setUserEmail] = useState<string>("");
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -530,12 +583,146 @@ export default function SalesPage() {
   };
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [activityUpdate, setActivityUpdate] = useState("");
+  const [isSavingActivity, setIsSavingActivity] = useState(false);
   const [view, setView] = useState<"leads" | "activity" | "call_stats" | "renewals" | "email_logs">("leads");
   const [showSalesDialog, setShowSalesDialog] = useState(false);
-  const [salesDialogMode, setSalesDialogMode] = useState<"new" | "edit">("new");
+  const [salesDialogMode, setSalesDialogMode] = useState<"all" | "first">("first");
 
   // —— Email States ——
+  // —— Hot Leads States ——
+  const [hotSources, setHotSources] = useState<string[]>([]);
+  const [dbHotLeadIds, setDbHotLeadIds] = useState<string[]>([]);
+  const [hotBucketLeadCount, setHotBucketLeadCount] = useState(0);
+  const [assignedHotLeadRecords, setAssignedHotLeadRecords] = useState<AssignedHotLeadCacheRecord[]>([]);
+  const [isHydrated, setIsHydrated] = useState(false);
+
+  const isHotLead = useCallback((lead: Lead) => {
+    if (!lead?.id) return false;
+    
+    // Normalize sources for strict lookup
+    const normalizedHotSources = hotSources.map(s => String(s || "").trim().toLowerCase());
+    const leadSource = String((lead as any).source || lead.source || "").trim().toLowerCase();
+    
+    // If the source is NOT in the active 'Hot Sources' list, it is NOT hot.
+    // This allows the Marketing team to revoke 'Hot' status dynamically across tabs.
+    if (!normalizedHotSources.includes(leadSource)) return false;
+
+    // 1. Check the `is_hot` flag the server sends directly on each lead
+    if ((lead as any).is_hot === true) return true;
+
+    // 2. Check if the lead's ID appears in the dbHotLeadIds array from the server
+    const leadId = String(lead.id);
+    if (dbHotLeadIds.some(id => String(id) === leadId)) return true;
+
+    // 3. Fallback: check local assigned hot lead cache (already restricted by hotSources above)
+    if (assignedHotLeadRecords.some(r => String(r.id) === leadId)) return true;
+
+    // 4. Source + Age Fallback (Consistency with Marketing Analytics)
+    if (lead.created_at) {
+        const leadDate = dayjs(lead.created_at);
+        if (leadDate.isValid()) {
+          const ageInHours = dayjs().diff(leadDate, 'hour');
+          if (ageInHours >= 0 && ageInHours <= 72) return true;
+        }
+    }
+
+    return false;
+  }, [assignedHotLeadRecords, dbHotLeadIds, hotSources]);
+
+  const toggleHotSource = (source: string) => {
+    if (!source) return;
+    setHotSources(prev => {
+      const lowerSource = source.trim().toLowerCase();
+      const exists = prev.some(s => s.trim().toLowerCase() === lowerSource);
+      const next = exists
+        ? prev.filter(s => s.trim().toLowerCase() !== lowerSource)
+        : [...prev, source];
+
+      localStorage.setItem('hotSources', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const syncHotSources = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const saved = localStorage.getItem('hotSources');
+      if (!saved) {
+        setHotSources(prev => prev.length > 0 ? [] : prev);
+        return;
+      }
+
+      const parsed = JSON.parse(saved);
+      const next = Array.isArray(parsed) ? parsed.filter((s: any) => typeof s === 'string') : [];
+
+      setHotSources(prev => {
+        if (JSON.stringify(prev) === JSON.stringify(next)) return prev;
+        return next;
+      });
+    } catch (e) {
+      console.error("Failed to sync hot sources:", e);
+    }
+  }, []);
+
+  const syncAssignedHotLeadRecords = useCallback(() => {
+    if (typeof window === "undefined") return;
+
+    try {
+      const saved = localStorage.getItem(ASSIGNED_HOT_LEADS_KEY);
+      const parsed = saved ? JSON.parse(saved) : [];
+      const filtered: AssignedHotLeadCacheRecord[] = Array.isArray(parsed)
+        ? parsed.filter((item: any) => item && typeof item.id === "string" && typeof item.created_at === "string")
+        : [];
+
+      const activeRecords = filtered.filter((item) => {
+        const createdAt = new Date(item.created_at);
+        if (Number.isNaN(createdAt.getTime())) return false;
+        const ageInDays = Math.floor((Date.now() - createdAt.getTime()) / (1000 * 3600 * 24));
+        return ageInDays >= 0 && ageInDays <= 3;
+      });
+
+      setAssignedHotLeadRecords((prev) => {
+        if (JSON.stringify(prev) === JSON.stringify(activeRecords)) return prev;
+        return activeRecords;
+      });
+    } catch (error) {
+      console.error("Failed to sync assigned hot lead cache:", error);
+    }
+  }, []);
+
+  useEffect(() => {
+    setIsHydrated(true);
+    syncHotSources();
+    syncAssignedHotLeadRecords();
+
+    // 1. Storage event for cross-tab sync
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'hotSources' || e.key === 'crm_hot_leads_sources') {
+        syncHotSources();
+      }
+      if (e.key === ASSIGNED_HOT_LEADS_KEY) {
+        syncAssignedHotLeadRecords();
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+
+    // 2. Poll every 2 seconds as a foolproof fallback
+    const interval = setInterval(() => {
+      syncHotSources();
+      syncAssignedHotLeadRecords();
+    }, 2000);
+
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      clearInterval(interval);
+    };
+  }, [syncAssignedHotLeadRecords, syncHotSources]);
+
+  const [showHotSourcesDialog, setShowHotSourcesDialog] = useState(false);
+
   const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
+  const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
   const [selectedLeadForEmail, setSelectedLeadForEmail] = useState<Lead | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
   const [emailSubject, setEmailSubject] = useState("");
@@ -719,7 +906,7 @@ Team ApplyWizz`
     }
   };
 
-  const [salesClosedTotal, setSalesClosedTotal] = useState(0);
+  const [, setSalesClosedTotal] = useState(0);
 
   const [salesUsers, setSalesUsers] = useState<{ full_name: string; user_email: string }[]>([]);
 
@@ -730,7 +917,6 @@ Team ApplyWizz`
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
   const [followUpDialogOpen, setFollowUpDialogOpen] = useState(false);
-  const [searchTerm, setSearchTerm] = useState(""); // Committed search (after debounce)
   const [tempSearch, setTempSearch] = useState(""); // Immediate input state
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [sources, setSources] = useState<string[]>([]);
@@ -739,7 +925,6 @@ Team ApplyWizz`
   const [stageFilter, setStageFilter] = useState<string>("all");
   const [followUpData, setFollowUpData] = useState<FollowUp>({ follow_up_date: "", notes: "" });
   const [followUpSubmitted, setFollowUpSubmitted] = useState(false); // Track if follow-up was submitted
-  const [followUpsDialogOpen, setFollowUpsDialogOpen] = useState(false);
   const [followUpsData, setFollowUpsData] = useState<any[]>([]);
   const [followUpsFilter, setFollowUpsFilter] = useState<"today" | "all">("today");
   const [pendingStageUpdate, setPendingStageUpdate] = useState<{ leadId: string, stage: SalesStage } | null>(null);
@@ -747,9 +932,10 @@ Team ApplyWizz`
   const [totalAmount, setTotalAmount] = useState(0);
   const [subscriptionEndsOn, setSubscriptionEndsOn] = useState<string>("");
   const [startDate, setStartDate] = useState<string | null>(null);
+  const [endDate, setEndDate] = useState<string | null>(null);
+  const [dateFilterType, setDateFilterType] = useState<string>("last_activity");
   const [editingNote, setEditingNote] = useState(false);
   const [editedNote, setEditedNote] = useState("");
-
   const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(true);
 
 
@@ -761,6 +947,32 @@ Team ApplyWizz`
   const [editingTemplate, setEditingTemplate] = useState<any>(null);
 
   useEffect(() => {
+    const fetchGlobalData = async () => {
+      if (!userEmail) return;
+      try {
+        // Fetch User Profile
+        let { data: profile } = await supabase
+          .from("profiles")
+          .select("full_name, roles, user_email")
+          .eq("user_email", userEmail)
+          .maybeSingle();
+
+        // Fallback to auth_id if email lookup failed (unlikely here but for safety)
+        if (!profile && user?.id) {
+          const { data: profileByAuth } = await supabase
+            .from("profiles")
+            .select("full_name, roles, user_email")
+            .eq("auth_id", user.id)
+            .maybeSingle();
+          profile = profileByAuth;
+        }
+
+        setUserProfile(profile);
+      } catch (err) {
+        console.error("Error fetching data:", err);
+      }
+    };
+
     const fetchTemplates = async () => {
       if (!userEmail) return;
 
@@ -916,8 +1128,6 @@ Team ApplyWizz`
   };
 
 
-  const [endDate, setEndDate] = useState<string | null>(null);
-  const [isDateDropdownOpen, setIsDateDropdownOpen] = useState(false);
   const [onboardDialogOpen, setOnboardDialogOpen] = useState(false);
 
   // Client Info
@@ -939,15 +1149,10 @@ Team ApplyWizz`
   const [linkedinValue, setLinkedinValue] = useState("");
   const [githubValue, setGithubValue] = useState("");
 
-  const [inputSearch, setInputSearch] = useState("");
-  const [isHoveringClear, setIsHoveringClear] = useState(false);
-
   // Calculated Fields
   const [autoTotal, setAutoTotal] = useState(0);
   const [totalSale, setTotalSale] = useState(0);
   const [nextDueDate, setNextDueDate] = useState("-");
-
-  const router = useRouter();
 
 
 
@@ -994,7 +1199,7 @@ Team ApplyWizz`
   useEffect(() => {
     fetchSalesClosureCount();
     fetchStageCounts();
-  }, [userProfile, ownerFilter]);
+  }, [userProfile, ownerFilter, sourceFilter, startDate, endDate, dateFilterType]);
 
   useEffect(() => {
     const run = async () => {
@@ -1106,147 +1311,35 @@ Team ApplyWizz`
 
   const fetchLeads = async (profile: Profile) => {
     try {
-      // Count total leads FIRST (for pagination display)
-      let countQuery = supabase
-        .from("leads")
-        .select("*", { count: "exact", head: true })
-        .eq("status", "Assigned");
+      const response = await fetch("/api/sales-assigned-leads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          profile,
+          page,
+          pageSize,
+          sourceFilter,
+          ownerFilter,
+          stageFilter,
+          searchTerm: debouncedSearchTerm,
+        }),
+      });
 
-      if (profile.roles === "Sales Associate") {
-        countQuery = countQuery.eq("assigned_to", profile.full_name);
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result?.error || "Failed to fetch sales leads");
       }
 
-      if (sourceFilter !== "all") {
-        countQuery = countQuery.eq("source", sourceFilter);
-      }
-
-      if (ownerFilter !== "all" && profile.roles === "Admin") {
-        countQuery = countQuery.eq("assigned_to", ownerFilter);
-      }
-
-      if (stageFilter !== "all") {
-        countQuery = countQuery.eq("current_stage", stageFilter);
-      }
-
-      if (debouncedSearchTerm.trim()) {
-        const term = debouncedSearchTerm.trim();
-        const bidPart = term.toUpperCase().startsWith("AWL-") ? `business_id.eq.${term}` : `business_id.ilike.%${term}%`;
-        countQuery = countQuery.or(`name.ilike.%${term}%,phone.ilike.%${term}%,${bidPart},email.ilike.%${term}%,assigned_to.ilike.%${term}%`);
-      }
-
-      const { count } = await countQuery;
-      setTotalRecords(count ?? 0);
-
-      // Now fetch paginated leads
-      const from = (page - 1) * pageSize;
-      const to = from + pageSize - 1;
-
-      let query = supabase
-        .from("leads")
-        .select(`
-id, business_id, name, email, phone,
-  assigned_to, current_stage, status,
-  created_at, assigned_at, source
-    `)
-        .eq("status", "Assigned")
-        .order("assigned_at", { ascending: false })   // 👈 NEW SORT
-        .range(from, to);
-
-
-      if (profile.roles === "Sales Associate") {
-        query = query.eq("assigned_to", profile.full_name);
-      }
-
-      if (sourceFilter !== "all") {
-        query = query.eq("source", sourceFilter);
-      }
-
-      if (ownerFilter !== "all" && profile.roles === "Admin") {
-        query = query.eq("assigned_to", ownerFilter);
-      }
-
-      if (stageFilter !== "all") {
-        query = query.eq("current_stage", stageFilter);
-      }
-
-      if (debouncedSearchTerm.trim()) {
-        const term = debouncedSearchTerm.trim();
-        const bidPart = term.toUpperCase().startsWith("AWL-") ? `business_id.eq.${term}` : `business_id.ilike.%${term}%`;
-        query = query.or(`name.ilike.%${term}%,phone.ilike.%${term}%,${bidPart},email.ilike.%${term}%,assigned_to.ilike.%${term}%`);
-      }
-
-      const { data, error } = await query;
-
-      if (error) {
-        console.error("Error fetching leads:", error);
-        return;
-      }
-
-      const leadsData = (data ?? []).map((lead: any) => ({
-        id: lead.id,
-        business_id: lead.business_id,
-        client_name: lead.name,
-        email: lead.email,
-        phone: lead.phone,
-        assigned_to: lead.assigned_to,
-        current_stage: lead.current_stage,
-        call_history: [],
-        created_at: lead.created_at,
-        assigned_at: lead.assigned_at,
-        source: lead.source,
-      }));
-
-      setLeads(leadsData);
-
+      setLeads(Array.isArray(result?.leads) ? result.leads : []);
+      setDbHotLeadIds(Array.isArray(result?.hotLeadIds) ? result.hotLeadIds : []);
+      setTotalRecords(typeof result?.totalRecords === "number" ? result.totalRecords : 0);
+      setHotBucketLeadCount(typeof result?.hotBucketLeadCount === "number" ? result.hotBucketLeadCount : 0);
     } catch (err) {
-      console.error("Pagination fetch error:", err);
-    }
-  };
-
-  const searchLeadsGlobally = async (term: string) => {
-    if (!term.trim()) {
-      if (userProfile) fetchLeads(userProfile); // Reset to normal view if empty
-      return;
-    }
-    try {
-      const bidPart = term.toUpperCase().startsWith("AWL-") ? `business_id.eq.${term}` : `business_id.ilike.%${term}%`;
-      const { data, error } = await supabase
-        .from("leads")
-        .select(`
-id, business_id, name, email, phone,
-  assigned_to, assigned_to_email, current_stage,
-  status, created_at, assigned_at, source
-    `)
-        .or(`name.ilike.%${term}%,email.ilike.%${term}%,phone.ilike.%${term}%,${bidPart},assigned_to.ilike.%${term}%,source.ilike.%${term}%`)
-        .eq("status", "Assigned")
-        .order("assigned_at", { ascending: false });
-
-      if (error) {
-        console.error("Global search error:", error);
-        return;
-      }
-
-      const leadsData = (data ?? []).map((lead: any) => ({
-        id: lead.id,
-        business_id: lead.business_id,
-        client_name: lead.name,
-        email: lead.email,
-        phone: lead.phone,
-        assigned_to: lead.assigned_to,
-        assigned_to_email: lead.assigned_to_email,
-        current_stage: lead.current_stage,
-        call_history: [],
-        created_at: lead.created_at,
-        assigned_at: lead.assigned_at,
-        updated_at: lead.updated_at,
-        source: lead.source,
-      }));
-
-      setLeads(leadsData);
-      setTotalRecords(leadsData.length);
-      setPage(1);
-    } catch (err) {
-      console.error("Global search failed:", err);
+      setLeads([]);
+      setDbHotLeadIds([]);
+      setHotBucketLeadCount(0);
+      setTotalRecords(0);
+      console.error("Prioritized pagination fetch error:", err);
     }
   };
 
@@ -1258,9 +1351,7 @@ id, business_id, name, email, phone,
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
 
     searchTimeoutRef.current = setTimeout(() => {
-      setSearchTerm(val);
       setDebouncedSearchTerm(val);
-      // searchLeadsGlobally(val); // Removed as fetchLeads now handles searchTerm via useEffect
     }, 400);
   };
 
@@ -1323,8 +1414,9 @@ id, business_id, name, email, phone,
       .select("id, business_id, name, email, phone, assigned_to, current_stage")
       .in("current_stage", ["DNP", "Conversation Done", "Target"]);
 
-    // 🔒 Filter by name if not Admin
-    if (userProfile.roles === "Sales Associate") {
+    // 🔒 Filter by name if Sales Associate or composite roles
+    const userProfileRoles = getRoles(userProfile.roles);
+    if (userProfileRoles.some(r => ["Sales Associate", "Resume Associate-Sales Associate", "Resume Head-Sales Associate"].includes(r))) {
       leadsQuery = leadsQuery.eq("assigned_to", userProfile.full_name);
     }
 
@@ -1413,10 +1505,43 @@ id, business_id, name, email, phone,
       }
 
       alert(`Lead assigned to ${selectedName}`);
-      if (userProfile) await fetchLeads(userProfile);
+      if (userProfile) {
+        await fetchLeads(userProfile);
+        fetchStageCounts();
+      }
     } catch (err: any) {
       console.error("Error updating assigned_to:", err.message);
       alert("Failed to update assignment.");
+    }
+  };
+
+  const handleSaveActivity = async () => {
+    if (!activityUpdate.trim() || !selectedLead || !userEmail) return;
+    setIsSavingActivity(true);
+
+    try {
+      const { error } = await supabase.from("call_history").insert([{
+        lead_id: selectedLead.business_id,
+        email: selectedLead.email,
+        phone: selectedLead.phone,
+        assigned_to: userProfile?.full_name || userEmail || "Unknown",
+        current_stage: selectedLead.current_stage,
+        followup_date: new Date().toISOString().split("T")[0],
+        call_started_at: new Date().toISOString(),
+        notes: activityUpdate.trim()
+      }]);
+
+      if (error) throw error;
+
+      setActivityUpdate("");
+      // Refresh the history for this lead
+      handleOpenHistory(selectedLead);
+      alert("Executive update logged successfully.");
+    } catch (err: any) {
+      console.error(err);
+      alert("Failed to save activity update: " + err.message);
+    } finally {
+      setIsSavingActivity(false);
     }
   };
 
@@ -1430,15 +1555,24 @@ id, business_id, name, email, phone,
     return leads.filter((lead) => {
       const matchesStage = stageFilter === "all" || lead.current_stage === stageFilter;
       const matchesSource = sourceFilter === "all" || lead.source === sourceFilter;
+      const matchesOwner = ownerFilter === "all" || lead.assigned_to === ownerFilter;
 
       let matchesDate = true;
-      if (startIso && endIso && lead.assigned_at) {
-        matchesDate = lead.assigned_at >= startIso && lead.assigned_at <= endIso;
+      if (startIso && endIso) {
+        let dateToCompare = lead.assigned_at;
+        if (dateFilterType === "created_at") dateToCompare = lead.created_at;
+        else if (dateFilterType === "last_activity") dateToCompare = lead.updated_at || lead.assigned_at;
+
+        if (dateToCompare) {
+          matchesDate = dateToCompare >= startIso && dateToCompare <= endIso;
+        } else {
+          matchesDate = false;
+        }
       }
 
-      return matchesStage && matchesSource && matchesDate;
+      return matchesStage && matchesSource && matchesOwner && matchesDate;
     });
-  }, [leads, stageFilter, sourceFilter, startDate, endDate]);
+  }, [leads, stageFilter, sourceFilter, ownerFilter, startDate, endDate, dateFilterType]);
 
   const handleStageUpdate = useCallback(async (leadId: string, newStage: SalesStage) => {
     const lead = leads.find((l) => l.id === leadId);
@@ -1548,6 +1682,7 @@ id, business_id, name, email, phone,
     // 👇 After updating stage and call_history
     const updatedFollowUps = await fetchFollowUps();
     setFollowUpsData(updatedFollowUps);
+    fetchStageCounts(); // Refresh KPI cards
     setFollowUpSubmitted(false);      // reset for next time
 
   };
@@ -1571,7 +1706,6 @@ id, business_id, name, email, phone,
     setFollowUpDialogOpen(true);
   };
 
-  const totalLeadsCount = filteredLeads.length;
   // KPI Stats removed - redundant on this page and causing high CPU usage.
   const fetchCallHistory = async (leadId: string) => {
     const lead = leads.find((l) => l.id === leadId);
@@ -1604,14 +1738,18 @@ id, business_id, name, email, phone,
     const { data, error } = await supabase
       .from("profiles")
       .select("full_name, user_email")
-      .in("roles", ["Sales", "Sales Associate", "Sale Associate", "Admin", "Super Admin"]);
+      .in("roles", ["Sales", "Sales Associate", "Sale Associate", "Admin", "Super Admin", "Sales Head", "Resume Associate-Sales Associate", "Resume Head-Sales Associate"]);
 
     if (error) {
       console.error("Error fetching sales users:", error);
       return [];
     }
 
-    setSalesUsers(data || []);
+    const sortedUsers = (data || []).sort((a: any, b: any) =>
+      a.full_name.localeCompare(b.full_name)
+    );
+
+    setSalesUsers(sortedUsers);
   };
 
   async function handleOnboardClientSubmit() {
@@ -1772,16 +1910,20 @@ id, business_id, name, email, phone,
     d === 0 ? 0 : d === 15 ? 0.5 : d === 30 ? 1 : d === 60 ? 2 : d === 90 ? 3 : 0;
 
   // 👉 ADD THIS derived constant (place near your other derived consts)
-  const applicationSaleValue = Number(
-    (saleData.base_value * cycleMultiplier(saleData.subscription_cycle)).toFixed(2)
-  );
-
   const sortedLeads = useMemo(() => {
     const leadsToSort = [...filteredLeads];
     const { key, direction } = sortConfig;
-    if (!key) return leadsToSort;
 
     return leadsToSort.sort((a, b) => {
+      // 1. Hot Leads Priority (Always at top)
+      const aHot = isHotLead(a);
+      const bHot = isHotLead(b);
+      if (aHot && !bHot) return -1;
+      if (!aHot && bHot) return 1;
+
+      // 2. Normal Priority Sorting
+      if (!key) return 0;
+
       let aValue: any = a[key as keyof Lead];
       let bValue: any = b[key as keyof Lead];
 
@@ -1804,17 +1946,26 @@ id, business_id, name, email, phone,
         ? (aValue || 0) - (bValue || 0)
         : (bValue || 0) - (aValue || 0);
     });
-  }, [filteredLeads, sortConfig]);
+  }, [filteredLeads, sortConfig, isHotLead]);
 
   const fetchSalesClosureCount = async () => {
+    if (!userProfile) return;
+
     let q = supabase
       .from("sales_closure")
       .select("lead_id", { count: "exact", head: true });
 
-    if (userProfile?.roles === "Sales Associate") {
+    const profileRoles = getRoles(userProfile.roles);
+    if (profileRoles.some(r => ["Sales Associate", "Resume Associate-Sales Associate", "Resume Head-Sales Associate"].includes(r))) {
       q = q.eq("account_assigned_name", userProfile.full_name);
-    } else if (ownerFilter !== "all" && ["Admin", "Super Admin", "Sales", "Marketing"].includes(userProfile?.roles || "")) {
+    } else if (ownerFilter !== "all" && profileRoles.some(r => ["Admin", "Super Admin", "Sales", "Marketing", "Sales Head"].includes(r))) {
       q = q.eq("account_assigned_name", ownerFilter);
+    }
+
+    if (startDate && endDate) {
+      q = q
+        .gte("closed_at", dayjs(startDate).format("YYYY-MM-DD"))
+        .lte("closed_at", dayjs(endDate).format("YYYY-MM-DD"));
     }
 
     const { count, error } = await q;
@@ -1825,26 +1976,49 @@ id, business_id, name, email, phone,
   const fetchStageCounts = async () => {
     if (!userProfile) return;
 
-    // Manual counts from fetching stages or individual counts
+    let q = supabase
+      .from("leads")
+      .select("current_stage")
+      .eq("status", "Assigned");
+
+    const profileRoles = getRoles(userProfile.roles);
+    if (profileRoles.some(r => ["Sales Associate", "Resume Associate-Sales Associate", "Resume Head-Sales Associate"].includes(r))) {
+      q = q.eq("assigned_to", userProfile.full_name);
+    } else if (ownerFilter !== "all" && profileRoles.some(r => ["Admin", "Super Admin", "Sales", "Marketing", "Sales Head"].includes(r))) {
+      q = q.eq("assigned_to", ownerFilter);
+    }
+
+    if (sourceFilter !== "all") {
+      q = q.eq("source", sourceFilter);
+    }
+
+    if (startDate && endDate) {
+      const startIso = dayjs(startDate).startOf("day").toISOString();
+      const endIso = dayjs(endDate).endOf("day").toISOString();
+      let dateCol = dateFilterType === "created_at" ? "created_at" : "assigned_at";
+      q = q.gte(dateCol, startIso).lte(dateCol, endIso);
+    }
+
+    const { data, error } = await q;
+    if (error) {
+      console.error("Error fetching stage counts:", error);
+      return;
+    }
+
     const counts: Record<string, number> = {};
     let total = 0;
-    for (const stage of salesStages) {
-      let q = supabase
-        .from("leads")
-        .select("*", { count: "exact", head: true })
-        .eq("status", "Assigned")
-        .eq("current_stage", stage);
 
-      if (userProfile.roles === "Sales Associate") {
-        q = q.eq("assigned_to", userProfile.full_name);
-      } else if (ownerFilter !== "all" && ["Admin", "Super Admin", "Sales", "Marketing"].includes(userProfile.roles)) {
-        q = q.eq("assigned_to", ownerFilter);
+    // Initialize all stages to 0
+    salesStages.forEach(s => counts[s] = 0);
+
+    data.forEach(lead => {
+      const stage = lead.current_stage;
+      if (stage && counts.hasOwnProperty(stage)) {
+        counts[stage]++;
       }
+      total++;
+    });
 
-      const { count } = await q;
-      counts[stage] = count || 0;
-      total += (count || 0);
-    }
     counts['total'] = total;
     setStageCounts(counts);
   };
@@ -1852,56 +2026,56 @@ id, business_id, name, email, phone,
 
 
   return (
-    <ProtectedRoute allowedRoles={["Sales", "Sales Associate", "Super Admin", "Admin", "Marketing"]}>
+    <ProtectedRoute allowedRoles={["Sales", "Sales Associate", "Super Admin", "Admin", "Marketing", "Sales Head"]}>
       <style jsx global>{`
-  .premium - font {
-  -webkit - font - smoothing: antialiased;
-  -moz - osx - font - smoothing: grayscale;
-}
+        .premium-font {
+          -webkit-font-smoothing: antialiased;
+          -moz-osx-font-smoothing: grayscale;
+        }
 
-        .text - brighter {
-  color: #0f172a!important; /* Slate 900 */
-}
+        .text-brighter {
+          color: #0f172a !important; /* Slate 900 */
+        }
 
-        .text - smooth {
-  letter - spacing: -0.01em;
-  line - height: 1.5;
-}
+        .text-smooth {
+          letter-spacing: -0.01em;
+          line-height: 1.5;
+        }
 
-        .sales - table - header {
-  background - color: #f8fafc!important; /* Slate 50 */
-  border - bottom: 2px solid #e2e8f0!important;
-}
+        .sales-table-header {
+          background-color: #f8fafc !important; /* Slate 50 */
+          border-bottom: 2px solid #e2e8f0 !important;
+        }
 
-        .lead - name - link {
-  color: #0284c7!important; /* Sky 600 */
-  font - weight: 500!important;
-  transition: all 0.2s ease;
-}
+        .lead-name-link {
+          color: #0284c7 !important; /* Sky 600 */
+          font-weight: 500 !important;
+          transition: all 0.2s ease;
+        }
 
-        .lead - name - link:hover {
-  color: #0369a1!important; /* Sky 700 */
-  text - decoration: underline;
-}
+        .lead-name-link:hover {
+          color: #0369a1 !important; /* Sky 700 */
+          text-decoration: underline;
+        }
 
         /* Global Table Text Enhancements */
-        .premium - font table td {
-  color: #334155!important; /* Slate 700 - Brighter than gray */
-  font - weight: 400;
-  -webkit - font - smoothing: antialiased;
-}
+        .premium-font table td {
+          color: #334155 !important; /* Slate 700 - Brighter than gray */
+          font-weight: 400;
+          -webkit-font-smoothing: antialiased;
+        }
 
-        .premium - font table td: nth - child(3) {
-  color: #0f172a!important; /* Slate 900 - Brighter for score */
-  font - weight: 600!important;
-}
+        .premium-font table td:nth-child(3) {
+          color: #0f172a !important; /* Slate 900 - Brighter for score */
+          font-weight: 600 !important;
+        }
 
-        .premium - font table thead th {
-  color: #475569!important; /* Slate 600 */
-  font - weight: 700!important;
-  letter - spacing: 0.05em;
-}
-`}</style>
+        .premium-font table thead th {
+          color: #475569 !important; /* Slate 600 */
+          font-weight: 700 !important;
+          letter-spacing: 0.05em;
+        }
+      `}</style>
       <SidebarProvider className="premium-font">
         <div className="flex min-h-screen w-full bg-[#f1f4f9]">
           <AppSidebar />
@@ -1910,239 +2084,262 @@ id, business_id, name, email, phone,
               searchTerm={tempSearch}
               onSearchChange={handleSearchChange}
             >
-              <div className="flex items-center gap-2 ml-4">
-                <Button variant="outline" size="sm" onClick={downloadAllTablesData} className="h-8 gap-2 border-gray-300 font-normal bg-white">
+              <div className="flex items-center gap-2 ml-4" suppressHydrationWarning>
+                <Button variant="outline" size="sm" onClick={downloadAllTablesData} className="h-8 gap-2 border-gray-300 font-normal bg-white" suppressHydrationWarning>
                   <Download className="w-4 h-4 text-gray-400" /> <span className="hidden lg:inline">Export All Data</span>
                 </Button>
 
-                <Button variant="outline" size="sm" onClick={() => setView("activity")} className="h-8 gap-2 border-gray-300 font-normal bg-white">
+                <Button variant="outline" size="sm" onClick={() => setView("activity")} className="h-8 gap-2 border-gray-300 font-normal bg-white" suppressHydrationWarning>
                   <ListOrdered className="w-4 h-4 text-gray-400" /> <span className="hidden lg:inline">Activity View</span>
                 </Button>
 
-                {["Admin", "Super Admin"].includes(userProfile?.roles || "") && (
-                  <Button variant="outline" size="sm" onClick={() => setView("call_stats")} className="h-8 gap-2 border-gray-300 font-normal bg-white">
+                {["Admin", "Super Admin", "Sales Head", "Resume Head-Sales Associate"].includes(userProfile?.roles || "") && (
+                  <Button variant="outline" size="sm" onClick={() => setView("call_stats")} className="h-8 gap-2 border-gray-300 font-normal bg-white" suppressHydrationWarning>
                     <BarChart className="w-4 h-4 text-gray-400" /> <span className="hidden lg:inline">View Call Stats</span>
                   </Button>
                 )}
 
-                <Button variant="outline" size="sm" onClick={() => setView("renewals")} className="h-8 gap-2 border-orange-200 text-orange-600 font-medium bg-orange-50/50 hover:bg-orange-50">
+                <Button variant="outline" size="sm" onClick={() => setView("renewals")} className="h-8 gap-2 border-orange-200 text-orange-600 font-medium bg-orange-50/50 hover:bg-orange-50" suppressHydrationWarning>
                   <RefreshCw className="w-4 h-4 text-orange-500" /> <span className="hidden lg:inline">Renewals</span>
                 </Button>
 
-                <Button variant="outline" size="sm" onClick={() => setView("email_logs")} className="h-8 gap-2 border-blue-200 text-blue-600 font-medium bg-blue-50/50 hover:bg-blue-50">
+                <Button variant="outline" size="sm" onClick={() => setView("email_logs")} className="h-8 gap-2 border-blue-200 text-blue-600 font-medium bg-blue-50/50 hover:bg-blue-50" suppressHydrationWarning>
                   <Mail className="w-4 h-4 text-blue-500" /> <span className="hidden lg:inline">Email History</span>
                 </Button>
 
                 <Button variant="outline" size="sm" onClick={() => {
                   setEditingTemplate({ subject: "", body: "", is_global: false });
                   setShowTemplateDialog(true);
-                }} className="h-8 gap-2 border-purple-200 text-purple-600 font-medium bg-purple-50/50 hover:bg-purple-50">
+                }} className="h-8 gap-2 border-purple-200 text-purple-600 font-medium bg-purple-50/50 hover:bg-purple-50" suppressHydrationWarning>
                   <Plus className="w-4 h-4 text-purple-500" /> <span className="hidden lg:inline">Custom Template</span>
                 </Button>
               </div>
             </Header>
-            <div className="flex flex-1 overflow-hidden">
-              {/* Main Content Area */}
-              <div className="flex-1 flex flex-col overflow-y-auto px-6 py-4">
-                <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center gap-2">
-                    <h1 className="text-2xl font-semibold text-slate-800 tracking-tight">
-                      {view === "leads" ? "Manage Leads" :
-                        view === "call_stats" ? "Zoom Call Statistics" :
-                          view === "renewals" ? "Subscription Renewals" :
-                            view === "email_logs" ? "Communication History" :
-                              "Activity History"}
-                    </h1>
-                    <div className="text-gray-400 cursor-pointer hover:text-gray-600">
-                      <ExternalLink className="w-4 h-4" />
+            {!isHydrated ? null : (
+              <div className="flex flex-1 overflow-hidden" suppressHydrationWarning>
+                {/* Main Content Area */}
+                <div className="flex-1 flex flex-col overflow-y-auto px-6 py-4">
+                  <div className="flex items-center justify-between mb-6">
+                    <div className="flex items-center gap-2">
+                      <h1 className="text-2xl font-semibold text-slate-800 tracking-tight">
+                        {view === "leads" ? "Manage Leads" :
+                          view === "call_stats" ? "Zoom Call Statistics" :
+                            view === "renewals" ? "Subscription Renewals" :
+                              view === "email_logs" ? "Communication History" :
+                                "Activity History"}
+                      </h1>
+                      <div className="text-gray-400 cursor-pointer hover:text-gray-600">
+                        <ExternalLink className="w-4 h-4" />
+                      </div>
                     </div>
+
+                    {view !== "leads" && (
+                      <Button
+                        onClick={() => setView("leads")}
+                        variant="outline"
+                        size="sm"
+                        className="gap-2"
+                      >
+                        <ChevronLeft className="w-4 h-4" /> Back to Leads
+                      </Button>
+                    )}
                   </div>
 
-                  {view !== "leads" && (
-                    <Button
-                      onClick={() => setView("leads")}
-                      variant="outline"
-                      size="sm"
-                      className="gap-2"
-                    >
-                      <ChevronLeft className="w-4 h-4" /> Back to Leads
-                    </Button>
-                  )}
-                </div>
-
-                {view === "leads" && (
-                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4 mb-6">
-                    <Card className="border-none shadow-sm bg-white hover:shadow-md transition-shadow cursor-pointer" onClick={() => setStageFilter("all")}>
-                      <CardHeader className="p-3 pb-0">
-                        <CardTitle className="text-[10px] uppercase font-bold text-gray-500 tracking-wider h-8 flex items-center">
-                          Total Leads
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="p-3 pt-1">
-                        <div className="text-xl font-bold text-slate-800">
-                          {stageCounts['total'] || 0}
-                        </div>
-                        <div className="w-full h-1 mt-2 rounded-full opacity-50 bg-slate-400" />
-                      </CardContent>
-                    </Card>
-
-                    {salesStages.map((stage) => (
-                      <Card key={stage} className="border-none shadow-sm bg-white hover:shadow-md transition-shadow cursor-pointer" onClick={() => setStageFilter(stage)}>
+                  {view === "leads" && (
+                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4 mb-6">
+                      <Card className="border-none shadow-sm bg-white hover:shadow-md transition-shadow cursor-pointer" onClick={() => setStageFilter("all")}>
                         <CardHeader className="p-3 pb-0">
                           <CardTitle className="text-[10px] uppercase font-bold text-gray-500 tracking-wider h-8 flex items-center">
-                            {stage}
+                            Total Leads
                           </CardTitle>
                         </CardHeader>
                         <CardContent className="p-3 pt-1">
                           <div className="text-xl font-bold text-slate-800">
-                            {stageCounts[stage] || 0}
+                            {stageCounts['total'] || 0}
                           </div>
-                          <div className={cn("w-full h-1 mt-2 rounded-full opacity-50", getStageColor(stage).split(" ")[0])} />
+                          <div className="w-full h-1 mt-2 rounded-full opacity-50 bg-slate-400" />
                         </CardContent>
                       </Card>
-                    ))}
-                  </div>
-                )}
 
-                {view === "activity" ? (
-                  <ActivityView userProfile={userProfile} onBack={() => setView("leads")} />
-                ) : view === "call_stats" ? (
-                  <CallStatsView />
-                ) : view === "renewals" ? (
-                  <RenewalsView />
-                ) : view === "email_logs" ? (
-                  <EmailLogView filterEmail={["Admin", "Super Admin"].includes(userProfile?.roles || "") ? undefined : userEmail} />
-                ) : (
-                  <>
+                      {salesStages.map((stage) => (
+                        <Card key={stage} className="border-none shadow-sm bg-white hover:shadow-md transition-shadow cursor-pointer" onClick={() => setStageFilter(stage)}>
+                          <CardHeader className="p-3 pb-0">
+                            <CardTitle className="text-[10px] uppercase font-bold text-gray-500 tracking-wider h-8 flex items-center">
+                              {stage}
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="p-3 pt-1">
+                            <div className="text-xl font-bold text-slate-800">
+                              {stageCounts[stage] || 0}
+                            </div>
+                            <div className={cn("w-full h-1 mt-2 rounded-full opacity-50", getStageColor(stage).split(" ")[0])} />
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  )}
 
-                    {/* Filter Section - LeadSquared Style */}
-                    <div className="bg-white border rounded shadow-sm mb-4">
-                      {/* Integrated Header and Tag Row */}
-                      <div className="px-4 py-2 border-b flex items-center justify-between bg-white">
-                        <div className="flex items-center gap-3">
-                          <Button variant="outline" size="sm" className="h-8 gap-2 border-gray-300 font-normal bg-white">
-                            <Tag className="w-3.5 h-3.5 text-gray-500" /> Tags
-                          </Button>
-                          <div className="h-4 w-px bg-gray-200 mx-1" />
-                          <Button
-                            variant="ghost"
-                            className="h-8 text-xs text-red-500 hover:text-red-600 p-0 px-2"
-                            onClick={() => { setStartDate(null); setEndDate(null); setStageFilter("all"); setSourceFilter("all"); setOwnerFilter("all"); }}
+                  {view === "activity" ? (
+                    <ActivityView userProfile={userProfile} onBack={() => setView("leads")} />
+                  ) : view === "call_stats" ? (
+                    <CallStatsView />
+                  ) : view === "renewals" ? (
+                    <RenewalsView />
+                  ) : view === "email_logs" ? (
+                    <EmailLogView filterEmail={["Admin", "Super Admin"].includes(userProfile?.roles || "") ? undefined : userEmail} />
+                  ) : (
+                    <>
+
+                      {/* Filter Section - LeadSquared Style */}
+                      <div className="bg-white border rounded shadow-sm mb-4">
+                        {/* Integrated Header and Tag Row */}
+                        <div className="px-4 py-2 border-b flex items-center justify-between bg-white">
+                          <div className="flex items-center gap-3">
+                            <Button variant="outline" size="sm" className="h-8 gap-2 border-gray-300 font-normal bg-white">
+                              <Tag className="w-3.5 h-3.5 text-gray-500" /> Tags
+                            </Button>
+                            <div className="h-4 w-px bg-gray-200 mx-1" />
+                            <Button
+                              variant="ghost"
+                              className="h-8 text-xs text-red-500 hover:text-red-600 p-0 px-2"
+                              onClick={() => {
+                                setStartDate(null);
+                                setEndDate(null);
+                                setStageFilter("all");
+                                setSourceFilter("all");
+                                setOwnerFilter("all");
+                                setDateFilterType("last_activity");
+                              }}
+                              suppressHydrationWarning
+                            >
+                              Reset Filters
+                            </Button>
+                            {/* <Button
+                              variant="outline"
+                              onClick={() => setShowHotSourcesDialog(true)}
+                              className="bg-white border-orange-200 text-orange-600 hover:bg-orange-50 hover:text-orange-700 h-8 px-4 min-w-[140px] shadow-sm transition-all"
+                              suppressHydrationWarning
+                            >
+                              <Flame className={`w-3.5 h-3.5 mr-2 ${hotSources.length > 0 ? "fill-orange-500 text-orange-500 animate-pulse" : ""}`} />
+                              Hot Bucket ({hotBucketLeadCount})
+                            </Button> */}
+                          </div>
+
+                          <div
+                            className="text-xs text-[#00a1e1] hover:underline cursor-pointer flex items-center gap-1 font-medium"
+                            onClick={() => setIsRightPanelCollapsed(!isRightPanelCollapsed)}
+                            suppressHydrationWarning
                           >
-                            Reset Filters
-                          </Button>
+                            {isRightPanelCollapsed ? "Expand Panel" : "Collapse Panel"} <ChevronRight className={cn("w-3.5 h-3.5 transition-transform", isRightPanelCollapsed && "rotate-180")} />
+                          </div>
                         </div>
 
-                        <div
-                          className="text-xs text-[#00a1e1] hover:underline cursor-pointer flex items-center gap-1 font-medium"
-                          onClick={() => setIsRightPanelCollapsed(!isRightPanelCollapsed)}
-                        >
-                          {isRightPanelCollapsed ? "Expand Panel" : "Collapse Panel"} <ChevronRight className={cn("w-3.5 h-3.5 transition-transform", isRightPanelCollapsed && "rotate-180")} />
-                        </div>
-                      </div>
-
-                      {/* Balanced Filter Row */}
-                      <div className="p-3 flex flex-wrap items-center gap-x-8 gap-y-4 bg-[#f8f9fb]/50">
-                        <div className="flex flex-col gap-1.5 min-w-[160px]">
-                          <Label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider">Lead Stage</Label>
-                          <Select value={stageFilter} onValueChange={setStageFilter}>
-                            <SelectTrigger className="h-8 text-xs border-gray-300 bg-white shadow-none">
-                              <SelectValue placeholder="All" />
-                            </SelectTrigger>
-                            <SelectContent className="z-50">
-                              <SelectItem value="all">All</SelectItem>
-                              {salesStages.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        <div className="flex flex-col gap-1.5 min-w-[160px]">
-                          <Label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider">Lead Source</Label>
-                          <Select value={sourceFilter} onValueChange={setSourceFilter}>
-                            <SelectTrigger className="h-8 text-xs border-gray-300 bg-white shadow-none">
-                              <SelectValue placeholder="All" />
-                            </SelectTrigger>
-                            <SelectContent className="z-50">
-                              <SelectItem value="all">All</SelectItem>
-                              {sources.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        {["Admin", "Super Admin", "Sales", "Marketing"].includes(userProfile?.roles || "") && (
+                        {/* Balanced Filter Row */}
+                        <div className="p-3 flex flex-wrap items-center gap-x-8 gap-y-4 bg-[#f8f9fb]/50">
                           <div className="flex flex-col gap-1.5 min-w-[160px]">
-                            <Label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider text-[#00a1e1]">Team View</Label>
-                            <Select value={ownerFilter} onValueChange={setOwnerFilter}>
-                              <SelectTrigger className="h-8 text-xs border-gray-300 bg-white shadow-none focus:ring-1 focus:ring-[#00a1e1]">
-                                <SelectValue placeholder="Select Person" />
+                            <Label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider">Lead Stage</Label>
+                            <Select value={stageFilter} onValueChange={setStageFilter}>
+                              <SelectTrigger className="h-8 text-xs border-gray-300 bg-white shadow-none">
+                                <SelectValue placeholder="All" />
                               </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="all">View All (Team)</SelectItem>
-                                {salesUsers.map(u => <SelectItem key={u.user_email} value={u.full_name}>{u.full_name}</SelectItem>)}
+                              <SelectContent className="z-50">
+                                <SelectItem value="all">All</SelectItem>
+                                {salesStages.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                               </SelectContent>
                             </Select>
                           </div>
-                        )}
 
-                        <div className="flex flex-col gap-1.5 flex-1 min-w-[320px]">
-                          <Label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider">Date Filters</Label>
-                          <div className="flex gap-2">
-                            <Select defaultValue="last_activity">
-                              <SelectTrigger className="h-8 text-xs border-gray-300 bg-white shadow-none w-[110px] shrink-0">
-                                <SelectValue placeholder="Activity" />
+                          <div className="flex flex-col gap-1.5 min-w-[160px]">
+                            <Label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider">Lead Source</Label>
+                            <Select value={sourceFilter} onValueChange={setSourceFilter}>
+                              <SelectTrigger className="h-8 text-xs border-gray-300 bg-white shadow-none">
+                                <SelectValue placeholder="All" />
                               </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="last_activity">Activity</SelectItem>
-                                <SelectItem value="assigned_at">Assigned</SelectItem>
-                                <SelectItem value="created_at">Created</SelectItem>
+                              <SelectContent className="z-50">
+                                <SelectItem value="all">All</SelectItem>
+                                {sources.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                               </SelectContent>
                             </Select>
-                            <div className="flex items-center gap-1.5 flex-1">
-                              <Input
-                                type="date"
-                                value={startDate || ""}
-                                onChange={(e) => setStartDate(e.target.value)}
-                                className="h-8 text-[11px] border-gray-300 bg-white px-2 shadow-none flex-1"
-                              />
-                              <span className="text-gray-400 text-xs text-center min-w-[8px]">→</span>
-                              <Input
-                                type="date"
-                                value={endDate || ""}
-                                onChange={(e) => setEndDate(e.target.value)}
-                                className="h-8 text-[11px] border-gray-300 bg-white px-2 shadow-none flex-1"
-                              />
+                          </div>
+
+                          {["Admin", "Super Admin", "Sales", "Marketing", "Sales Head"].includes(userProfile?.roles || "") && (
+                            <div className="flex flex-col gap-1.5 min-w-[160px]">
+                              <Label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider text-[#00a1e1]">Team View</Label>
+                              <Select value={ownerFilter} onValueChange={setOwnerFilter}>
+                                <SelectTrigger className="h-8 text-xs border-gray-300 bg-white shadow-none focus:ring-1 focus:ring-[#00a1e1]">
+                                  <SelectValue placeholder="Select Person" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">View All (Team)</SelectItem>
+                                  {salesUsers.map(u => <SelectItem key={u.user_email} value={u.full_name}>{u.full_name}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          )}
+
+                          <div className="flex flex-col gap-1.5 flex-1 min-w-[320px]">
+                            <Label className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider">Date Filters</Label>
+                            <div className="flex gap-2">
+                              <Select value={dateFilterType} onValueChange={setDateFilterType}>
+                                <SelectTrigger className="h-8 text-xs border-gray-300 bg-white shadow-none w-[110px] shrink-0">
+                                  <SelectValue placeholder="Activity" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="last_activity">Activity</SelectItem>
+                                  <SelectItem value="assigned_at">Assigned</SelectItem>
+                                  <SelectItem value="created_at">Created</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <div className="flex items-center gap-1.5 flex-1">
+                                <Input
+                                  type="date"
+                                  value={startDate || ""}
+                                  onChange={(e) => setStartDate(e.target.value)}
+                                  className="h-8 text-[11px] border-gray-300 bg-white px-2 shadow-none flex-1"
+                                />
+                                <span className="text-gray-400 text-xs text-center min-w-[8px]">→</span>
+                                <Input
+                                  type="date"
+                                  value={endDate || ""}
+                                  onChange={(e) => setEndDate(e.target.value)}
+                                  className="h-8 text-[11px] border-gray-300 bg-white px-2 shadow-none flex-1"
+                                />
+                              </div>
                             </div>
                           </div>
                         </div>
                       </div>
-                    </div>
 
-                    <LeadsTable
-                      leads={sortedLeads}
-                      sortConfig={sortConfig}
-                      handleSort={handleSort}
-                      handleStageUpdate={handleStageUpdate}
-                      handlePhoneClick={handlePhoneClick}
-                      userProfile={userProfile}
-                      page={page}
-                      pageSize={pageSize}
-                      totalRecords={totalRecords}
-                      setPage={setPage}
-                      setPageSize={setPageSize}
-                      isRightPanelCollapsed={isRightPanelCollapsed}
-                      onOpenHistory={handleOpenHistory}
-                      onOpenMail={handleOpenMail}
-                    />
-                  </>
-                )}
+                      <LeadsTable
+                        leads={sortedLeads}
+                        sortConfig={sortConfig}
+                        handleSort={handleSort}
+                        handleStageUpdate={handleStageUpdate}
+                        handlePhoneClick={handlePhoneClick}
+                        userProfile={userProfile}
+                        page={page}
+                        pageSize={pageSize}
+                        totalRecords={totalRecords}
+                        setPage={setPage}
+                        setPageSize={setPageSize}
+                        onOpenHistory={handleOpenHistory}
+                        onOpenMail={handleOpenMail}
+                        onUpdateAssignedTo={handleUpdateAssignedTo}
+                        salesUsers={salesUsers}
+                        isHotLead={isHotLead}
+                        selectedLeads={selectedLeads}
+                        onSelectedLeadsChange={setSelectedLeads}
+                      />
+                    </>
+                  )}
+                </div>
+
+                <RightActionPanel
+                  isCollapsed={isRightPanelCollapsed || view !== "leads"}
+                  onAddLead={() => setOnboardDialogOpen(true)}
+                />
               </div>
-
-              <RightActionPanel
-                isCollapsed={isRightPanelCollapsed || view !== "leads"}
-                onAddLead={() => setOnboardDialogOpen(true)}
-                userProfile={userProfile}
-              />
-            </div>
+            )}
           </div>
         </div>
       </SidebarProvider>
@@ -2313,7 +2510,55 @@ id, business_id, name, email, phone,
               Complete history of interactions from both Sales and Finance teams.
             </DialogDescription>
           </DialogHeader>
-          <div className="mt-4 max-h-[60vh] overflow-y-auto space-y-4 pr-2">
+
+          {/* New Strategic Update Section - Role Restricted */}
+          { (() => {
+            const rolesStr = (userProfile?.roles || "").toString().toLowerCase();
+            const email = (userEmail || "").toString().toLowerCase();
+            
+            // High-level organizational keywords
+            const allowedKeywords = ["admin", "sales", "associate"];
+            
+            // Permission logic
+            const isAuthorized = allowedKeywords.some(key => rolesStr.includes(key) || email.includes(key)) ||
+                                email.includes("applywizz.com");
+            
+            return isAuthorized;
+          })() && (
+            <div className="mt-4 p-4 border rounded-xl bg-gradient-to-br from-indigo-50/50 to-white shadow-sm border-indigo-100">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-6 h-6 rounded-full bg-indigo-600 flex items-center justify-center text-[10px] font-bold text-white uppercase shadow-sm">
+                  {userProfile?.full_name?.charAt(0) || "U"}
+                </div>
+                <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Log Strategic Interaction</span>
+              </div>
+              <div className="space-y-3">
+                <Textarea
+                  rows={3}
+                  placeholder="Log recent conversation details, client sentiment, or strategic updates here..."
+                  className="text-xs font-medium border-slate-200 focus:ring-indigo-500 rounded-lg shadow-inner bg-white/80"
+                  value={activityUpdate}
+                  onChange={(e) => setActivityUpdate(e.target.value)}
+                />
+                <div className="flex justify-between items-center">
+                  <span className="text-[9px] text-slate-400 font-bold uppercase tracking-tight tabular-nums">
+                    {activityUpdate.length} chars
+                  </span>
+                  <Button
+                    size="sm"
+                    disabled={!activityUpdate.trim() || isSavingActivity}
+                    className="h-8 bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 rounded-md shadow-md active:scale-95 transition-all"
+                    onClick={handleSaveActivity}
+                  >
+                    {isSavingActivity ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-2" /> : <Send className="w-3.5 h-3.5 mr-2" />}
+                    Save Update
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-6 max-h-[50vh] overflow-y-auto space-y-4 pr-2">
             {isChecking ? (
               <div className="flex justify-center p-8"><Loader2 className="animate-spin h-8 w-8 text-blue-500" /></div>
             ) : selectedLead?.call_history && selectedLead.call_history.length > 0 ? (
@@ -2590,6 +2835,59 @@ id, business_id, name, email, phone,
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {/* Hot Sources Management Dialog */}
+      <Dialog open={showHotSourcesDialog} onOpenChange={setShowHotSourcesDialog}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Flame className="w-5 h-5 text-orange-500 fill-orange-500" />
+              Manage Hot Bucket Sources
+            </DialogTitle>
+            <DialogDescription>
+              Any lead from these sources arriving in the last 3 days will be prioritized at the top.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[50vh] overflow-y-auto space-y-1 p-1">
+            {sources.length === 0 ? (
+              <p className="text-center py-4 text-gray-400 text-sm">No lead sources found in history.</p>
+            ) : (
+              sources.map(source => {
+                const isActive = hotSources.some(s => s.trim().toLowerCase() === source.trim().toLowerCase());
+                return (
+                  <div key={source} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded-md group">
+                    <span className="text-sm font-medium text-slate-700">{source}</span>
+                    <Button
+                      variant={isActive ? "default" : "outline"}
+                      size="sm"
+                      className={cn(
+                        "h-7 text-[10px] uppercase font-bold",
+                        isActive ? "bg-orange-500 hover:bg-orange-600 border-none" : "text-gray-400 border-gray-200"
+                      )}
+                      onClick={() => toggleHotSource(source)}
+                    >
+                      {isActive ? "Active" : "Add"}
+                    </Button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setShowHotSourcesDialog(false)} className="w-full">Done</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Hot Float Keyframes */}
+      <style jsx global>{`
+        @keyframes hot-float {
+          0%, 100% { transform: translateY(0) rotate(0deg); }
+          50% { transform: translateY(-3px) rotate(5deg); }
+        }
+        .animate-hot-float {
+          animation: hot-float 1.5s ease-in-out infinite;
+        }
+      `}</style>
     </ProtectedRoute>
   );
 }

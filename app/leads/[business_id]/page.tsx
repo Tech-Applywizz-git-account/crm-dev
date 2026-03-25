@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { supabase } from "@/utils/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, RefreshCw, ExternalLink, ArrowLeft, Star, Share2, Mail, Phone, MapPin, Plus, ChevronDown, MoreHorizontal, Send, FileText, CheckCircle2, Bell, Clock, Trash2 } from "lucide-react";
+import { Loader2, RefreshCw, ExternalLink, ArrowLeft, Star, Share2, Mail, Phone, MapPin, Plus, ChevronDown, MoreHorizontal, Send, FileText, CheckCircle2, Bell, Clock, Trash2, Flame } from "lucide-react";
 import { useAuth } from "@/components/providers/auth-provider";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
@@ -19,6 +19,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import dayjs from "dayjs";
 
 interface Lead {
   id: string;
@@ -162,18 +163,34 @@ export default function LeadProfilePage() {
   const [customTemplates, setCustomTemplates] = useState<any[]>([]);
   const [editingTemplate, setEditingTemplate] = useState<any>(null);
   const [userProfile, setUserProfile] = useState<any>(null);
+  const [activityUpdate, setActivityUpdate] = useState("");
+  const [isSavingActivity, setIsSavingActivity] = useState(false);
 
   useEffect(() => {
     const fetchProfileAndTemplates = async () => {
-      if (!user?.id) return;
+      if (!user) return;
+      try {
+        // Try fetching by auth_id first
+        let { data: profile, error } = await supabase
+          .from("profiles")
+          .select("full_name, roles, user_email")
+          .eq("auth_id", user.id)
+          .maybeSingle();
 
-      // 1. Fetch Profile for Role
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("full_name, roles")
-        .eq("auth_id", user.id)
-        .single();
-      setUserProfile(profile);
+        // Fallback to email if auth_id lookup yielded nothing
+        if (!profile && user.email) {
+          const { data: profileByEmail } = await supabase
+            .from("profiles")
+            .select("full_name, roles, user_email")
+            .eq("user_email", user.email)
+            .maybeSingle();
+          profile = profileByEmail;
+        }
+
+        setUserProfile(profile);
+      } catch (err) {
+        console.error("Error fetching user profile:", err);
+      }
 
       // 2. Fetch Templates (Personal + Global)
       const { data: templates, error } = await supabase
@@ -261,6 +278,23 @@ export default function LeadProfilePage() {
     return name.replace(/[⭐*🌟✨]/g, '').trim();
   };
 
+  // —— Hot Lead Recognition ——
+  const isHotLead = useCallback(() => {
+    if (!lead || !lead.source) return false;
+    const hotSources = (() => {
+      if (typeof window !== 'undefined') {
+        const saved = localStorage.getItem('hotSources');
+        return saved ? JSON.parse(saved) : [];
+      }
+      return [];
+    })();
+
+    if (!hotSources.includes(lead.source)) return false;
+    const leadDate = new Date(lead.created_at);
+    const ageInDays = Math.floor((new Date().getTime() - leadDate.getTime()) / (1000 * 3600 * 24));
+    return ageInDays >= 0 && ageInDays <= 3;
+  }, [lead]);
+
   const upcomingRenewalDate = useMemo(() => {
     if (!saleHistory.length) return null;
     const latest = saleHistory[0];
@@ -339,7 +373,8 @@ Looking forward to our next steps.
 
 Best regards,
 ${formatAssociateName(user?.email, user?.name)}
-ApplyWizz Team`
+ApplyWizz Team`,
+      isCustom: false
     },
     {
       id: "dnp_after_1st",
@@ -360,7 +395,8 @@ Check the case study here.
 If you'd like to learn how ApplyWizz can support your job search, please reply to this email or let us know a convenient time to connect.
 
 Best regards,
-Team ApplyWizz`
+Team ApplyWizz`,
+      isCustom: false
     },
     {
       id: "followup_standard",
@@ -383,7 +419,8 @@ Check the case study here.
 If you're still exploring ways to optimize your job search and want to learn more about how ApplyWizz can support your career goals, please reply to this email or let us know a convenient time to connect.
 
 Best regards,
-Team ApplyWizz`
+Team ApplyWizz`,
+      isCustom: false
     },
     {
       id: "followup_2days",
@@ -406,7 +443,8 @@ Check the case study here.
 Please let me know if you're available for a brief 5-minute chat this week to discuss how we can support your search.
 
 Best regards,
-Team ApplyWizz`
+Team ApplyWizz`,
+      isCustom: false
     },
     {
       id: "followup_final",
@@ -429,7 +467,8 @@ Check the case study here.
 Wishing you the best of luck with your job search and future career endeavors.
 
 Best regards,
-Team ApplyWizz`
+Team ApplyWizz`,
+      isCustom: false
     },
     {
       id: "payment_success",
@@ -445,7 +484,8 @@ We're thrilled to have you with us.
 
 Best regards,
 ${formatAssociateName(user?.email, user?.name)}
-ApplyWizz Team`
+ApplyWizz Team`,
+      isCustom: false
     },
     {
       id: "onboard",
@@ -469,7 +509,8 @@ Our team is standing by to assist you once these details are submitted.
 
 Best regards,
 ${formatAssociateName(user?.email, user?.name)}
-ApplyWizz Team`
+ApplyWizz Team`,
+      isCustom: false
     },
     {
       id: "renewal_manual",
@@ -483,7 +524,8 @@ Please let us know if you'd like to continue with your job application support f
 
 Best regards,
 ${formatAssociateName(user?.email, user?.name)}
-ApplyWizz Team`
+ApplyWizz Team`,
+      isCustom: false
     },
     ...customTemplates.map(ct => ({
       id: ct.id,
@@ -635,6 +677,34 @@ ApplyWizz Team`
     } catch (err: any) {
       console.error(err);
       alert("Error updating stage: " + err.message);
+    }
+  };
+
+  const handleSaveActivity = async () => {
+    if (!activityUpdate.trim() || !lead || !user) return;
+    setIsSavingActivity(true);
+
+    try {
+      const { error } = await supabase.from("call_history").insert([{
+        lead_id: lead.business_id,
+        email: lead.email,
+        phone: lead.phone,
+        assigned_to: userProfile?.full_name || user?.email || "Unknown",
+        current_stage: lead.current_stage,
+        followup_date: new Date().toISOString().split("T")[0],
+        call_started_at: new Date().toISOString(),
+        notes: activityUpdate.trim()
+      }]);
+
+      if (error) throw error;
+
+      setActivityUpdate("");
+      fetchAll(); // Refresh everything
+    } catch (err: any) {
+      console.error(err);
+      alert("Failed to save activity update: " + err.message);
+    } finally {
+      setIsSavingActivity(false);
     }
   };
 
@@ -1282,7 +1352,12 @@ ApplyWizz Team`
                 <div className="flex justify-between items-start">
                   <div className="flex gap-2 items-center min-w-0">
                     <Star className="w-4 h-4 text-yellow-500 fill-yellow-500 flex-shrink-0" />
-                    <h2 className="text-xl font-semibold text-white truncate" title={lead.name}>{lead.name}</h2>
+                    <h2 className="text-xl font-semibold text-white truncate flex items-center gap-2" title={lead.name}>
+                      {lead.name}
+                      {lead.status === "Assigned" && isHotLead() && (
+                        <Flame className="w-5 h-5 text-orange-500 fill-orange-500 animate-bounce" />
+                      )}
+                    </h2>
                   </div>
                   <Share2 className="w-4 h-4 text-white/70 cursor-pointer hover:text-white flex-shrink-0" />
                 </div>
@@ -1424,7 +1499,12 @@ ApplyWizz Team`
                 <TabsContent value="activity" className="m-0 h-full p-0">
                   <div className="flex flex-col h-full">
                     <div className="p-4 border-b border-gray-50 flex items-center justify-between bg-gray-50/30">
-                      <h4 className="text-sm font-semibold text-gray-700">Call Logs & Activity History</h4>
+                      <div className="flex flex-col">
+                        <h4 className="text-sm font-semibold text-gray-700 uppercase tracking-widest">Interaction Ledger</h4>
+                        <span className="text-[8px] text-gray-300 uppercase font-mono">
+                          {userProfile?.roles ? `Authorized: ${userProfile.roles}` : "Access Check Pending..."}
+                        </span>
+                      </div>
                       <Button
                         variant="ghost"
                         size="sm"
@@ -1436,6 +1516,58 @@ ApplyWizz Team`
                         SYNC ZOOM LOGS
                       </Button>
                     </div>
+
+                          { (() => {
+                            const rolesStr = (userProfile?.roles || "").toString().toLowerCase();
+                            const authRole = (user?.role || "").toString().toLowerCase();
+                            const email = (user?.email || "").toString().toLowerCase();
+                            
+                            // High-level organizational keywords
+                            const allowedKeywords = ["admin", "sales", "associate"];
+                            
+                            // Specifically allow the roles mentioned by the user
+                            const isAuthorized = allowedKeywords.some(key => rolesStr.includes(key) || authRole.includes(key)) ||
+                                                email.includes("applywizz.com"); // Internal safety fallback
+                            
+                            return isAuthorized;
+                          })() && (
+                            <div className="p-6 bg-gradient-to-b from-white to-gray-50/50 border-b border-gray-100">
+                              <div className="flex flex-col gap-4 max-w-4xl">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-[10px] font-black uppercase shadow-inner">
+                                    {userProfile?.full_name?.charAt(0) || "U"}
+                                  </div>
+                                  <div className="flex flex-col">
+                                    <span className="text-xs font-bold text-gray-900 leading-none">Strategic Update Log</span>
+                                    <span className="text-[10px] text-gray-400 mt-1 uppercase tracking-tight font-medium">Logged by {userProfile?.full_name || "Authorized Associate"}</span>
+                                  </div>
+                                </div>
+
+                                <div className="relative group">
+                                  <Textarea
+                                    placeholder="Enter recent conversation summaries, client sentiments, or strategic next steps..."
+                                    className="text-sm font-medium border-gray-200 focus:ring-blue-500 min-h-[120px] transition-all bg-white/80 shadow-sm border-2"
+                                    value={activityUpdate}
+                                    onChange={(e) => setActivityUpdate(e.target.value)}
+                                  />
+                                  <div className="absolute bottom-3 right-3 flex items-center gap-3">
+                                    <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider tabular-nums">
+                                      {activityUpdate.length} chars
+                                    </span>
+                                    <Button
+                                      size="sm"
+                                      disabled={!activityUpdate.trim() || isSavingActivity}
+                                      className="h-8 bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 rounded-md shadow-lg shadow-blue-200 transition-all active:scale-95"
+                                      onClick={handleSaveActivity}
+                                    >
+                                      {isSavingActivity ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-2" /> : <Send className="w-3.5 h-3.5 mr-2" />}
+                                      Commit Update
+                                    </Button>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
                     {(() => {
                       const merged: any[] = [];
                       const addedKeys = new Set<string>();
@@ -1467,11 +1599,12 @@ ApplyWizz Team`
                             id: key,
                             dbId: c.id,
                             timestamp: c.call_started_at || c.followup_date,
-                            direction: c.notes?.toLowerCase().includes("inbound") ? "inbound" : "outbound",
+                            direction: c.notes?.toLowerCase().includes("inbound") ? "inbound" : (c.notes?.toLowerCase().includes("outbound") || c.notes?.toLowerCase().includes("call") ? "outbound" : null),
                             duration: c.call_duration_seconds || zMatch?.duration || 0,
                             recording: c.recording_url || zMatch?.recording_url,
                             stageOrNote: c.notes || "Call logged",
                             currentStage: c.current_stage,
+                            assignedTo: c.assigned_to,
                             isCrm: true
                           });
                         }
@@ -1523,7 +1656,9 @@ ApplyWizz Team`
                               <div key={item.id} className="p-4 hover:bg-gray-50/50 transition-colors flex gap-4">
                                 <div className="w-40 flex-shrink-0">
                                   <div className="text-xs font-medium text-gray-700">{item.timestamp ? new Date(item.timestamp).toLocaleString("en-IN", { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : "-"}</div>
-                                  <div className="text-[10px] text-gray-400 uppercase mt-0.5 tracking-wider">{item.direction} {dur > 0 ? `• ${Math.floor(dur / 60)}m ${dur % 60}s` : ""}</div>
+                                  <div className="text-[10px] text-gray-400 uppercase mt-0.5 tracking-wider">
+                                    {item.direction ? item.direction : ""} {dur > 0 ? `• ${Math.floor(dur / 60)}m ${dur % 60}s` : ""}
+                                  </div>
                                 </div>
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-start justify-between gap-6">
@@ -1575,9 +1710,17 @@ ApplyWizz Team`
                                           </audio>
                                         </div>
                                       )}
-                                      <div className="text-sm text-gray-700 leading-relaxed italic pr-4 mt-1">
-                                        &quot;{item.stageOrNote}&quot;
+                                      <div className="text-sm text-gray-700 font-medium leading-relaxed mt-2 p-3 bg-white border border-gray-200 rounded-md shadow-sm border-l-4 border-l-blue-500 whitespace-pre-wrap">
+                                        {item.stageOrNote}
                                       </div>
+                                      {item.isCrm && item.assignedTo && (
+                                        <div className="flex items-center gap-1.5 mt-2">
+                                          <div className="w-4 h-4 rounded-full bg-gray-100 flex items-center justify-center text-[8px] font-bold text-gray-400 border border-gray-200 uppercase">
+                                            {item.assignedTo.charAt(0)}
+                                          </div>
+                                          <span className="text-[10px] font-bold text-gray-400 border-none uppercase tracking-tight">Executive Note by {item.assignedTo}</span>
+                                        </div>
+                                      )}
                                     </div>
 
                                     {item.isCrm && (
