@@ -89,6 +89,7 @@ export interface CallEvent {
   scheduled_at?: string; // ISO timestamp
   scheduled_until?: string; // ISO timestamp
   sla_deadline: string; // ISO timestamp
+  renewal_date?: string; // ISO timestamp - For RENEWAL calls, the actual renewal date
 
   // Metadata
   trigger_event?: string;
