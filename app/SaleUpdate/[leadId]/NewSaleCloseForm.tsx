@@ -319,12 +319,19 @@ export default function NewSaleCloseForm({ leadId }: NewSaleCloseFormProps) {
       setError(null);
 
 
+      if (!closedAtDate) {
+        alert("Please select Sale Closed At date");
+        setSaving(false);
+        return;
+      }
       if (!paymentMode) {
         alert("Please select Payment Mode");
+        setSaving(false);
         return;
       }
       if (!no_of_job_applications) {
         alert("Please select No. of Job Applications");
+        setSaving(false);
         return;
       }
       // 1) Insert NEW sales_closure
@@ -514,9 +521,10 @@ export default function NewSaleCloseForm({ leadId }: NewSaleCloseFormProps) {
                     </div> */}
 
 
-                  {/* Sale Closed At */}
                   <div className="space-y-1">
-                    <Label>Sale Closed At</Label>
+                    <Label>
+                      Sale Closed At <span className="text-red-700">*</span>
+                    </Label>
                     <Input
                       type="date"
                       value={closedAtDate}

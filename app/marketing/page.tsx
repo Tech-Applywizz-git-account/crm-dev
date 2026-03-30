@@ -1,6 +1,6 @@
 //app/marketing/page.tsx
 "use client";
-import { useEffect, useRef, useState, useContext, useMemo } from "react";
+import { useEffect, useRef, useState, useContext, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
@@ -49,7 +49,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { MoreVertical, PlusCircle } from "lucide-react";
 
-import { Upload, Search, UserPlus, Download, List } from "lucide-react";
+import { Upload, Search, UserPlus, Download, List, Flame, Filter, XCircle } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import Papa from "papaparse";
@@ -57,6 +57,7 @@ import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import { supabase } from "@/utils/supabase/client";
 import { LoadingContext } from "@/components/providers/LoadingContext";
 import FullScreenLoader from "@/components/ui/FullScreenLoader";
+import dayjs from "dayjs";
 
 interface Lead {
   id: string;
@@ -72,6 +73,27 @@ interface Lead {
   assigned_at?: string;
   current_stage?: string;
 }
+
+const ASSIGNED_HOT_LEADS_KEY = "crm_assigned_hot_leads";
+
+type AssignedHotLeadCacheRecord = {
+  id: string;
+  source?: string;
+  created_at: string;
+  hot_assigned_at: string;
+};
+
+type HotLeadPayload = {
+  id: string;
+  business_id: string;
+  name: string;
+  email: string;
+  phone: string;
+  source: string;
+  city: string;
+  created_at: string;
+  current_stage?: string;
+};
 
 
 export default function MarketingPage() {
@@ -166,6 +188,126 @@ export default function MarketingPage() {
   const [selectedStages, setSelectedStages] = useState<string[]>([]);
   const [unassignConfirmDialogOpen, setUnassignConfirmDialogOpen] = useState(false);
   const [stagesList, setStagesList] = useState<string[]>([]);
+
+  // —— Hot Leads States ——
+  const [hotSources, setHotSources] = useState<string[]>(() => {
+    if (typeof window !== 'undefined') {
+      const primary = localStorage.getItem('hotSources');
+      const fallback = localStorage.getItem('crm_hot_leads_sources');
+
+      try {
+        const parseSources = (raw: string | null) => {
+          if (!raw) return [] as string[];
+          const parsed = JSON.parse(raw);
+          return Array.isArray(parsed) ? parsed.filter((s: any) => typeof s === "string") : [];
+        };
+
+        return Array.from(
+          new Map(
+            [...parseSources(primary), ...parseSources(fallback)].map((source) => [
+              source.trim().toLowerCase(),
+              source,
+            ])
+          ).values()
+        );
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  });
+
+  const isHotLead = useCallback((lead: Lead) => {
+    const normalizedLeadSource = String(lead.source || "").trim().toLowerCase();
+    const normalizedHotSources = hotSources.map((source) => String(source || "").trim().toLowerCase());
+    if (!normalizedLeadSource || !normalizedHotSources.includes(normalizedLeadSource)) return false;
+    const leadDate = new Date(lead.created_at);
+    const ageInDays = Math.floor((new Date().getTime() - leadDate.getTime()) / (1000 * 3600 * 24));
+    return ageInDays >= 0 && ageInDays <= 3;
+  }, [hotSources]);
+
+  const getEffectiveHotSources = () => {
+    if (typeof window === "undefined") return hotSources.map((source) => String(source || "").trim().toLowerCase());
+
+    try {
+      const parseSources = (raw: string | null) => {
+        if (!raw) return [] as string[];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed.filter((source: any) => typeof source === "string") : [];
+      };
+
+      const primary = parseSources(localStorage.getItem("hotSources"));
+      const fallback = parseSources(localStorage.getItem("crm_hot_leads_sources"));
+
+      return Array.from(
+        new Set(
+          [...hotSources, ...primary, ...fallback].map((source) => String(source || "").trim().toLowerCase()).filter(Boolean)
+        )
+      );
+    } catch {
+      return hotSources.map((source) => String(source || "").trim().toLowerCase());
+    }
+  };
+
+  const isLeadHotForAssignment = (lead: Lead, activeHotSources: string[]) => {
+    const normalizedLeadSource = String(lead.source || "").trim().toLowerCase();
+    if (!normalizedLeadSource || !activeHotSources.includes(normalizedLeadSource)) return false;
+    return true;
+  };
+
+  const syncAssignedHotLeadCache = useCallback((candidateLeads: Lead[]) => {
+    if (typeof window === "undefined" || candidateLeads.length === 0) return;
+
+    try {
+      const saved = localStorage.getItem(ASSIGNED_HOT_LEADS_KEY);
+      const parsed = saved ? JSON.parse(saved) : [];
+      const existingRecords: AssignedHotLeadCacheRecord[] = Array.isArray(parsed)
+        ? parsed.filter((item: any) => item && typeof item.id === "string" && typeof item.created_at === "string")
+        : [];
+
+      const nextMap = new Map(existingRecords.map((item) => [item.id, item]));
+
+      for (const lead of candidateLeads) {
+        if (!lead?.id) continue;
+
+        if (lead.created_at && isHotLead(lead)) {
+          nextMap.set(lead.id, {
+            id: lead.id,
+            source: lead.source,
+            created_at: lead.created_at,
+            hot_assigned_at: new Date().toISOString(),
+          });
+        } else {
+          nextMap.delete(lead.id);
+        }
+      }
+
+      const nextRecords = Array.from(nextMap.values()).filter((item) => {
+        const createdAt = new Date(item.created_at);
+        if (Number.isNaN(createdAt.getTime())) return false;
+        const ageInDays = Math.floor((Date.now() - createdAt.getTime()) / (1000 * 3600 * 24));
+        return ageInDays >= 0 && ageInDays <= 3;
+      });
+
+      localStorage.setItem(ASSIGNED_HOT_LEADS_KEY, JSON.stringify(nextRecords));
+    } catch (error) {
+      console.error("Failed to sync assigned hot leads cache:", error);
+    }
+  }, [isHotLead]);
+
+  const toggleHotSource = (source: string) => {
+    setHotSources(prev => {
+      const normalizedSource = source.trim().toLowerCase();
+      const next = prev.some((s) => s.trim().toLowerCase() === normalizedSource)
+        ? prev.filter((s) => s.trim().toLowerCase() !== normalizedSource)
+        : [...prev, source];
+      localStorage.setItem('hotSources', JSON.stringify(next));
+      localStorage.setItem('crm_hot_leads_sources', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const [showHotSourcesDialog, setShowHotSourcesDialog] = useState(false);
 
 
   const [resultDialogOpen, setResultDialogOpen] = useState(false);
@@ -264,6 +406,16 @@ export default function MarketingPage() {
   const sortedLeads = useMemo(() => {
     if (!sortConfig) return leads || [];
     const sorted = [...(leads || [])].sort((a, b) => {
+      // Priority 1: Hot Leads (Always sorted at top)
+      const aHot = isHotLead(a);
+      const bHot = isHotLead(b);
+      if (aHot && !bHot) return -1;
+      if (!aHot && bHot) return 1;
+
+      if (!sortConfig) {
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      }
+
       const aVal = a[sortConfig.key as keyof Lead];
       const bVal = b[sortConfig.key as keyof Lead];
 
@@ -287,7 +439,7 @@ export default function MarketingPage() {
       return 0;
     });
     return sorted;
-  }, [leads, sortConfig]);
+  }, [leads, sortConfig, isHotLead]);
 
   const paginatedLeads = sortedLeads;
 
@@ -324,6 +476,22 @@ export default function MarketingPage() {
   const handleBulkAssign = async (assignedTo: string) => {
     setLoading(true);
     try {
+      const effectiveHotSources = getEffectiveHotSources();
+      const selectedLeadRows = leads.filter((lead) => selectedLeads.includes(lead.id));
+      const hotLeadsPayload: HotLeadPayload[] = selectedLeadRows
+        .filter((lead) => isLeadHotForAssignment(lead, effectiveHotSources))
+        .map((lead) => ({
+          id: lead.id,
+          business_id: lead.business_id,
+          name: lead.name,
+          email: lead.email,
+          phone: lead.phone,
+          source: lead.source,
+          city: lead.city,
+          created_at: lead.created_at,
+          current_stage: lead.current_stage,
+        }));
+
       const res = await fetch("/api/assign-leads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -331,11 +499,16 @@ export default function MarketingPage() {
           selectedLeads,
           assignedTo,
           assignedAt: new Date().toISOString(),
-          allLeads: leads,
+          hotLeads: hotLeadsPayload,
+          hotLeadIds: hotLeadsPayload.map((lead) => lead.id),
+          hotSources: effectiveHotSources,
+          selectedLeadRows,
         }),
       });
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || "Assignment failed");
+
+      syncAssignedHotLeadCache(selectedLeadRows);
 
       setAssignSuccessMessage(`Assigned ${selectedLeads.length} lead(s) to ${assignedTo}.`);
       setSuccessDialogOpen(true); //  Open dialog
@@ -351,6 +524,7 @@ export default function MarketingPage() {
 
     } catch (error) {
       console.error("Bulk assign error:", error);
+      alert(error instanceof Error ? error.message : "Failed to assign leads.");
     } finally {
       setLoading(false);
     }
@@ -530,6 +704,22 @@ export default function MarketingPage() {
   const handleIndividualAssign = async (leadId: string, assignedTo: string) => {
     setLoading(true, "Assigning... please wait");
     try {
+      const effectiveHotSources = getEffectiveHotSources();
+      const selectedLeadRow = leads.find((lead) => lead.id === leadId);
+      const hotLeadsPayload: HotLeadPayload[] = selectedLeadRow && isLeadHotForAssignment(selectedLeadRow, effectiveHotSources)
+        ? [{
+          id: selectedLeadRow.id,
+          business_id: selectedLeadRow.business_id,
+          name: selectedLeadRow.name,
+          email: selectedLeadRow.email,
+          phone: selectedLeadRow.phone,
+          source: selectedLeadRow.source,
+          city: selectedLeadRow.city,
+          created_at: selectedLeadRow.created_at,
+          current_stage: selectedLeadRow.current_stage,
+        }]
+        : [];
+
       const res = await fetch("/api/assign-leads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -537,10 +727,19 @@ export default function MarketingPage() {
           selectedLeads: [leadId],
           assignedAt: new Date().toISOString(),
           assignedTo,
+          hotLeads: hotLeadsPayload,
+          hotLeadIds: hotLeadsPayload.map((lead) => lead.id),
+          hotSources: effectiveHotSources,
+          selectedLeadRows: selectedLeadRow ? [selectedLeadRow] : [],
         }),
       });
 
-      if (!res.ok) throw new Error("Assignment failed");
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || "Assignment failed");
+
+      if (selectedLeadRow) {
+        syncAssignedHotLeadCache([selectedLeadRow]);
+      }
 
       setLeads((prev) =>
         prev.map((lead) =>
@@ -558,6 +757,7 @@ export default function MarketingPage() {
 
     } catch (error) {
       console.error("Individual assign error:", error);
+      alert(error instanceof Error ? error.message : "Failed to assign lead.");
     } finally {
       setLoading(false);
     }
@@ -1372,6 +1572,15 @@ export default function MarketingPage() {
                     </div>
                   </DialogContent>
                 </Dialog>
+
+                {/* <Button
+                  variant="outline"
+                  onClick={() => setShowHotSourcesDialog(true)}
+                  className={`gap-2 ${hotSources.length > 0 ? "border-orange-200 text-orange-600 hover:bg-orange-50" : ""}`}
+                >
+                  <Flame className={`w-4 h-4 ${hotSources.length > 0 ? "fill-orange-500 text-orange-500 animate-pulse" : ""}`} />
+                  Hot Bucket ({hotSources.length})
+                </Button> */}
 
                 <Dialog open={googleSheetDialogOpen} onOpenChange={setGoogleSheetDialogOpen}>
                   {/* <DialogContent className="max-w-md"> */}
@@ -2249,7 +2458,12 @@ export default function MarketingPage() {
                             className="font-medium max-w-[150px] break-words whitespace-normal cursor-pointer text-blue-600 hover:underline"
                             onClick={() => window.open(`/leads/${lead.business_id}`, "_blank")}
                           >
-                            {lead.name}
+                            <div className="flex items-center gap-2 justify-center">
+                              {lead.name}
+                              {lead.status === "Assigned" && isHotLead(lead) && (
+                                <Flame className="w-4 h-4 text-orange-500 fill-orange-500 animate-bounce" />
+                              )}
+                            </div>
                           </TableCell>
                           {/* <TableCell className="font-medium max-w-[150px] break-words whitespace-normal">{lead.name}</TableCell> */}
                           <TableCell className="max-w-[100px] break-words whitespace-normal">{lead.phone}</TableCell>
@@ -2320,9 +2534,9 @@ export default function MarketingPage() {
                     </Button>
                     <span className="text-gray-600">
                       {/* Page {currentPage} of {paginationPages} */}
-                    <span className="text-gray-600">
-                      Page {currentPage} of {totalPages}
-                    </span>
+                      <span className="text-gray-600">
+                        Page {currentPage} of {totalPages}
+                      </span>
 
                     </span>
                     <Button
@@ -2621,6 +2835,43 @@ export default function MarketingPage() {
 
           </div>
           {/* </main> */}
+          <Dialog open={showHotSourcesDialog} onOpenChange={setShowHotSourcesDialog}>
+            <DialogContent className="sm:max-w-[425px]">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Flame className="w-5 h-5 text-orange-500 fill-orange-500" />
+                  Manage Hot Sources
+                </DialogTitle>
+                <DialogDescription>
+                  Leads from these sources created in the last 3 days will be marked as "Hot" and pinned to the top.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 py-4 text-center">
+                <div className="flex flex-wrap gap-2 justify-center">
+                  {uniqueSources.map(source => (
+                    <Badge
+                      key={source}
+                      variant={hotSources.includes(source) ? "default" : "outline"}
+                      className={`cursor-pointer transition-all hover:scale-105 ${hotSources.includes(source) ? "bg-orange-500 hover:bg-orange-600" : "hover:border-orange-400"}`}
+                      onClick={() => toggleHotSource(source)}
+                    >
+                      {source}
+                      {hotSources.includes(source) && <XCircle className="w-3 h-3 ml-1" />}
+                    </Badge>
+                  ))}
+                </div>
+                {uniqueSources.length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-4 italic">
+                    No sources found to mark as hot.
+                  </p>
+                )}
+              </div>
+              <DialogFooter>
+                <Button onClick={() => setShowHotSourcesDialog(false)} className="w-full">Done</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
         </DashboardLayout>
         {/* </div> */}
       </ProtectedRoute>

@@ -15,12 +15,14 @@ interface MemberStats {
     inbound: number;
     connected: number;
     notConnected: number;
+    totalDuration: number;
     totalDurationFormatted: string;
 }
 
 interface CallStatsResponse {
     success: boolean;
-    date: string;
+    startDate: string;
+    endDate: string;
     members: MemberStats[];
     totals: MemberStats;
     totalLogs: number;
@@ -28,7 +30,8 @@ interface CallStatsResponse {
 }
 
 export default function CallStatsView({ date = new Date().toISOString().split("T")[0] }: { date?: string }) {
-    const [selectedDate, setSelectedDate] = useState(date);
+    const [startDate, setStartDate] = useState(date);
+    const [endDate, setEndDate] = useState(date);
     const [stats, setStats] = useState<CallStatsResponse | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -37,7 +40,7 @@ export default function CallStatsView({ date = new Date().toISOString().split("T
         setLoading(true);
         setError(null);
         try {
-            const res = await fetch(`/api/zoom-call-stats?date=${selectedDate}`);
+            const res = await fetch(`/api/zoom-call-stats?startDate=${startDate}&endDate=${endDate}`);
             const data = await res.json();
             if (data.success) {
                 setStats(data);
@@ -53,30 +56,42 @@ export default function CallStatsView({ date = new Date().toISOString().split("T
 
     useEffect(() => {
         fetchStats();
-    }, [selectedDate]);
+    }, [startDate, endDate]);
 
     return (
         <div className="bg-white border rounded shadow-sm flex flex-col h-full overflow-hidden">
             <div className="p-4 border-b flex items-center justify-between bg-gray-50 flex-shrink-0">
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-6">
                     <div className="flex flex-col">
                         <h2 className="text-lg font-bold text-gray-800">Zoom Call Statistics</h2>
                         <span className="text-[10px] text-blue-600 font-semibold uppercase tracking-tight">Shift: 8:00 PM - 8:00 AM IST</span>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                        <Label htmlFor="date-picker" className="text-sm text-gray-500">Date:</Label>
-                        <Input
-                            id="date-picker"
-                            type="date"
-                            value={selectedDate}
-                            onChange={(e) => setSelectedDate(e.target.value)}
-                            className="h-8 w-36 text-sm"
-                        />
+                    <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2">
+                            <Label htmlFor="start-date" className="text-sm font-medium text-gray-500">From:</Label>
+                            <Input
+                                id="start-date"
+                                type="date"
+                                value={startDate}
+                                onChange={(e) => setStartDate(e.target.value)}
+                                className="h-8 w-36 text-sm border-gray-300 focus:ring-blue-500"
+                            />
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <Label htmlFor="end-date" className="text-sm font-medium text-gray-500">To:</Label>
+                            <Input
+                                id="end-date"
+                                type="date"
+                                value={endDate}
+                                onChange={(e) => setEndDate(e.target.value)}
+                                className="h-8 w-36 text-sm border-gray-300 focus:ring-blue-500"
+                            />
+                        </div>
                     </div>
                 </div>
 
-                <Button variant="outline" size="sm" onClick={fetchStats} disabled={loading} className="gap-2">
+                <Button variant="outline" size="sm" onClick={fetchStats} disabled={loading} className="gap-2 h-8">
                     {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
                     Refresh
                 </Button>
@@ -100,22 +115,36 @@ export default function CallStatsView({ date = new Date().toISOString().split("T
                         <table className="w-full text-sm text-left">
                             <thead className="bg-[#f8f9fb] border-b text-gray-600 font-semibold text-xs tracking-wider uppercase">
                                 <tr>
-                                    <th className="px-4 py-3 border-r border-[#e5e7eb]">Team Member</th>
+                                    <th className="px-4 py-3 border-r border-[#e5e7eb] cursor-pointer hover:bg-gray-100" onClick={() => {
+                                        const sorted = [...stats.members].sort((a, b) => b.totalDuration - a.totalDuration);
+                                        setStats({ ...stats, members: sorted });
+                                    }}>Team Member</th>
                                     <th className="px-4 py-3 border-r border-[#e5e7eb] text-center">Extension</th>
                                     <th className="px-4 py-3 border-r border-[#e5e7eb] text-center">Total Calls</th>
                                     <th className="px-4 py-3 border-r border-[#e5e7eb] text-center">Outbound</th>
                                     <th className="px-4 py-3 border-r border-[#e5e7eb] text-center">Inbound</th>
                                     <th className="px-4 py-3 border-r border-[#e5e7eb] text-center">Connected / Answered</th>
                                     <th className="px-4 py-3 border-r border-[#e5e7eb] text-center">Not Connected / Cancelled</th>
-                                    <th className="px-4 py-3 text-center">Total Duration (HH:MM:SS)</th>
+                                    <th className="px-4 py-3 text-center cursor-pointer hover:bg-gray-100" onClick={() => {
+                                        const sorted = [...stats.members].sort((a, b) => b.totalDuration - a.totalDuration);
+                                        setStats({ ...stats, members: sorted });
+                                    }}>Total Duration (HH:MM:SS)</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y text-gray-700">
-                                {stats.members.map((member, idx) => (
-                                    <tr key={idx} className="hover:bg-gray-50/50">
-                                        <td className="px-4 py-3 border-r border-[#e5e7eb] font-medium text-gray-900">
-                                            {member.name}
-                                        </td>
+                                {stats.members
+                                    .sort((a, b) => b.totalDuration - a.totalDuration)
+                                    .map((member, idx) => (
+                                        <tr key={idx} className="hover:bg-gray-50/50">
+                                            <td className="px-4 py-3 border-r border-[#e5e7eb] font-medium text-gray-900">
+                                                <a
+                                                    href={`/sales/user-call-history?extension=${member.extension}&name=${encodeURIComponent(member.name)}&email=${member.email}`}
+                                                    target="_blank"
+                                                    className="text-blue-600 hover:underline hover:text-blue-800"
+                                                >
+                                                    {member.name}
+                                                </a>
+                                            </td>
                                         <td className="px-4 py-3 border-r border-[#e5e7eb] text-center font-mono text-xs text-gray-500">
                                             {member.extension || "-"}
                                         </td>
