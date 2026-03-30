@@ -913,6 +913,7 @@ export default function FinanceAssociatesPage() {
       assigned_to: user?.name || user?.email || "Finance",
       notes: `[Finance Note] ${callNote.trim()}`,
       followup_date: dayjs().format("YYYY-MM-DD"),
+      call_started_at: dayjs().toISOString(),
       current_stage: "Finance Interaction"
     }]);
 

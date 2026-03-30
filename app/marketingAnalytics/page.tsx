@@ -40,7 +40,12 @@ import {
     Flame,
     Trash2,
     Trash,
-    AlertTriangle
+    AlertTriangle,
+    ExternalLink,
+    Plus,
+    Save,
+    Link2,
+    Loader2
 } from "lucide-react";
 
 dayjs.extend(isBetween);
@@ -89,6 +94,18 @@ export default function MarketingAnalyticsPage() {
     }>>({});
     const [deleteLeadsDialogOpen, setDeleteLeadsDialogOpen] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [createLeadDialogOpen, setCreateLeadDialogOpen] = useState(false);
+    const [newLeadForm, setNewLeadForm] = useState({
+        name: "",
+        email: "",
+        phone: "",
+        city: "",
+        source: "",
+        isNewSource: false,
+        newSourceName: "",
+        newSourceUrl: "",
+        assignedTo: "none"
+    });
 
     // Pagination state
     const [currentPage, setCurrentPage] = useState(1);
@@ -141,6 +158,53 @@ export default function MarketingAnalyticsPage() {
             localStorage.removeItem('crm_hot_leads_sources');
             return next;
         });
+    };
+
+    // Source URL Management
+    const [editingSourceForUrl, setEditingSourceForUrl] = useState<string | null>(null);
+    const [newUrlForSource, setNewUrlForSource] = useState<string>("");
+    const [isUpdatingSource, setIsUpdatingSource] = useState(false);
+    const [sourceUpdateDialogOpen, setSourceUpdateDialogOpen] = useState(false);
+
+    const handleOpenSourceUrlDialog = (sourceName: string) => {
+        setEditingSourceForUrl(sourceName);
+        
+        // Find if any current lead already has a URL for this source to pre-populate
+        const existingLead = leads.find(l => (l.source || "").startsWith(`${sourceName}|`));
+        if (existingLead && existingLead.source.includes("|")) {
+            setNewUrlForSource(existingLead.source.split("|")[1]);
+        } else {
+            setNewUrlForSource("");
+        }
+        
+        setSourceUpdateDialogOpen(true);
+    };
+
+    const handleUpdateSourceUrl = async () => {
+        if (!editingSourceForUrl) return;
+        setIsUpdatingSource(true);
+        try {
+            const finalSourceStr = newUrlForSource.trim() 
+                ? `${editingSourceForUrl}|${newUrlForSource.trim()}` 
+                : editingSourceForUrl;
+
+            const { error: updateError } = await supabase
+                .from("leads")
+                .update({ source: finalSourceStr })
+                .or(`source.eq."${editingSourceForUrl}",source.ilike."${editingSourceForUrl}|%"`);
+
+            if (updateError) throw updateError;
+
+            alert(`Successfully updated source links for "${editingSourceForUrl}"`);
+            setSourceUpdateDialogOpen(false);
+            fetchUniqueSources(); 
+            fetchLeads(currentPage); 
+        } catch (err: any) {
+            console.error("Error updating source URL:", err);
+            alert(`Failed to update source: ${err.message}`);
+        } finally {
+            setIsUpdatingSource(false);
+        }
     };
 
     useEffect(() => {
@@ -305,7 +369,7 @@ export default function MarketingAnalyticsPage() {
 
             if (error) throw error;
 
-            const uniqueSourceNames = Array.from(new Set((data || []).map(item => item.source).filter(Boolean))) as string[];
+            const uniqueSourceNames = Array.from(new Set((data || []).map(item => (item.source || "").split("|")[0]).filter(Boolean))) as string[];
             setSources(uniqueSourceNames.map(name => ({ name, total: 0, sales: 0 })));
         } catch (err) {
             console.error("Error fetching sources:", err);
@@ -327,7 +391,8 @@ export default function MarketingAnalyticsPage() {
             const applyFilters = (q: any, skipSource: boolean = false) => {
                 let filteredQ = q;
                 if (!skipSource && selectedSources.length > 0) {
-                    filteredQ = filteredQ.in("source", selectedSources);
+                    const orFilter = selectedSources.map(s => `source.eq.${s},source.ilike."${s}|%"`).join(",");
+                    filteredQ = filteredQ.or(orFilter);
                 }
                 if (startDate && endDate) {
                     const startISO = dayjs(startDate).startOf("day").toISOString();
@@ -412,17 +477,17 @@ export default function MarketingAnalyticsPage() {
             const { data: rawChartData } = await chartQuery.order("created_at", { ascending: false }).limit(10000);
 
             if (rawChartData) {
-                // Secondary In-Memory Filtering for Graphs
-                // We keep rawChartData for the Sidebar counts (so all sources show potential totals)
-                // but we filter it for the Charts based on user selection
                 const filteredChartData = selectedSources.length > 0
-                    ? rawChartData.filter(lead => selectedSources.includes(lead.source || "Unknown"))
+                    ? rawChartData.filter(lead => {
+                        const sName = (lead.source || "Unknown").split("|")[0];
+                        return selectedSources.includes(sName);
+                    })
                     : rawChartData;
 
                 // Aggregating Source Data for Chart (using filtered data)
                 const sourceMapForChart: Record<string, { total: number; sales: number }> = {};
-                filteredChartData.forEach(lead => {
-                    const s = lead.source || "Unknown";
+                rawChartData.forEach(lead => {
+                    const s = (lead.source || "Unknown").split("|")[0];
                     if (!sourceMapForChart[s]) sourceMapForChart[s] = { total: 0, sales: 0 };
                     sourceMapForChart[s].total++;
                     if ((lead.current_stage || "").toLowerCase() === "sale done") {
@@ -624,6 +689,114 @@ export default function MarketingAnalyticsPage() {
         }
     };
 
+    const handleCreateLead = async () => {
+        if (!newLeadForm.name || !newLeadForm.phone) {
+            alert("Name and Phone are required.");
+            return;
+        }
+
+        setLoading(true);
+        try {
+            // 1. Generate business_id
+            const { data: bId, error: bIdError } = await supabase.rpc('generate_custom_lead_id');
+            if (bIdError || !bId) {
+                console.error("RPC Error:", bIdError);
+                throw new Error("Failed to generate Business ID");
+            }
+
+            // 2. Determine source value
+            let sourceValue = newLeadForm.source;
+            if (newLeadForm.isNewSource) {
+                if (!newLeadForm.newSourceName) throw new Error("New source name is required");
+                if (newLeadForm.newSourceUrl) {
+                    sourceValue = `${newLeadForm.newSourceName}|${newLeadForm.newSourceUrl}`;
+                } else {
+                    sourceValue = newLeadForm.newSourceName;
+                }
+            } else if (!sourceValue || sourceValue === "none") {
+                throw new Error("Please select a source");
+            }
+
+            // 3. Determine status and assignment
+            const isAssigned = newLeadForm.assignedTo !== "none";
+            const leadData = {
+                name: newLeadForm.name,
+                email: newLeadForm.email,
+                phone: newLeadForm.phone,
+                city: newLeadForm.city,
+                source: sourceValue,
+                business_id: bId,
+                status: isAssigned ? "Assigned" : "New",
+                current_stage: "Prospect",
+                created_at: new Date().toISOString(),
+                assigned_to: isAssigned ? newLeadForm.assignedTo : null,
+                assigned_at: isAssigned ? new Date().toISOString() : null,
+                extra_data: {}
+            };
+
+            // 4. Insert Lead
+            const { error } = await supabase.from("leads").insert([leadData]);
+
+            if (error) throw error;
+
+            setCreateLeadDialogOpen(false);
+            setNewLeadForm({ 
+                name: "", 
+                email: "", 
+                phone: "", 
+                city: "", 
+                source: "", 
+                isNewSource: false, 
+                newSourceName: "", 
+                newSourceUrl: "", 
+                assignedTo: "none" 
+            });
+            fetchLeads(1);
+            alert("Lead created successfully!");
+        } catch (err: any) {
+            console.error("Error creating lead:", err);
+            alert(`Failed to create lead: ${err.message || 'Unknown error'}`);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const renderSource = (source: string) => {
+        if (!source) return <span className="text-muted-foreground">—</span>;
+        
+        let display = source;
+        let url = "";
+
+        if (source.includes("|")) {
+            const parts = source.split("|");
+            display = parts[0];
+            url = parts[1];
+        } else if (source.startsWith("http://") || source.startsWith("https://") || source.startsWith("www.")) {
+            url = source;
+            display = "View Source";
+        }
+
+        if (url) {
+            const trimmedUrl = url.trim();
+            const finalUrl = (trimmedUrl.startsWith("http://") || trimmedUrl.startsWith("https://")) 
+                ? trimmedUrl 
+                : `https://${trimmedUrl}`;
+                
+            return (
+                <a 
+                    href={finalUrl} 
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    className="text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1 font-medium"
+                >
+                    {display} <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+            );
+        }
+        
+        return source;
+    };
+
 
     const getProbabilityScoreBadge = (extraData: any) => {
         const score = extraData?.probability_score ?? extraData?.Form2?.probability_score ?? extraData?.Form1?.probability_score;
@@ -737,16 +910,25 @@ export default function MarketingAnalyticsPage() {
                                             ({source.total}) - ({source.sales})
                                         </div>
                                     </label>
-                                    <button
-                                        onClick={(e) => { e.preventDefault(); toggleHotSource(source.name); }}
-                                        className={`p-1.5 rounded-full transition-all duration-200 hover:scale-110 ${hotSources.includes(source.name)
-                                            ? "text-orange-500 bg-orange-100 shadow-sm border border-orange-200"
-                                            : "text-gray-400 opacity-60 hover:opacity-100 hover:text-orange-500 hover:bg-orange-50"
-                                            }`}
-                                        title={hotSources.includes(source.name) ? "Remove from Hot Bucket" : "Add to Hot Bucket"}
-                                    >
-                                        <Flame className={`w-3.5 h-3.5 ${hotSources.includes(source.name) ? "fill-orange-500 animate-pulse" : ""}`} />
-                                    </button>
+                                    <div className="flex items-center gap-1 opacity-100 lg:opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button
+                                            onClick={(e) => { e.preventDefault(); handleOpenSourceUrlDialog(source.name); }}
+                                            className="p-1.5 rounded-full text-gray-400 hover:text-blue-600 hover:bg-blue-50"
+                                            title="Update Source URL"
+                                        >
+                                            <Link2 className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button
+                                            onClick={(e) => { e.preventDefault(); toggleHotSource(source.name); }}
+                                            className={`p-1.5 rounded-full transition-all duration-200 hover:scale-110 ${hotSources.includes(source.name)
+                                                ? "text-orange-500 bg-orange-100 shadow-sm border border-orange-200"
+                                                : "text-gray-400 opacity-60 hover:opacity-100 hover:text-orange-500 hover:bg-orange-50"
+                                                }`}
+                                            title={hotSources.includes(source.name) ? "Remove from Hot Bucket" : "Add to Hot Bucket"}
+                                        >
+                                            <Flame className={`w-3.5 h-3.5 ${hotSources.includes(source.name) ? "fill-orange-500 animate-pulse" : ""}`} />
+                                        </button>
+                                    </div>
                                 </div>
                             ))}
                         </div>
@@ -790,6 +972,143 @@ export default function MarketingAnalyticsPage() {
                                     </SelectContent>
                                 </Select>
                             </div>
+                            <div className="ml-auto flex items-center gap-2">
+                                <Dialog open={createLeadDialogOpen} onOpenChange={setCreateLeadDialogOpen}>
+                                    <DialogTrigger asChild>
+                                        <Button className="bg-emerald-600 hover:bg-emerald-700 font-bold gap-2">
+                                            <Plus className="w-4 h-4" /> Create New Lead
+                                        </Button>
+                                    </DialogTrigger>
+                                    <DialogContent className="sm:max-w-[450px]">
+                                        <DialogHeader>
+                                            <DialogTitle className="flex items-center gap-2">
+                                                <UserPlus className="w-5 h-5 text-emerald-600" />
+                                                Add New Manual Lead
+                                            </DialogTitle>
+                                            <DialogDescription>
+                                                Enter lead details manually when they contact you directly.
+                                            </DialogDescription>
+                                        </DialogHeader>
+                                        <div className="grid gap-4 py-4">
+                                            <div className="grid gap-2">
+                                                <Label htmlFor="create-name">Full Name <span className="text-red-500">*</span></Label>
+                                                <Input 
+                                                    id="create-name" 
+                                                    placeholder="John Doe" 
+                                                    value={newLeadForm.name}
+                                                    onChange={(e) => setNewLeadForm({...newLeadForm, name: e.target.value})}
+                                                />
+                                            </div>
+                                            <div className="grid gap-2">
+                                                <Label htmlFor="create-phone">Phone Number <span className="text-red-500">*</span></Label>
+                                                <Input 
+                                                    id="create-phone" 
+                                                    placeholder="+91 XXXXX XXXXX" 
+                                                    value={newLeadForm.phone}
+                                                    onChange={(e) => setNewLeadForm({...newLeadForm, phone: e.target.value})}
+                                                />
+                                            </div>
+                                            <div className="grid gap-2">
+                                                <Label htmlFor="create-email">Email</Label>
+                                                <Input 
+                                                    id="create-email" 
+                                                    type="email" 
+                                                    placeholder="john@example.com" 
+                                                    value={newLeadForm.email}
+                                                    onChange={(e) => setNewLeadForm({...newLeadForm, email: e.target.value})}
+                                                />
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div className="grid gap-2">
+                                                    <Label htmlFor="create-city">City / Location</Label>
+                                                    <Input 
+                                                        id="create-city" 
+                                                        placeholder="Mumbai" 
+                                                        value={newLeadForm.city}
+                                                        onChange={(e) => setNewLeadForm({...newLeadForm, city: e.target.value})}
+                                                    />
+                                                </div>
+                                                <div className="grid gap-2">
+                                                    <Label htmlFor="create-assigned">Assign To (Optional)</Label>
+                                                    <Select 
+                                                        value={newLeadForm.assignedTo} 
+                                                        onValueChange={(v) => setNewLeadForm({...newLeadForm, assignedTo: v})}
+                                                    >
+                                                        <SelectTrigger id="create-assigned">
+                                                            <SelectValue placeholder="Fresher Lead" />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="none">Keep as Fresh Lead</SelectItem>
+                                                            {salesTeamMembers.map(m => (
+                                                                <SelectItem key={m.id} value={m.full_name}>{m.full_name}</SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                            </div>
+
+                                            <div className="grid gap-2 mt-2">
+                                                <Label htmlFor="create-source">Lead Source <span className="text-red-500">*</span></Label>
+                                                <Select 
+                                                    value={newLeadForm.isNewSource ? "ADD_NEW" : newLeadForm.source} 
+                                                    onValueChange={(v) => {
+                                                        if (v === "ADD_NEW") {
+                                                            setNewLeadForm({...newLeadForm, isNewSource: true, source: ""});
+                                                        } else {
+                                                            setNewLeadForm({...newLeadForm, isNewSource: false, source: v});
+                                                        }
+                                                    }}
+                                                >
+                                                    <SelectTrigger id="create-source">
+                                                        <SelectValue placeholder="Select existing or add new" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="ADD_NEW" className="font-bold text-blue-600">
+                                                            + Add New Source
+                                                        </SelectItem>
+                                                        {sources.map(s => (
+                                                            <SelectItem key={s.name} value={s.name}>{s.name}</SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+
+                                            {newLeadForm.isNewSource && (
+                                                <div className="grid grid-cols-2 gap-2 p-3 bg-blue-50/50 rounded-lg border border-blue-100 animate-in fade-in slide-in-from-top-2 duration-300">
+                                                    <div className="grid gap-1.5">
+                                                        <Label htmlFor="newSource" className="text-[10px] font-bold uppercase text-blue-600">New Source Name</Label>
+                                                        <Input 
+                                                            id="newSource" 
+                                                            placeholder="e.g. Instagram Reel" 
+                                                            value={newLeadForm.newSourceName}
+                                                            onChange={(e) => setNewLeadForm({...newLeadForm, newSourceName: e.target.value})}
+                                                            className="h-8 text-xs border-blue-200"
+                                                        />
+                                                    </div>
+                                                    <div className="grid gap-1.5">
+                                                        <Label htmlFor="sourceUrl" className="text-[10px] font-bold uppercase text-blue-600">Source URL (Link)</Label>
+                                                        <Input 
+                                                            id="sourceUrl" 
+                                                            placeholder="https://..." 
+                                                            value={newLeadForm.newSourceUrl}
+                                                            onChange={(e) => setNewLeadForm({...newLeadForm, newSourceUrl: e.target.value})}
+                                                            className="h-8 text-xs border-blue-200"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            )}
+                                            <p className="text-[10px] text-muted-foreground">Adding a URL will make the source clickable for the sales team.</p>
+                                        </div>
+                                        <DialogFooter>
+                                            <Button variant="ghost" onClick={() => setCreateLeadDialogOpen(false)}>Cancel</Button>
+                                            <Button className="bg-emerald-600 hover:bg-emerald-700 gap-2" onClick={handleCreateLead}>
+                                                <Save className="w-4 h-4" /> Create Lead
+                                            </Button>
+                                        </DialogFooter>
+                                    </DialogContent>
+                                </Dialog>
+                            </div>
+
                             <div className="space-y-1">
                                 <Label className="text-xs">Current Stage</Label>
                                 <Select value={stageFilter} onValueChange={setStageFilter}>
@@ -1027,14 +1346,19 @@ export default function MarketingAnalyticsPage() {
                                                     </TableCell>
                                                     <TableCell className="font-mono text-xs">{lead.business_id}</TableCell>
                                                     <TableCell className="font-medium whitespace-nowrap text-sm relative group">
-                                                        <div className="flex items-center gap-2">
+                                                        <a 
+                                                            href={`/leads/${lead.business_id}`} 
+                                                            target="_blank" 
+                                                            rel="noopener noreferrer"
+                                                            className="flex items-center gap-2 text-blue-600 hover:text-blue-800 hover:underline font-semibold"
+                                                        >
                                                             {lead.name}
                                                             {isHotLead(lead) && (
                                                                 <span title="Hot Lead">
                                                                     <Flame className="w-4 h-4 text-orange-500 fill-orange-500 animate-pulse ml-1" />
                                                                 </span>
                                                             )}
-                                                        </div>
+                                                        </a>
                                                     </TableCell>
                                                     <TableCell>
                                                         <div className="text-xs leading-tight">
@@ -1050,7 +1374,9 @@ export default function MarketingAnalyticsPage() {
                                                             {dayjs(lead.created_at).add(5, 'hour').add(30, 'minute').format("HH:mm")} IST
                                                         </span>
                                                     </TableCell>
-                                                    <TableCell className="text-sm">{lead.source}</TableCell>
+                                                    <TableCell className="text-sm">
+                                                        {renderSource(lead.source)}
+                                                    </TableCell>
                                                     <TableCell className="text-center">
                                                         {getProbabilityScoreBadge(lead.extra_data)}
                                                     </TableCell>
@@ -1199,6 +1525,49 @@ export default function MarketingAnalyticsPage() {
                             <DialogFooter>
                                 <Button variant="ghost" onClick={() => setBulkAssignDialogOpen(false)}>Cancel</Button>
                                 <Button variant="default" className="bg-blue-600 hover:bg-blue-700" onClick={handleBulkAssign}>Assign</Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
+
+                    {/* Source URL Update Dialog */}
+                    <Dialog open={sourceUpdateDialogOpen} onOpenChange={setSourceUpdateDialogOpen}>
+                        <DialogContent className="max-w-md">
+                            <DialogHeader>
+                                <DialogTitle className="flex items-center gap-2">
+                                    <Link2 className="w-5 h-5 text-blue-600" />
+                                    Update Source Link
+                                </DialogTitle>
+                                <DialogDescription>
+                                    Update the hyperlink for all leads associated with <strong>"{editingSourceForUrl}"</strong>.
+                                </DialogDescription>
+                            </DialogHeader>
+                            <div className="py-4 space-y-4">
+                                <div className="space-y-2">
+                                    <Label className="text-xs font-bold uppercase text-muted-foreground tracking-wider">Source Name</Label>
+                                    <Input value={editingSourceForUrl || ""} disabled className="bg-muted h-10 font-bold" />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label className="text-xs font-bold uppercase text-muted-foreground tracking-wider">Source URL (Paste Link Here)</Label>
+                                    <Input 
+                                        placeholder="E.g. https://instagram.com/p/reel_id" 
+                                        value={newUrlForSource} 
+                                        onChange={(e) => setNewUrlForSource(e.target.value)}
+                                        className="h-12 border-2 focus:border-blue-500 transition-all font-medium text-base"
+                                    />
+                                    <p className="text-[10px] text-muted-foreground">This will update all leads belonging to this source name.</p>
+                                </div>
+                            </div>
+                            <DialogFooter>
+                                <Button variant="outline" onClick={() => setSourceUpdateDialogOpen(false)} disabled={isUpdatingSource}>
+                                    Cancel
+                                </Button>
+                                <Button 
+                                    className="bg-blue-600 hover:bg-blue-700 text-white font-bold" 
+                                    onClick={handleUpdateSourceUrl}
+                                    disabled={isUpdatingSource}
+                                >
+                                    {isUpdatingSource ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Updating...</> : "Update All Leads"}
+                                </Button>
                             </DialogFooter>
                         </DialogContent>
                     </Dialog>

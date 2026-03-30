@@ -1176,6 +1176,42 @@ ApplyWizz Team`,
   }, [fetchAll]);
 
 
+  const renderSource = (source?: string) => {
+    if (!source) return <span className="text-gray-400">—</span>;
+    
+    let display = source;
+    let url = "";
+
+    if (source.includes("|")) {
+      const parts = source.split("|");
+      display = parts[0];
+      url = parts[1];
+    } else if (source.startsWith("http://") || source.startsWith("https://") || source.startsWith("www.")) {
+      url = source;
+      display = "View Source";
+    }
+
+    if (url) {
+      const trimmedUrl = url.trim();
+      const finalUrl = (trimmedUrl.startsWith("http://") || trimmedUrl.startsWith("https://")) 
+        ? trimmedUrl 
+        : `https://${trimmedUrl}`;
+          
+      return (
+        <a 
+          href={finalUrl} 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          className="text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1 font-medium"
+        >
+          {display} <ExternalLink className="w-3.5 h-3.5" />
+        </a>
+      );
+    }
+    
+    return <span>{source}</span>;
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -1431,7 +1467,7 @@ ApplyWizz Team`,
                 </div>
                 <div className="flex justify-between py-2 border-b border-gray-50 last:border-0">
                   <span className="text-gray-400">Lead Source</span>
-                  <span className="text-gray-700 font-medium">{lead.source || "—"}</span>
+                  <span className="text-gray-700 font-medium">{renderSource(lead.source)}</span>
                 </div>
                 <div className="flex justify-between py-2 border-b border-gray-50 last:border-0">
                   <span className="text-gray-400">Lead Age</span>
