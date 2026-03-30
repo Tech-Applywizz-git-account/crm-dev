@@ -11,6 +11,7 @@
     "test-email": "tsx scripts/test-automatic-email.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-cost-explorer": "^3.1010.0",
     "@aws-sdk/client-s3": "^3.922.0",
     "@hookform/resolvers": "^3.9.1",
     "@radix-ui/react-accordion": "1.2.2",

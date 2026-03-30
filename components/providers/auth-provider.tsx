@@ -650,12 +650,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         "technical", "technical-associate", "resume", "resume-associate", "onboard"
       ],
       Marketing: ["marketing", "marketingAssociate", "onboard", "sales"],
-      "Sales Head": ["sales", "account-management", "onboard"],
+      "Sales Head": ["sales", "onboard"],
       Sales: ["sales", "Sales Associate", "onboard"],
       "Account Management": ["account-management", "onboard"],
       Finance: ["finance", "onboard"],                     // keep as-is unless you want Onboard here too
       "Marketing Associate": ["marketingAssociates"],
-      "Sales Associate": ["sales", "Sales Associate", "onboard", "account-management"],
+      "Sales Associate": ["sales", "Sales Associate", "onboard"],
       "Finance Associate": ["finance-associates"],
       "Accounts Associate": ["account-management",],
       "Technical Head": ["technical", "onboard"],
@@ -663,11 +663,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       "Resume Head": ["resume", "onboard"],
       "Resume Associate": ["resume-associate"],
       "Resume Head-Sales Associate": [
-        "admin", "marketing", "sales", "account-management", "finance", "finance-associates", "marketingAssociate",
+        "admin", "marketing", "sales", "finance", "finance-associates", "marketingAssociate",
         "technical", "technical-associate", "resume", "resume-associate", "onboard"
       ],
       "Resume Associate-Sales Associate": [
-        "admin", "marketing", "sales", "account-management", "finance", "finance-associates", "marketingAssociate",
+        "admin", "marketing", "sales", "finance", "finance-associates", "marketingAssociate",
         "technical", "technical-associate", "resume", "resume-associate", "onboard"
       ],
     };
