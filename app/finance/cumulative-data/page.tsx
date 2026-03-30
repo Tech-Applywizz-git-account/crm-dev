@@ -7,7 +7,7 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Star, ChevronDown, ExternalLink, Calendar, Phone, Mail, Clock, RefreshCw, CheckCircle2, XCircle, Search, Edit2 } from "lucide-react";
+import { Star, ChevronDown, ExternalLink, Calendar, Phone, Mail, Clock, RefreshCw, CheckCircle2, XCircle, Search, Edit2, Eye, EyeOff } from "lucide-react";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -51,6 +51,12 @@ export default function CumulativeDataPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [editingClient, setEditingClient] = useState<RenewalRecord | null>(null);
   const [tempNote, setTempNote] = useState("");
+
+  const [revealed, setRevealed] = useState<Record<string, boolean>>({
+    total: false,
+    renewed: false,
+    pending: false,
+  });
 
   const [dateFilter, setDateFilter] = useState({
     from: new Date(Date.now() - 7 * 86400000).toISOString().split("T")[0],
@@ -237,9 +243,11 @@ export default function CumulativeDataPage() {
       <DashboardLayout>
         <div className="p-8">
           <div className="flex flex-col gap-8 mb-10">
-            <div>
-              <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Cumulative Renewal Records</h1>
-              <p className="text-slate-500 mt-1 text-base">Daily summary of due and processed renewals</p>
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Cumulative Renewal Records</h1>
+                <p className="text-slate-500 mt-1 text-base">Daily summary of due and processed renewals</p>
+              </div>
             </div>
             
             <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
@@ -287,17 +295,41 @@ export default function CumulativeDataPage() {
 
               {/* Counts Section (Now on Right) */}
               <div className="flex flex-wrap items-center gap-3">
-                  <div className="bg-white px-5 py-3 rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center min-w-[100px]">
+                  <div className="bg-white px-5 py-3 rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center min-w-[100px] relative group">
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="absolute top-1 right-1 h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={() => setRevealed(prev => ({ ...prev, total: !prev.total }))}
+                    >
+                      {revealed.total ? <Eye className="h-3 w-3 text-slate-400" /> : <EyeOff className="h-3 w-3 text-slate-400" />}
+                    </Button>
                     <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest leading-none mb-2">Total</span>
-                    <span className="text-xl font-semibold text-slate-800 leading-none">{rangeSummary.total}</span>
+                    <span className="text-xl font-semibold text-slate-800 leading-none">{revealed.total ? rangeSummary.total : "•••"}</span>
                   </div>
-                  <div className="bg-emerald-50 px-5 py-3 rounded-2xl border border-emerald-100 shadow-sm flex flex-col items-center min-w-[100px]">
+                  <div className="bg-emerald-50 px-5 py-3 rounded-2xl border border-emerald-100 shadow-sm flex flex-col items-center min-w-[100px] relative group">
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="absolute top-1 right-1 h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={() => setRevealed(prev => ({ ...prev, renewed: !prev.renewed }))}
+                    >
+                      {revealed.renewed ? <Eye className="h-3 w-3 text-emerald-400" /> : <EyeOff className="h-3 w-3 text-emerald-400" />}
+                    </Button>
                     <span className="text-[10px] font-semibold text-emerald-600 uppercase tracking-widest leading-none mb-2">Renewed</span>
-                    <span className="text-xl font-semibold text-emerald-700 leading-none">{rangeSummary.renewed}</span>
+                    <span className="text-xl font-semibold text-emerald-700 leading-none">{revealed.renewed ? rangeSummary.renewed : "•••"}</span>
                   </div>
-                  <div className="bg-rose-50 px-5 py-3 rounded-2xl border border-rose-100 shadow-sm flex flex-col items-center min-w-[100px]">
+                  <div className="bg-rose-50 px-5 py-3 rounded-2xl border border-rose-100 shadow-sm flex flex-col items-center min-w-[100px] relative group">
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="absolute top-1 right-1 h-5 w-5 opacity-0 group-hover:opacity-100 transition-opacity"
+                      onClick={() => setRevealed(prev => ({ ...prev, pending: !prev.pending }))}
+                    >
+                      {revealed.pending ? <Eye className="h-3 w-3 text-rose-400" /> : <EyeOff className="h-3 w-3 text-rose-400" />}
+                    </Button>
                     <span className="text-[10px] font-semibold text-rose-600 uppercase tracking-widest leading-none mb-2">Pending</span>
-                    <span className="text-xl font-semibold text-rose-700 leading-none">{rangeSummary.pending}</span>
+                    <span className="text-xl font-semibold text-rose-700 leading-none">{revealed.pending ? rangeSummary.pending : "•••"}</span>
                   </div>
               </div>
             </div>

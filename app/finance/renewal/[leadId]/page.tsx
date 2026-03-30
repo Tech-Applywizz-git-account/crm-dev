@@ -761,6 +761,7 @@
 //app/finance/renewal/%5BleadId%5D/page.tsx
 "use client";
 
+import dayjs from "dayjs";
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/utils/supabase/client";
@@ -949,6 +950,13 @@ export default function RenewalPage() {
     fetchData();
   }, []);
 
+  const dateWithTime = (dateStr: string) => {
+    const now = new Date();
+    const d = new Date(dateStr);
+    d.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
+    return d.toISOString();
+  };
+
   // Move function OUTSIDE useEffect so it can be reused
   async function fetchHistory() {
     if (!leadId) return;
@@ -972,116 +980,6 @@ export default function RenewalPage() {
     fetchHistory();
   }, [leadId]);
 
-  // async function handleSubmit() {
-  //   if (!user) {
-  //     alert("Please wait for user data to load...");
-  //     return;
-  //   }
-  //   if (!clientName || !clientEmail || !paymentMode) {
-  //     alert("Please fill required fields before submitting.");
-  //     return;
-  //   }
-
-  //   if (!closedAtDate) {
-  //     alert("Please select closed date to proceed.");
-  //     return;
-  //   }
-
-  //   if (no_of_job_applications === "none") {
-  //     alert("Please select no of job applications to proceed.");
-  //     return;
-  //   }
-
-
-  //   setSaving(true);
-
-  //   // Update Lead
-  //   await supabase.from("leads").update({
-  //     name: clientName,
-  //     email: clientEmail,
-  //     phone: leadPhone,
-  //     // application_email: companyApplicationEmail,
-  //     city,
-  //   }).eq("business_id", leadId);
-
-  //   // Insert Renewal
-
-  //   // ------------------ Compute onboarded_date ------------------
-  //   if (!originalClosedAtDate) return; // safety check
-
-  //   const closedPlus45 = new Date(
-  //     originalClosedAtDate.getTime() + Number(subscriptionCycle) * 24 * 60 * 60 * 1000 + 45 * 24 * 60 * 60 * 1000
-  //   );
-
-  //   // console.log("Subscription cycle days:", Number(subscriptionCycle));
-  //   // console.log("original closed at date:", originalClosedAtDate.getTime());
-  //   // console.log("45 * 24 * 60 * 60 * 1000",45 * 24 * 60 * 60 * 1000)
-  //   // console.log("==========================================")
-  //   // Apply onboarded date logic based on original closed date
-  //   const onboardedDate =
-  //     closedPlus45 > new Date() ? closedAtDate : null;
-
-  //   // console.log("Original closed:", originalClosedAtDate);
-  //   // console.log("Closed + 45 days:", closedPlus45);
-  //   // console.log("Onboarded date:", onboardedDate);
-
-  //   // console.log("==========================================")
-  //   //   console.log("Subscription cycle days:", Number(subscriptionCycle));
-  //   // console.log("original closed at date:", originalClosedAtDate.getTime());
-  //   // console.log("45 * 24 * 60 * 60 * 1000",45 * 24 * 60 * 60 * 1000)
-
-  //   const { error } = await supabase.from("sales_closure").insert({
-  //     lead_id: leadId,
-  //     lead_name: clientName,
-  //     email: clientEmail,
-  //     company_application_email: companyApplicationEmail,
-  //     payment_mode: paymentMode,
-  //     sale_value: totalSale,
-  //     subscription_cycle: Number(subscriptionCycle),
-  //     closed_at: closedAtDate,
-  //     finance_status: "Paid",
-  //     commitments,
-  //     application_sale_value: Number(autoCalculatedValue),
-  //     resume_sale_value: Number(resumeValue || 0),
-  //     portfolio_sale_value: Number(portfolioValue || 0),
-  //     linkedin_sale_value: Number(linkedinValue || 0),
-  //     github_sale_value: Number(githubValue || 0),
-  //     courses_sale_value: Number(coursesValue || 0),
-  //     job_board_value: Number(jobBoardValue || 0),
-  //     badge_value: Number(badgeValue || 0),
-  //     custom_sale_value: Number(customValue || 0),
-  //     custom_label: customLabel || "",
-  //     no_of_job_applications,
-  //     onboarded_date: onboardedDate,
-  //     account_assigned_name: user?.name || user?.email || "Finance",
-  //     account_assigned_email: user?.email || null,
-  //   });
-
-  //   // Notify Sales and Log Milestone (Phase 4)
-  //   if (!error) {
-  //     await supabase.from("call_history").insert([{
-  //       lead_id: leadId,
-  //       email: clientEmail,
-  //       assigned_to: user?.name || user?.email || "Finance",
-  //       current_stage: "Renewal Confirmed",
-  //       notes: `RENEWAL COMPLETED by ${user?.name || user?.email || 'Finance Associate'}: Client renewed for ${subscriptionCycle} days. Next due: ${nextDueDate || 'N/A'}. Total Sale: $${totalSale}.`
-  //     }]);
-  //   }
-
-
-  //   if (error) {
-  //     toast.error(error.message);
-  //     console.log(error);
-  //     setSaving(false);
-  //     return;
-  //   }
-
-  //   fetchHistory(); // refresh sidebar
-  //   toast.success("Renewal submitted successfully 🎉");
-  //   setSaving(false);
-
-  //   setTimeout(() => confirmCloseAction(), 600);
-  // }
   async function handleSubmit() {
 
     // Get the REAL authenticated user from Supabase
@@ -1144,7 +1042,7 @@ export default function RenewalPage() {
       payment_mode: paymentMode,
       sale_value: totalSale,
       subscription_cycle: Number(subscriptionCycle),
-      closed_at: closedAtDate,
+      closed_at: dateWithTime(closedAtDate),
       finance_status: "Paid",
 
       commitments,
@@ -1185,6 +1083,8 @@ export default function RenewalPage() {
           "Finance",
 
         current_stage: "Renewal Confirmed",
+        followup_date: dayjs().format("YYYY-MM-DD"),
+        call_started_at: dayjs().toISOString(),
 
         notes: `RENEWAL COMPLETED by ${authUser?.user_metadata?.name ??
           authUser?.email ??

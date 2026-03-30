@@ -47,7 +47,7 @@ export async function POST(req: Request) {
       
       // Define who sees everything
       const hasElevatedPrivilege = normalizedRoles.some(r => 
-        ["admin", "super admin", "sales head", "marketing", "resume head", "accounts"].includes(r)
+        ["admin", "super admin", "sales head", "marketing", "accounts"].includes(r)
       );
 
       if (isSalesAssociate && !hasElevatedPrivilege) {

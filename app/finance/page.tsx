@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { User, DollarSign, TrendingUp, TrendingDown, Pause, Star } from "lucide-react";
+import { User, DollarSign, TrendingUp, TrendingDown, Pause, Star, Eye, EyeOff } from "lucide-react";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
@@ -230,6 +230,14 @@ export default function FinancePage() {
   const [badgeValue, setBadgeValue] = useState('');
   const [customValue, setCustomValue] = useState('');
 
+
+  const [revealed, setRevealed] = useState<Record<string, boolean>>({
+    total: false,
+    paid: false,
+    unpaid: false,
+    paused: false,
+    gotPlaced: false,
+  });
 
   const [tlActiveCounts, setTlActiveCounts] = useState<
     { associates_tl_email: string | null; count: number }[]
@@ -828,7 +836,8 @@ export default function FinancePage() {
   const pausedCount = allSales.filter(s => s.finance_status === "Paused").length;
   const gotPlacedCount = allSales.filter(s => s.finance_status === "Got Placed").length;
 
-  const formatCurrency = (amount: number) => {
+  const formatCurrency = (amount: number, cardId?: string) => {
+    if (cardId && !revealed[cardId]) return "••••••";
     return new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: "USD",
@@ -1151,9 +1160,8 @@ export default function FinancePage() {
                     {refreshing ? "Refreshing..." : "Refresh"}
                   </span>
                 </Button>
-
-
               </div>
+
               <p className="text-gray-600 mt-2">Track revenue and manage payments</p>
             </div>
             {/* <Button onClick={() => setShowRevenueDialog(true)}>Revenue</Button> */}
@@ -1201,10 +1209,15 @@ export default function FinancePage() {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
-                <DollarSign className="h-4 w-4 text-muted-foreground" />
+                <div className="flex items-center gap-2">
+                  <DollarSign className="h-4 w-4 text-muted-foreground" />
+                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setRevealed(prev => ({ ...prev, total: !prev.total }))}>
+                    {revealed.total ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{formatCurrency(totalRevenue)}</div>
+                <div className="text-2xl font-bold">{formatCurrency(totalRevenue, "total")}</div>
                 <p className="text-xs text-muted-foreground">{sales.length} total clients</p>
               </CardContent>
             </Card>
@@ -1212,10 +1225,15 @@ export default function FinancePage() {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Paid</CardTitle>
-                <TrendingUp className="h-4 w-4 text-green-600" />
+                <div className="flex items-center gap-2">
+                  <TrendingUp className="h-4 w-4 text-green-600" />
+                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setRevealed(prev => ({ ...prev, paid: !prev.paid }))}>
+                    {revealed.paid ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-green-600">{formatCurrency(paidRevenue)}</div>
+                <div className="text-2xl font-bold text-green-600">{formatCurrency(paidRevenue, "paid")}</div>
                 <p className="text-xs text-muted-foreground">{paidCount} transactions</p>
               </CardContent>
             </Card>
@@ -1223,10 +1241,15 @@ export default function FinancePage() {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Unpaid</CardTitle>
-                <TrendingDown className="h-4 w-4 text-red-600" />
+                <div className="flex items-center gap-2">
+                  <TrendingDown className="h-4 w-4 text-red-600" />
+                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setRevealed(prev => ({ ...prev, unpaid: !prev.unpaid }))}>
+                    {revealed.unpaid ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-red-600">{formatCurrency(unpaidRevenue)}</div>
+                <div className="text-2xl font-bold text-red-600">{formatCurrency(unpaidRevenue, "unpaid")}</div>
                 <p className="text-xs text-muted-foreground">{unpaidCount} clients</p>
               </CardContent>
             </Card>
@@ -1234,10 +1257,15 @@ export default function FinancePage() {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Paused</CardTitle>
-                <Pause className="h-4 w-4 text-yellow-600" />
+                <div className="flex items-center gap-2">
+                  <Pause className="h-4 w-4 text-yellow-600" />
+                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setRevealed(prev => ({ ...prev, paused: !prev.paused }))}>
+                    {revealed.paused ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-yellow-600">{formatCurrency(pausedRevenue)}</div>
+                <div className="text-2xl font-bold text-yellow-600">{formatCurrency(pausedRevenue, "paused")}</div>
                 <p className="text-xs text-muted-foreground">{pausedCount} clients</p>
               </CardContent>
             </Card>
@@ -1245,10 +1273,17 @@ export default function FinancePage() {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Got Placed</CardTitle>
-                <User className="h-4 w-4 text-blue-600" />
+                <div className="flex items-center gap-2">
+                  <User className="h-4 w-4 text-blue-600" />
+                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setRevealed(prev => ({ ...prev, gotPlaced: !prev.gotPlaced }))}>
+                    {revealed.gotPlaced ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl text-blue-600 font-bold">{gotPlacedCount} Clients placed</div>
+                <div className="text-2xl text-blue-600 font-bold">
+                  {revealed.gotPlaced ? `${gotPlacedCount} Clients placed` : "••••••"}
+                </div>
                 {/* <p className="text-xs text-muted-foreground">{sales.length} total clients</p> */}
               </CardContent>
             </Card>
