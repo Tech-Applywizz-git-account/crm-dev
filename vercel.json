@@ -7,6 +7,14 @@
         {
             "path": "/api/cron/other-role-alert",
             "schedule": "30 2 * * *"
+        },
+        {
+            "path": "/api/scheduling/scheduler-cron",
+            "schedule": "*/5 * * * *"
+        },
+        {
+            "path": "/api/scheduling/renewal-check-cron",
+            "schedule": "0 0 * * *"
         }
     ]
 }
