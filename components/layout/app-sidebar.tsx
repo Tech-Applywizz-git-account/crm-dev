@@ -233,6 +233,8 @@ import {
   Building2,
   Wrench,
   FileText,
+  BarChart3,
+  Settings,
 } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
@@ -268,6 +270,27 @@ const navigationItems = [
     icon: UserCheck,
     module: "account-management",
     description: "Client Relations",
+  },
+  {
+    title: "Scheduling Dashboard",
+    url: "/account-manager-dashboard",
+    icon: BarChart3,
+    module: "account-management",
+    description: "Your scheduled calls",
+  },
+  {
+    title: "Scheduling Admin",
+    url: "/admin-panel",
+    icon: Users,
+    module: "account-management",
+    description: "Manage scheduling team",
+  },
+  {
+    title: "Scheduling Settings",
+    url: "/scheduling-settings",
+    icon: Settings,
+    module: "account-management",
+    description: "Configure scheduler",
   },
   {
     title: "Finance CRM",

@@ -168,173 +168,171 @@ export default function AccountManagerDashboard() {
   }))
 
   return (
-    <div className="min-h-screen bg-gray-50 p-8">
-      <div className="max-w-7xl mx-auto space-y-8">
-        {/* Header */}
-        <div>
-          <h1 className="text-4xl font-bold text-gray-900">My Dashboard</h1>
-          <p className="text-gray-600 mt-2">Welcome back! Here's your scheduling overview.</p>
-        </div>
+    <div className="space-y-6">
+      {/* Header */}
+      <div>
+        <h1 className="text-4xl font-bold text-gray-900">My Dashboard</h1>
+        <p className="text-gray-600 mt-2">Welcome back! Here's your scheduling overview.</p>
+      </div>
 
-        {/* Key Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-gray-600">Total Clients</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{dashboardData.totalClients}</div>
-              <p className="text-xs text-gray-500 mt-1">Active accounts</p>
-            </CardContent>
-          </Card>
+      {/* Key Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-600">Total Clients</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{dashboardData.totalClients}</div>
+            <p className="text-xs text-gray-500 mt-1">Active accounts</p>
+          </CardContent>
+        </Card>
 
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-gray-600">Scheduled Calls</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-blue-600">{dashboardData.totalCalls.scheduled || 0}</div>
-              <p className="text-xs text-gray-500 mt-1">Coming up</p>
-            </CardContent>
-          </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-600">Scheduled Calls</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-600">{dashboardData.totalCalls.scheduled || 0}</div>
+            <p className="text-xs text-gray-500 mt-1">Coming up</p>
+          </CardContent>
+        </Card>
 
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-gray-600">Completed Today</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-green-600">{dashboardData.totalCalls.completed || 0}</div>
-              <p className="text-xs text-gray-500 mt-1">This period</p>
-            </CardContent>
-          </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-600">Completed Today</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600">{dashboardData.totalCalls.completed || 0}</div>
+            <p className="text-xs text-gray-500 mt-1">This period</p>
+          </CardContent>
+        </Card>
 
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-gray-600">SLA Breaches</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-red-600">{slaBreach.length}</div>
-              <p className="text-xs text-gray-500 mt-1">Need attention</p>
-            </CardContent>
-          </Card>
-        </div>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-gray-600">SLA Breaches</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-red-600">{slaBreach.length}</div>
+            <p className="text-xs text-gray-500 mt-1">Need attention</p>
+          </CardContent>
+        </Card>
+      </div>
 
-        {/* Charts Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Calls by Type</CardTitle>
-              <CardDescription>Distribution of call types this period</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ResponsiveContainer width="100%" height={300}>
-                <PieChart>
-                  <Pie data={callTypeData} cx="50%" cy="50%" labelLine={false} label={({ name, value }) => `${name}: ${value}`} outerRadius={100} fill="#8884d8" dataKey="value">
-                    {callTypeData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                </PieChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
+      {/* Charts Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Calls by Type</CardTitle>
+            <CardDescription>Distribution of call types this period</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={300}>
+              <PieChart>
+                <Pie data={callTypeData} cx="50%" cy="50%" labelLine={false} label={({ name, value }) => `${name}: ${value}`} outerRadius={100} fill="#8884d8" dataKey="value">
+                  {callTypeData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Calls by Status</CardTitle>
-              <CardDescription>Current status breakdown</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={callStatusData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="name" />
-                  <YAxis />
-                  <Tooltip />
-                  <Bar dataKey="value" fill="#3b82f6">
-                    {callStatusData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Calls by Status</CardTitle>
+            <CardDescription>Current status breakdown</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={callStatusData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="name" />
+                <YAxis />
+                <Tooltip />
+                <Bar dataKey="value" fill="#3b82f6">
+                  {callStatusData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      </div>
 
-        {/* Tabs Section */}
-        <Tabs defaultValue="upcoming" className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="upcoming">
-              <Calendar className="w-4 h-4 mr-2" />
-              Upcoming Calls ({upcomingCalls.length})
-            </TabsTrigger>
-            <TabsTrigger value="sla">
-              <AlertCircle className="w-4 h-4 mr-2" />
-              SLA Breaches ({slaBreach.length})
-            </TabsTrigger>
-            <TabsTrigger value="unscheduled">
-              <Clock className="w-4 h-4 mr-2" />
-              Unscheduled ({unscheduledCalls.length})
-            </TabsTrigger>
-          </TabsList>
+      {/* Tabs Section */}
+      <Tabs defaultValue="upcoming" className="w-full">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="upcoming">
+            <Calendar className="w-4 h-4 mr-2" />
+            Upcoming Calls ({upcomingCalls.length})
+          </TabsTrigger>
+          <TabsTrigger value="sla">
+            <AlertCircle className="w-4 h-4 mr-2" />
+            SLA Breaches ({slaBreach.length})
+          </TabsTrigger>
+          <TabsTrigger value="unscheduled">
+            <Clock className="w-4 h-4 mr-2" />
+            Unscheduled ({unscheduledCalls.length})
+          </TabsTrigger>
+        </TabsList>
 
-          <TabsContent value="upcoming" className="space-y-4">
-            <div className="flex gap-4 items-end">
-              <div className="flex-1">
-                <label className="text-sm font-medium text-gray-700">Search</label>
-                <Input
-                  placeholder="Search by lead ID or client name..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="mt-1"
-                />
-              </div>
-              <Select value={selectedFilter} onValueChange={(v: any) => setSelectedFilter(v)}>
-                <SelectTrigger className="w-40">
-                  <SelectValue placeholder="Filter by..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All</SelectItem>
-                  <SelectItem value="today">Today</SelectItem>
-                  <SelectItem value="week">This Week</SelectItem>
-                </SelectContent>
-              </Select>
+        <TabsContent value="upcoming" className="space-y-4">
+          <div className="flex gap-4 items-end">
+            <div className="flex-1">
+              <label className="text-sm font-medium text-gray-700">Search</label>
+              <Input
+                placeholder="Search by lead ID or client name..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="mt-1"
+              />
             </div>
+            <Select value={selectedFilter} onValueChange={(v: any) => setSelectedFilter(v)}>
+              <SelectTrigger className="w-40">
+                <SelectValue placeholder="Filter by..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="today">Today</SelectItem>
+                <SelectItem value="week">This Week</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
-            <div className="space-y-2">
-              {upcomingCalls.length === 0 ? (
-                <div className="text-center py-8 text-gray-500">No upcoming calls</div>
-              ) : (
-                upcomingCalls.map(call => (
-                  <CallCard key={call.id} call={call} />
-                ))
-              )}
-            </div>
-          </TabsContent>
-
-          <TabsContent value="sla" className="space-y-4">
-            {slaBreach.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">All SLA targets on track!</div>
+          <div className="space-y-2">
+            {upcomingCalls.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">No upcoming calls</div>
             ) : (
-              slaBreach.map(call => (
-                <CallCard key={call.id} call={call} showSlaWarning={true} />
-              ))
-            )}
-          </TabsContent>
-
-          <TabsContent value="unscheduled" className="space-y-4">
-            {unscheduledCalls.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">All calls scheduled!</div>
-            ) : (
-              unscheduledCalls.map(call => (
+              upcomingCalls.map(call => (
                 <CallCard key={call.id} call={call} />
               ))
             )}
-          </TabsContent>
-        </Tabs>
-      </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="sla" className="space-y-4">
+          {slaBreach.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">All SLA targets on track!</div>
+          ) : (
+            slaBreach.map(call => (
+              <CallCard key={call.id} call={call} showSlaWarning={true} />
+            ))
+          )}
+        </TabsContent>
+
+        <TabsContent value="unscheduled" className="space-y-4">
+          {unscheduledCalls.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">All calls scheduled!</div>
+          ) : (
+            unscheduledCalls.map(call => (
+              <CallCard key={call.id} call={call} />
+            ))
+          )}
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }
