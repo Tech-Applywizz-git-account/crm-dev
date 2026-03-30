@@ -4,6 +4,7 @@ import type { Metadata } from "next"
 import { Inter } from "next/font/google"
 import "./globals.css"
 import { Toaster } from "@/components/ui/toaster"
+import { Toaster as SonnerToaster } from "@/components/ui/sonner"
 import { AuthProvider } from "@/components/providers/auth-provider"
 import { SidebarProvider } from "@/components/ui/sidebar" // ✅ added
 import { LoadingProvider } from "@/components/providers/LoadingContext"
@@ -27,7 +28,7 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
         <SignupRedirectGuard /> {/* 🛑 Stops auto-login after email verification */}
 
@@ -37,6 +38,7 @@ export default function RootLayout({
               <EmailProvider>
                 {children}
                 <Toaster />
+                <SonnerToaster position="top-center" richColors />
               </EmailProvider>
             </SidebarProvider>
           </AuthProvider>

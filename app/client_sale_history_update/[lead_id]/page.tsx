@@ -152,7 +152,7 @@
 //   const [selectedRecord, setSelectedRecord] = useState<SaleRecord | null>(null);
 //   const [showUpdateCard, setShowUpdateCard] = useState(false);
 
-  
+
 // const [teamLoaded, setTeamLoaded] = useState(false);
 // const [loadingTeam, setLoadingTeam] = useState(false);
 
@@ -460,7 +460,7 @@
 
 
 //         <DashboardLayout>
-   
+
 // <div className="w-[85vw] px-6 space-y-6 overflow-x-auto">
 //       {/* CARD 1: SALES HISTORY TABLE */}
 //       <Card>
@@ -1354,6 +1354,8 @@ interface RecordFormState {
   associates_tl_name: string;
   associates_tl_email: string;
   digital_resume_sale_value: string;
+  account_assigned_name: string;
+  account_assigned_email: string;
 }
 
 
@@ -1527,6 +1529,8 @@ export default function ClientSaleHistoryPage() {
       associates_tl_name: rec.associates_tl_name || "",
       associates_tl_email: rec.associates_tl_email || "",
       digital_resume_sale_value: rec.digital_resume_sale_value?.toString() || "",
+      account_assigned_name: rec.account_assigned_name || "",
+      account_assigned_email: rec.account_assigned_email || "",
     });
 
 
@@ -1652,6 +1656,8 @@ export default function ClientSaleHistoryPage() {
         ? Number(recordForm.digital_resume_sale_value)
         : null,
       associates_tl_name: recordForm.associates_tl_name || null,
+      account_assigned_name: recordForm.account_assigned_name || null,
+      account_assigned_email: recordForm.account_assigned_email || null,
     };
 
 

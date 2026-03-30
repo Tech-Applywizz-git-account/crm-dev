@@ -1,745 +1,19 @@
-// // app/marketingAssociates/page.tsx
-// "use client";
-
-// import { useEffect, useMemo, useState, useContext } from "react";
-// import ProtectedRoute from "@/components/auth/ProtectedRoute";
-// import { DashboardLayout } from "@/components/layout/dashboard-layout";
-// import { supabase } from "@/utils/supabase/client";
-// import { LoadingContext } from "@/components/providers/LoadingContext";
-// import FullScreenLoader from "@/components/ui/FullScreenLoader";
-
-// import { Button } from "@/components/ui/button";
-// import { Input } from "@/components/ui/input";
-// import { Badge } from "@/components/ui/badge";
-// import {
-//   DropdownMenu,
-//   DropdownMenuTrigger,
-//   DropdownMenuContent,
-// } from "@/components/ui/dropdown-menu";
-// import { Label } from "@/components/ui/label";
-
-// import {
-//   Card, CardHeader, CardTitle, CardContent,
-// } from "@/components/ui/card";
-// import {
-//   Table, TableHeader, TableHead, TableRow, TableBody, TableCell,
-// } from "@/components/ui/table";
-// import {
-//   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
-// } from "@/components/ui/select";
-// import { Search } from "lucide-react";
-
-// /* ========= Types ========= */
-
-// type LeadStatus = "New" | "Assigned";
-// type LeadSource =
-//   | "Instagram"
-//   | "WhatsApp"
-//   | "Google"
-//   | "Google Forms"
-//   | "Facebook"
-//   | "Unknown";
-
-// interface Lead {
-//   id: string;
-//   business_id: string;
-//   name: string;
-//   phone: string;
-//   email: string;
-//   source: LeadSource | string;
-//   city: string;
-//   status: LeadStatus;
-//   created_at: string;
-//   assigned_to?: string | null;
-//   assigned_at?: string | null;
-//   current_stage?: string | null;
-// }
-
-// /* ========= Helpers ========= */
-
-// const cmpStr = (a?: string | null, b?: string | null) =>
-//   (a ?? "").localeCompare(b ?? "", undefined, { sensitivity: "base" });
-
-// const getSourceBadgeColor = (source: string) => {
-//   const s = (source ?? "").toLowerCase();
-//   if (s === "instagram") return "bg-pink-100 text-pink-800 rounded-md";
-//   if (s === "whatsapp") return "bg-green-100 text-green-800 rounded-md";
-//   if (s === "google" || s === "google forms")
-//     return "bg-gray-900 text-gray-100 rounded-md";
-//   if (s === "facebook") return "bg-blue-200 text-blue-900 rounded-md";
-//   return "bg-gray-100 text-gray-800 rounded-md";
-// };
-
-// function useDebounced<T>(value: T, ms = 300) {
-//   const [v, setV] = useState(value);
-//   useEffect(() => {
-//     const t = setTimeout(() => setV(value), ms);
-//     return () => clearTimeout(t);
-//   }, [value, ms]);
-//   return v;
-// }
-
-// /* ========= Page ========= */
-
-// export default function MarketingAssociatesPage() {
-//   const { loading, setLoading } = useContext(LoadingContext);
-//   const [leads, setLeads] = useState<Lead[]>([]);
-//   const [totalCount, setTotalCount] = useState(0);
-
-//   const [rawSearch, setRawSearch] = useState("");
-//   const searchTerm = useDebounced(rawSearch, 300);
-
-//   const [statusFilter, setStatusFilter] = useState<"all" | LeadStatus>("all");
-//   const [sourceFilter, setSourceFilter] = useState<string>("all");
-//   const [uniqueSources, setUniqueSources] = useState<string[]>([]);
-//   const [startDate, setStartDate] = useState<string>(""); // YYYY-MM-DD
-// const [endDate, setEndDate] = useState<string>("");
-
-// //   const [pageSize, setPageSize] = useState(15);
-// const [pageSize, setPageSize] = useState<number | "all">(15);
-
-//   const [currentPage, setCurrentPage] = useState(1);
-
-//   const [sortConfig, setSortConfig] = useState<{
-//     key:
-//       | "business_id"
-//       | "name"
-//       | "city"
-//       | "source"
-//       | "created_at"
-//       | "lead_age";
-//     direction: "asc" | "desc";
-//   } | null>(null);
-
-// //   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
-// const totalPages =
-//   pageSize === "all" ? 1 : Math.max(1, Math.ceil(totalCount / pageSize));
-
-
-//   const handleSort = (
-//     key:
-//       | "business_id"
-//       | "name"
-//       | "city"
-//       | "source"
-//       | "created_at"
-//       | "lead_age",
-//     direction: "asc" | "desc"
-//   ) => setSortConfig({ key, direction });
-
-//   /* ======= Data fetching ======= */
-
-//   const fetchDistinctSources = async () => {
-//     const { data, error } = await supabase
-//       .from("leads")
-//       .select("source")
-//       .neq("source", "");
-//     if (!error) {
-//       const sources = [
-//         ...new Set(
-//           (data ?? [])
-//             .map((r: any) => (r.source ?? "").trim())
-//             .filter(Boolean)
-//         ),
-//       ];
-//       setUniqueSources(sources);
-//     }
-//   };
-
-//   const getUTCRange = (dateStr: string, isStart: boolean) => {
-//   // dateStr is YYYY-MM-DD
-//   const d = new Date(dateStr);
-//   if (Number.isNaN(d.getTime())) return null;
-//   if (isStart) d.setHours(0, 0, 0, 0);
-//   else d.setHours(23, 59, 59, 999);
-//   return d.toISOString(); // UTC
-// };
-
-// const fetchLeads = async () => {
-//   setLoading(true);
-//   try {
-//    let query = supabase
-//   .from("leads")
-//   .select("*", { count: "exact" })
-//   .order("created_at", { ascending: false });
-
-// // page size / pagination
-// if (pageSize !== "all") {
-//   const from = (currentPage - 1) * pageSize;
-//   const to = from + pageSize - 1;
-//   query = query.range(from, to);
-// }
-
-// // ✅ date range filter
-// if (startDate && endDate) {
-//   const fromISO = getUTCRange(startDate, true);
-//   const toISO = getUTCRange(endDate, false);
-//   if (fromISO && toISO) {
-//     query = query.gte("created_at", fromISO).lte("created_at", toISO);
-//   }
-// }
-
-// // existing filters
-// if (statusFilter !== "all") query = query.eq("status", statusFilter);
-// if (sourceFilter !== "all") query = query.eq("source", sourceFilter);
-// if (searchTerm) {
-//   query = query.or(
-//     `name.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%,city.ilike.%${searchTerm}%`
-//   );
-// }
-
-
-//     const { data, error, count } = await query;
-//     if (error) throw error;
-
-//     setLeads((data as Lead[]) ?? []);
-//     setTotalCount(count || 0);
-//   } catch (e) {
-//     console.error("Error fetching leads:", e);
-//   } finally {
-//     setLoading(false);
-//   }
-// };
-
-
-//   useEffect(() => {
-//     fetchDistinctSources();
-//   }, []);
-
-//   useEffect(() => {
-//   fetchLeads();
-//   // eslint-disable-next-line react-hooks/exhaustive-deps
-// }, [currentPage, pageSize, statusFilter, sourceFilter, searchTerm, startDate, endDate]);
-
-
-//   /* ======= Sorting (client) ======= */
-//   const sortedLeads = useMemo(() => {
-//     if (!sortConfig) return leads;
-//     const { key, direction } = sortConfig;
-//     const dir = direction === "asc" ? 1 : -1;
-//     const copy = [...leads];
-
-//     return copy.sort((a, b) => {
-//       if (key === "created_at") {
-//         const ad = new Date(a.created_at).getTime();
-//         const bd = new Date(b.created_at).getTime();
-//         return (ad - bd) * dir;
-//       }
-//       if (key === "lead_age") {
-//         const aAge = Date.now() - new Date(a.created_at).getTime();
-//         const bAge = Date.now() - new Date(b.created_at).getTime();
-//         return (aAge - bAge) * dir;
-//       }
-//       if (key === "business_id") {
-//         const num = (v?: string) => {
-//           const m = v?.match(/\d+$/);
-//           return m ? parseInt(m[0], 10) : 0;
-//         };
-//         return (num(a.business_id) - num(b.business_id)) * dir;
-//       }
-//       // name/city/source
-//       return cmpStr((a as any)[key], (b as any)[key]) * dir;
-//     });
-//   }, [leads, sortConfig]);
-
-//   return (
-//     <>
-//       {loading && <FullScreenLoader />}
-//       <ProtectedRoute
-//         allowedRoles={["Marketing Associate", "Marketing", "Super Admin"]}
-//       >
-//         <DashboardLayout>
-//           <div className="space-y-6">
-//             {/* Header */}
-//             <div className="flex justify-between items-center">
-//               <div>
-//                 <h1 className="text-3xl font-bold text-gray-900">
-//                   Marketing Associates
-//                 </h1>
-//                 <p className="text-gray-600 mt-2">
-//                   View and manage leads assigned across the funnel
-//                 </p>
-//               </div>
-//             </div>
-
-//             {/* Stats */}
-//             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-//               <Card>
-//                 <CardHeader className="pb-2">
-//                   <CardTitle className="text-sm font-medium">
-//                     Total Leads (this view)
-//                   </CardTitle>
-//                 </CardHeader>
-//                 <CardContent>
-//                   <div className="text-2xl font-bold">{totalCount}</div>
-//                 </CardContent>
-//               </Card>
-//               <Card>
-//                 <CardHeader className="pb-2">
-//                   <CardTitle className="text-sm font-medium">
-//                     Page Size
-//                   </CardTitle>
-//                 </CardHeader>
-//                 <CardContent>
-//                   <Select
-//   value={String(pageSize)}
-//   onValueChange={(v) => {
-//     if (v === "all") {
-//       setPageSize("all");
-//       setCurrentPage(1);
-//     } else {
-//       setPageSize(Number(v));
-//       setCurrentPage(1);
-//     }
-//   }}
-// >
-//   <SelectTrigger className="w-[150px]">
-//     <SelectValue
-//       placeholder={
-//         pageSize === "all" ? "All" : `${pageSize} per page`
-//       }
-//     />
-//   </SelectTrigger>
-//   <SelectContent>
-//     {[15, 25, 50, 100].map((n) => (
-//       <SelectItem key={n} value={String(n)}>
-//         {n} per page
-//       </SelectItem>
-//     ))}
-//     <SelectItem value="all">All</SelectItem>
-//   </SelectContent>
-// </Select>
-
-//                 </CardContent>
-//               </Card>
-//               <Card>
-//                 <CardHeader className="pb-2">
-//                   <CardTitle className="text-sm font-medium">
-//                     Assigned (page)
-//                   </CardTitle>
-//                 </CardHeader>
-//                 <CardContent>
-//                   <div className="text-2xl font-bold">
-//                     {leads.filter((l) => l.status === "Assigned").length}
-//                   </div>
-//                 </CardContent>
-//               </Card>
-//               <Card>
-//                 <CardHeader className="pb-2">
-//                   <CardTitle className="text-sm font-medium">
-//                     New (page)
-//                   </CardTitle>
-//                 </CardHeader>
-//                 <CardContent>
-//                   <div className="text-2xl font-bold">
-//                     {leads.filter((l) => l.status === "New").length}
-//                   </div>
-//                 </CardContent>
-//               </Card>
-//             </div>
-
-//             {/* Controls */}
-//             <Card>
-//               <CardHeader className="pb-2">
-//                 <CardTitle>Leads</CardTitle>
-//               </CardHeader>
-//               <CardContent>
-//                 <div className="flex flex-col sm:flex-row gap-4 mb-6">
-//                   <div className="relative flex-1">
-//                     <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-//                     <Input
-//                       placeholder="Search by name, phone, email, or city..."
-//                       value={rawSearch}
-//                       onChange={(e) => {
-//                         setRawSearch(e.target.value);
-//                         setCurrentPage(1);
-//                       }}
-//                       className="pl-10 w-full"
-//                     />
-//                   </div>
-
-//                   <Select
-//                     value={statusFilter}
-//                     onValueChange={(v) => {
-//                       setStatusFilter(v as any);
-//                       setCurrentPage(1);
-//                     }}
-//                   >
-//                     <SelectTrigger className="min-w-[150px] w-full sm:w-auto">
-//                       <SelectValue placeholder="Status" />
-//                     </SelectTrigger>
-//                     <SelectContent>
-//                       <SelectItem value="all">All Status</SelectItem>
-//                       <SelectItem value="New">New</SelectItem>
-//                       <SelectItem value="Assigned">Assigned</SelectItem>
-//                     </SelectContent>
-//                   </Select>
-
-//                   <Select
-//                     value={sourceFilter}
-//                     onValueChange={(v) => {
-//                       setSourceFilter(v);
-//                       setCurrentPage(1);
-//                     }}
-//                   >
-//                     <SelectTrigger className="min-w-[180px] w-full sm:w-auto">
-//                       <SelectValue placeholder="Source" />
-//                     </SelectTrigger>
-//                     <SelectContent>
-//                       <SelectItem value="all">All Sources</SelectItem>
-//                       {uniqueSources.map((src) => (
-//                         <SelectItem key={src} value={src}>
-//                           {src}
-//                         </SelectItem>
-//                       ))}
-//                     </SelectContent>
-//                   </Select>
-
-//                   <DropdownMenu>
-//   <DropdownMenuTrigger asChild>
-//     <Button variant="outline" className="min-w-[200px]">
-//       {startDate && endDate
-//         ? `📅 ${startDate.split("-").reverse().join("-")} → ${endDate
-//             .split("-")
-//             .reverse()
-//             .join("-")}`
-//         : "📅 Date Range"}
-//     </Button>
-//   </DropdownMenuTrigger>
-
-//   <DropdownMenuContent className="p-4 space-y-4 w-[260px]">
-//     <div className="space-y-2">
-//       <Label className="text-sm text-gray-600">Start Date</Label>
-//       <Input
-//         type="date"
-//         placeholder="dd-mm-yyyy"
-//         value={startDate}
-//         onChange={(e) => {
-//           setStartDate(e.target.value);
-//           // if only one side is filled, we still let the user pick the other;
-//           // fetchLeads will run when both are present (or when End is set)
-//         }}
-//       />
-//     </div>
-
-//     <div className="space-y-2">
-//       <Label className="text-sm text-gray-600">End Date</Label>
-//       <Input
-//         type="date"
-//         placeholder="dd-mm-yyyy"
-//         value={endDate}
-//         onChange={(e) => {
-//           setEndDate(e.target.value);
-//           // fetch triggers via useEffect when both dates exist
-//           if (!startDate) {
-//             // UX nicety: if user picks end first, default start to same day
-//             setStartDate(e.target.value);
-//           }
-//           // always reset to first page when dates change
-//           setCurrentPage(1);
-//         }}
-//       />
-//     </div>
-
-//     <Button
-//       variant="ghost"
-//       className="text-red-500 text-sm p-0"
-//       onClick={() => {
-//         setStartDate("");
-//         setEndDate("");
-//         setCurrentPage(1);
-//       }}
-//     >
-//       ❌ Clear Filter
-//     </Button>
-//   </DropdownMenuContent>
-
-
-// </DropdownMenu>
-
-//                 </div>
-
-//                 {/* Table */}
-//                 <div className="w-full overflow-x-auto">
-//                   <Table className="min-w-[1000px] w-full break-words text-center">
-//                     <TableHeader>
-//                       <TableRow>
-//                         <TableHead className="w-16 max-w-[70px] whitespace-normal">
-//                           s.no
-//                         </TableHead>
-
-//                         <TableHead className="text-center">
-//                           <div className="flex items-center gap-1 justify-center">
-//                             ID
-//                             <span
-//                               onClick={() => handleSort("business_id", "asc")}
-//                               className={`cursor-pointer ${
-//                                 sortConfig?.key === "business_id" &&
-//                                 sortConfig.direction === "asc"
-//                                   ? "text-blue-700 font-bold"
-//                                   : "text-gray-500"
-//                               }`}
-//                             >
-//                               ↑
-//                             </span>
-//                             <span
-//                               onClick={() => handleSort("business_id", "desc")}
-//                               className={`cursor-pointer ${
-//                                 sortConfig?.key === "business_id" &&
-//                                 sortConfig.direction === "desc"
-//                                   ? "text-blue-700 font-bold"
-//                                   : "text-gray-500"
-//                               }`}
-//                             >
-//                               ↓
-//                             </span>
-//                           </div>
-//                         </TableHead>
-
-//                         <TableHead className="text-center">
-//                           <div className="flex items-center gap-1 justify-center">
-//                             Name
-//                             <span
-//                               onClick={() => handleSort("name", "asc")}
-//                               className={`cursor-pointer ${
-//                                 sortConfig?.key === "name" &&
-//                                 sortConfig.direction === "asc"
-//                                   ? "text-blue-700 font-semibold"
-//                                   : "text-gray-500"
-//                               }`}
-//                             >
-//                               ↑
-//                             </span>
-//                             <span
-//                               onClick={() => handleSort("name", "desc")}
-//                               className={`cursor-pointer ${
-//                                 sortConfig?.key === "name" &&
-//                                 sortConfig.direction === "desc"
-//                                   ? "text-blue-700 font-semibold"
-//                                   : "text-gray-500"
-//                               }`}
-//                             >
-//                               ↓
-//                             </span>
-//                           </div>
-//                         </TableHead>
-
-//                         <TableHead className="text-center">Phone</TableHead>
-//                         <TableHead className="text-center">Email</TableHead>
-
-//                         <TableHead className="text-center">
-//                           <div className="flex items-center gap-1 justify-center">
-//                             City
-//                             <span
-//                               onClick={() => handleSort("city", "asc")}
-//                               className={`cursor-pointer ${
-//                                 sortConfig?.key === "city" &&
-//                                 sortConfig.direction === "asc"
-//                                   ? "text-blue-700 font-semibold"
-//                                   : "text-gray-500"
-//                               }`}
-//                             >
-//                               ↑
-//                             </span>
-//                             <span
-//                               onClick={() => handleSort("city", "desc")}
-//                               className={`cursor-pointer ${
-//                                 sortConfig?.key === "city" &&
-//                                 sortConfig.direction === "desc"
-//                                   ? "text-blue-700 font-semibold"
-//                                   : "text-gray-500"
-//                               }`}
-//                             >
-//                               ↓
-//                             </span>
-//                           </div>
-//                         </TableHead>
-
-//                         <TableHead className="text-center">Source</TableHead>
-
-//                         <TableHead className="text-center">Status</TableHead>
-
-//                         <TableHead className="text-center">
-//                           <div className="flex items-center gap-1 justify-center">
-//                             Created At
-//                             <span
-//                               onClick={() => handleSort("created_at", "asc")}
-//                               className={`cursor-pointer ${
-//                                 sortConfig?.key === "created_at" &&
-//                                 sortConfig.direction === "asc"
-//                                   ? "text-blue-700 font-semibold"
-//                                   : "text-gray-500"
-//                               }`}
-//                             >
-//                               ↑
-//                             </span>
-//                             <span
-//                               onClick={() => handleSort("created_at", "desc")}
-//                               className={`cursor-pointer ${
-//                                 sortConfig?.key === "created_at" &&
-//                                 sortConfig.direction === "desc"
-//                                   ? "text-blue-700 font-semibold"
-//                                   : "text-gray-500"
-//                               }`}
-//                             >
-//                               ↓
-//                             </span>
-//                           </div>
-//                         </TableHead>
-
-//                         <TableHead className="text-center">
-//                           <div className="flex items-center gap-1 justify-center">
-//                             Lead Age
-//                             <span
-//                               onClick={() => handleSort("lead_age", "asc")}
-//                               className={`cursor-pointer ${
-//                                 sortConfig?.key === "lead_age" &&
-//                                 sortConfig.direction === "asc"
-//                                   ? "text-blue-700 font-semibold"
-//                                   : "text-gray-500"
-//                               }`}
-//                             >
-//                               ↑
-//                             </span>
-//                             <span
-//                               onClick={() => handleSort("lead_age", "desc")}
-//                               className={`cursor-pointer ${
-//                                 sortConfig?.key === "lead_age" &&
-//                                 sortConfig.direction === "desc"
-//                                   ? "text-blue-700 font-semibold"
-//                                   : "text-gray-500"
-//                               }`}
-//                             >
-//                               ↓
-//                             </span>
-//                           </div>
-//                         </TableHead>
-//                       </TableRow>
-//                     </TableHeader>
-
-//                     <TableBody>
-//                       {sortedLeads.map((lead, idx) => (
-//                         <TableRow key={lead.id} className="hover:bg-gray-50">
-//                           <TableCell className="font-medium">
-//                             {typeof pageSize === "number"
-//                               ? (currentPage - 1) * pageSize + idx + 1
-//                               : idx + 1}
-//                           </TableCell>
-
-//                           <TableCell className="font-medium">
-//                             {lead.business_id}
-//                           </TableCell>
-
-//                           <TableCell className="font-medium max-w-[160px] whitespace-normal">
-//                             {lead.name}
-//                           </TableCell>
-
-//                           <TableCell className="max-w-[120px] whitespace-normal">
-//                             {lead.phone}
-//                           </TableCell>
-
-//                           <TableCell className="max-w-[160px] whitespace-normal">
-//                             {lead.email}
-//                           </TableCell>
-
-//                           <TableCell className="max-w-[120px] whitespace-normal">
-//                             {lead.city}
-//                           </TableCell>
-
-//                           <TableCell className="max-w-[90px] whitespace-normal">
-//                             <Badge className={getSourceBadgeColor(lead.source)}>
-//                               {lead.source}
-//                             </Badge>
-//                           </TableCell>
-
-//                           <TableCell className="max-w-[100px] whitespace-normal">
-//                             <Badge
-//                               className={
-//                                 lead.status === "Assigned"
-//                                   ? "bg-green-100 text-green-800"
-//                                   : "bg-red-100 text-red-800"
-//                               }
-//                             >
-//                               {lead.status}
-//                             </Badge>
-//                           </TableCell>
-
-//                           <TableCell className="max-w-[140px] whitespace-normal">
-//                             {new Date(lead.created_at).toLocaleString("en-IN", {
-//                               timeZone: "Asia/Kolkata",
-//                               year: "numeric",
-//                               month: "2-digit",
-//                               day: "2-digit",
-//                               hour: "2-digit",
-//                               minute: "2-digit",
-//                               hour12: true,
-//                             })}
-//                           </TableCell>
-
-//                           <TableCell className="max-w-[100px] whitespace-normal">
-//                             {(() => {
-//                               const createdAt = new Date(lead.created_at);
-//                               const diffDays = Math.floor(
-//                                 (Date.now() - createdAt.getTime()) /
-//                                   (1000 * 60 * 60 * 24)
-//                               );
-//                               return `${diffDays} days`;
-//                             })()}
-//                           </TableCell>
-//                         </TableRow>
-//                       ))}
-//                     </TableBody>
-//                   </Table>
-
-//                   {/* Pagination */}
-//                   <div className="flex justify-between items-center mt-4">
-//                     <Button
-//   variant="outline"
-//   onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-//   disabled={pageSize === "all" || currentPage === 1}
-// >
-//   ⬅ Previous
-// </Button>
-//                    <span className="text-gray-600">
-//   {pageSize === "all" ? (
-//     <>Showing all {totalCount} leads</>
-//   ) : (
-//     <>Page {currentPage} of {totalPages}</>
-//   )}
-// </span>
-
-//                     <Button
-//   variant="outline"
-//   onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-//   disabled={pageSize === "all" || currentPage === totalPages}
-// >
-//   Next ➡
-// </Button>
-//                   </div>
-//                 </div>
-//                 </CardContent>
-//               </Card>
-//             </div>
-//           </DashboardLayout>
-//       </ProtectedRoute>
-//     </>
-//   );
-// }
-
-
 // app/marketingAssociates/page.tsx
 "use client";
 
-import { useEffect, useMemo, useState, useContext } from "react";
+import { useEffect, useMemo, useState, useContext, useRef } from "react";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import Link from "next/link";
 import { supabase } from "@/utils/supabase/client";
 import { LoadingContext } from "@/components/providers/LoadingContext";
 import FullScreenLoader from "@/components/ui/FullScreenLoader";
+import dayjs from "dayjs";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -768,7 +42,8 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select";
-import { Search } from "lucide-react";
+import { Search, Flame, Filter, XCircle } from "lucide-react";
+import { useCallback } from "react";
 
 /* ========= Types ========= */
 
@@ -872,8 +147,8 @@ export default function MarketingAssociatesPage() {
   const [view, setView] = useState<"marketing" | "sales">("marketing");
 
   // Shared filters
-  const [rawSearch, setRawSearch] = useState("");
-  const searchTerm = useDebounced(rawSearch, 300);
+  const [searchTerm, setSearchTerm] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const [pageSize, setPageSize] = useState<number | "all">(15);
   const [currentPage, setCurrentPage] = useState(1);
@@ -925,6 +200,57 @@ export default function MarketingAssociatesPage() {
     | "closed_at";
     direction: "asc" | "desc";
   } | null>(null);
+
+  // —— Hot Leads States ——
+  const [hotSources, setHotSources] = useState<string[]>(() => {
+    if (typeof window !== 'undefined') {
+      const primary = localStorage.getItem('hotSources');
+      const fallback = localStorage.getItem('crm_hot_leads_sources');
+
+      try {
+        const parseSources = (raw: string | null) => {
+          if (!raw) return [] as string[];
+          const parsed = JSON.parse(raw);
+          return Array.isArray(parsed) ? parsed.filter((s: any) => typeof s === "string") : [];
+        };
+
+        return Array.from(
+          new Map(
+            [...parseSources(primary), ...parseSources(fallback)].map((source) => [
+              source.trim().toLowerCase(),
+              source,
+            ])
+          ).values()
+        );
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  });
+
+  const isHotLead = useCallback((lead: Lead) => {
+    const normalizedLeadSource = String(lead.source || "").trim().toLowerCase();
+    const normalizedHotSources = hotSources.map((source) => String(source || "").trim().toLowerCase());
+    if (!normalizedLeadSource || !normalizedHotSources.includes(normalizedLeadSource)) return false;
+    const leadDate = dayjs(lead.created_at);
+    const ageInDays = dayjs().diff(leadDate, 'day');
+    return ageInDays >= 0 && ageInDays <= 3;
+  }, [hotSources]);
+
+  const toggleHotSource = (source: string) => {
+    setHotSources(prev => {
+      const normalizedSource = source.trim().toLowerCase();
+      const next = prev.some((s) => s.trim().toLowerCase() === normalizedSource)
+        ? prev.filter((s) => s.trim().toLowerCase() !== normalizedSource)
+        : [...prev, source];
+      localStorage.setItem('hotSources', JSON.stringify(next));
+      localStorage.setItem('crm_hot_leads_sources', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const [showHotSourcesDialog, setShowHotSourcesDialog] = useState(false);
 
   const totalPages =
     pageSize === "all"
@@ -1208,11 +534,16 @@ export default function MarketingAssociatesPage() {
 
   const sortedLeads = useMemo(() => {
     let rows = [...leads];
-    if (!sortConfig) return rows;
+
+    // Priority 1: Hot Leads (Always sorted at top)
+    const hotLeads = rows.filter(isHotLead);
+    const regularLeads = rows.filter(l => !isHotLead(l));
+
+    if (!sortConfig) return [...hotLeads.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()), ...regularLeads.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())];
     const { key, direction } = sortConfig;
     const dir = direction === "asc" ? 1 : -1;
 
-    return rows.sort((a, b) => {
+    const sortFn = (a: Lead, b: Lead) => {
       if (key === "created_at") {
         const ad = new Date(a.created_at).getTime();
         const bd = new Date(b.created_at).getTime();
@@ -1231,8 +562,10 @@ export default function MarketingAssociatesPage() {
         return (num(a.business_id) - num(b.business_id)) * dir;
       }
       return cmpStr((a as any)[key], (b as any)[key]) * dir;
-    });
-  }, [leads, sortConfig]);
+    };
+
+    return [...hotLeads.sort(sortFn), ...regularLeads.sort(sortFn)];
+  }, [leads, sortConfig, isHotLead]);
 
   const sortedSales = useMemo(() => {
     let rows = [...salesRows];
@@ -1272,6 +605,11 @@ export default function MarketingAssociatesPage() {
               </div>
 
               <div className="flex gap-2">
+                <Link href="/marketingAnalytics" target="_blank">
+                  <Button variant="outline" className="gap-2">
+                    📊Analytics
+                  </Button>
+                </Link>
                 <Button
                   variant={view === "marketing" ? "default" : "outline"}
                   onClick={() => {
@@ -1302,8 +640,13 @@ export default function MarketingAssociatesPage() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">
+                  <div className="text-2xl font-bold flex items-center gap-2">
                     {view === "marketing" ? mkTotalCount : salesTotalCount}
+                    {view === "marketing" && leads.some(isHotLead) && (
+                      <Badge variant="outline" className="bg-orange-50 text-orange-600 border-orange-200 gap-1">
+                        <Flame className="w-3 h-3 fill-orange-500" /> {leads.filter(isHotLead).length} Hot
+                      </Badge>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -1410,21 +753,35 @@ export default function MarketingAssociatesPage() {
               </CardHeader>
               <CardContent>
                 <div className="flex flex-col sm:flex-row gap-4 mb-6">
-                  <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                    <Input
-                      placeholder={
-                        view === "marketing"
-                          ? "Search by name, phone, email, or city..."
-                          : "Search by lead name, email, or lead ID..."
-                      }
-                      value={rawSearch}
-                      onChange={(e) => {
-                        setRawSearch(e.target.value);
+                  <div className="relative flex-1 flex gap-2">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                      <Input
+                        ref={searchInputRef}
+                        placeholder={
+                          view === "marketing"
+                            ? "Search by name, phone, email, or city..."
+                            : "Search by lead name, email, or lead ID..."
+                        }
+                        defaultValue={searchTerm}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            setSearchTerm(searchInputRef.current?.value || "");
+                            setCurrentPage(1);
+                          }
+                        }}
+                        className="pl-10 w-full"
+                      />
+                    </div>
+                    <Button
+                      onClick={() => {
+                        setSearchTerm(searchInputRef.current?.value || "");
                         setCurrentPage(1);
                       }}
-                      className="pl-10 w-full"
-                    />
+                      className="bg-blue-600 hover:bg-blue-700 text-white"
+                    >
+                      Search
+                    </Button>
                   </div>
 
                   {view === "marketing" ? (
@@ -1465,6 +822,15 @@ export default function MarketingAssociatesPage() {
                           ))}
                         </SelectContent>
                       </Select>
+
+                      {/* <Button
+                        variant="outline"
+                        onClick={() => setShowHotSourcesDialog(true)}
+                        className={`gap-2 ${hotSources.length > 0 ? "border-orange-200 text-orange-600 hover:bg-orange-50" : ""}`}
+                      >
+                        <Flame className={`w-4 h-4 ${hotSources.length > 0 ? "fill-orange-500 text-orange-500 animate-pulse" : ""}`} />
+                        Hot Bucket ({hotSources.length})
+                      </Button> */}
 
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -1646,9 +1012,9 @@ export default function MarketingAssociatesPage() {
                                     handleSort("business_id", "asc")
                                   }
                                   className={`cursor-pointer ${sortConfig?.key === "business_id" &&
-                                      sortConfig.direction === "asc"
-                                      ? "text-blue-700 font-bold"
-                                      : "text-gray-500"
+                                    sortConfig.direction === "asc"
+                                    ? "text-blue-700 font-bold"
+                                    : "text-gray-500"
                                     }`}
                                 >
                                   ↑
@@ -1658,9 +1024,9 @@ export default function MarketingAssociatesPage() {
                                     handleSort("business_id", "desc")
                                   }
                                   className={`cursor-pointer ${sortConfig?.key === "business_id" &&
-                                      sortConfig.direction === "desc"
-                                      ? "text-blue-700 font-bold"
-                                      : "text-gray-500"
+                                    sortConfig.direction === "desc"
+                                    ? "text-blue-700 font-bold"
+                                    : "text-gray-500"
                                     }`}
                                 >
                                   ↓
@@ -1674,9 +1040,9 @@ export default function MarketingAssociatesPage() {
                                 <span
                                   onClick={() => handleSort("name", "asc")}
                                   className={`cursor-pointer ${sortConfig?.key === "name" &&
-                                      sortConfig.direction === "asc"
-                                      ? "text-blue-700 font-semibold"
-                                      : "text-gray-500"
+                                    sortConfig.direction === "asc"
+                                    ? "text-blue-700 font-semibold"
+                                    : "text-gray-500"
                                     }`}
                                 >
                                   ↑
@@ -1684,9 +1050,9 @@ export default function MarketingAssociatesPage() {
                                 <span
                                   onClick={() => handleSort("name", "desc")}
                                   className={`cursor-pointer ${sortConfig?.key === "name" &&
-                                      sortConfig.direction === "desc"
-                                      ? "text-blue-700 font-semibold"
-                                      : "text-gray-500"
+                                    sortConfig.direction === "desc"
+                                    ? "text-blue-700 font-semibold"
+                                    : "text-gray-500"
                                     }`}
                                 >
                                   ↓
@@ -1703,9 +1069,9 @@ export default function MarketingAssociatesPage() {
                                 <span
                                   onClick={() => handleSort("city", "asc")}
                                   className={`cursor-pointer ${sortConfig?.key === "city" &&
-                                      sortConfig.direction === "asc"
-                                      ? "text-blue-700 font-semibold"
-                                      : "text-gray-500"
+                                    sortConfig.direction === "asc"
+                                    ? "text-blue-700 font-semibold"
+                                    : "text-gray-500"
                                     }`}
                                 >
                                   ↑
@@ -1713,9 +1079,9 @@ export default function MarketingAssociatesPage() {
                                 <span
                                   onClick={() => handleSort("city", "desc")}
                                   className={`cursor-pointer ${sortConfig?.key === "city" &&
-                                      sortConfig.direction === "desc"
-                                      ? "text-blue-700 font-semibold"
-                                      : "text-gray-500"
+                                    sortConfig.direction === "desc"
+                                    ? "text-blue-700 font-semibold"
+                                    : "text-gray-500"
                                     }`}
                                 >
                                   ↓
@@ -1735,9 +1101,9 @@ export default function MarketingAssociatesPage() {
                                     handleSort("created_at", "asc")
                                   }
                                   className={`cursor-pointer ${sortConfig?.key === "created_at" &&
-                                      sortConfig.direction === "asc"
-                                      ? "text-blue-700 font-semibold"
-                                      : "text-gray-500"
+                                    sortConfig.direction === "asc"
+                                    ? "text-blue-700 font-semibold"
+                                    : "text-gray-500"
                                     }`}
                                 >
                                   ↑
@@ -1747,9 +1113,9 @@ export default function MarketingAssociatesPage() {
                                     handleSort("created_at", "desc")
                                   }
                                   className={`cursor-pointer ${sortConfig?.key === "created_at" &&
-                                      sortConfig.direction === "desc"
-                                      ? "text-blue-700 font-semibold"
-                                      : "text-gray-500"
+                                    sortConfig.direction === "desc"
+                                    ? "text-blue-700 font-semibold"
+                                    : "text-gray-500"
                                     }`}
                                 >
                                   ↓
@@ -1763,9 +1129,9 @@ export default function MarketingAssociatesPage() {
                                 <span
                                   onClick={() => handleSort("lead_age", "asc")}
                                   className={`cursor-pointer ${sortConfig?.key === "lead_age" &&
-                                      sortConfig.direction === "asc"
-                                      ? "text-blue-700 font-semibold"
-                                      : "text-gray-500"
+                                    sortConfig.direction === "asc"
+                                    ? "text-blue-700 font-semibold"
+                                    : "text-gray-500"
                                     }`}
                                 >
                                   ↑
@@ -1773,9 +1139,9 @@ export default function MarketingAssociatesPage() {
                                 <span
                                   onClick={() => handleSort("lead_age", "desc")}
                                   className={`cursor-pointer ${sortConfig?.key === "lead_age" &&
-                                      sortConfig.direction === "desc"
-                                      ? "text-blue-700 font-semibold"
-                                      : "text-gray-500"
+                                    sortConfig.direction === "desc"
+                                    ? "text-blue-700 font-semibold"
+                                    : "text-gray-500"
                                     }`}
                                 >
                                   ↓
@@ -1798,12 +1164,17 @@ export default function MarketingAssociatesPage() {
                                 {lead.business_id}
                               </TableCell>
 
-                              
-<TableCell
+
+                              <TableCell
                                 className="font-medium max-w-[150px] break-words whitespace-normal cursor-pointer text-blue-600 hover:underline"
                                 onClick={() => window.open(`/leads/${lead.business_id}`, "_blank")}
                               >
-                                {lead.name ?? "-"}
+                                <div className="flex items-center gap-2 justify-center">
+                                  {lead.name ?? "-"}
+                                  {lead.status === "Assigned" && isHotLead(lead) && (
+                                    <Flame className="w-4 h-4 text-orange-500 fill-orange-500 animate-bounce" />
+                                  )}
+                                </div>
                               </TableCell>
 
                               {/* <TableCell className="font-medium max-w-[160px] whitespace-normal">
@@ -1894,9 +1265,9 @@ export default function MarketingAssociatesPage() {
                                     handleSalesSort("lead_id", "asc")
                                   }
                                   className={`cursor-pointer ${salesSort?.key === "lead_id" &&
-                                      salesSort.direction === "asc"
-                                      ? "text-blue-700 font-bold"
-                                      : "text-gray-500"
+                                    salesSort.direction === "asc"
+                                    ? "text-blue-700 font-bold"
+                                    : "text-gray-500"
                                     }`}
                                 >
                                   ↑
@@ -1906,9 +1277,9 @@ export default function MarketingAssociatesPage() {
                                     handleSalesSort("lead_id", "desc")
                                   }
                                   className={`cursor-pointer ${salesSort?.key === "lead_id" &&
-                                      salesSort.direction === "desc"
-                                      ? "text-blue-700 font-bold"
-                                      : "text-gray-500"
+                                    salesSort.direction === "desc"
+                                    ? "text-blue-700 font-bold"
+                                    : "text-gray-500"
                                     }`}
                                 >
                                   ↓
@@ -1924,9 +1295,9 @@ export default function MarketingAssociatesPage() {
                                     handleSalesSort("lead_name", "asc")
                                   }
                                   className={`cursor-pointer ${salesSort?.key === "lead_name" &&
-                                      salesSort.direction === "asc"
-                                      ? "text-blue-700 font-bold"
-                                      : "text-gray-500"
+                                    salesSort.direction === "asc"
+                                    ? "text-blue-700 font-bold"
+                                    : "text-gray-500"
                                     }`}
                                 >
                                   ↑
@@ -1936,9 +1307,9 @@ export default function MarketingAssociatesPage() {
                                     handleSalesSort("lead_name", "desc")
                                   }
                                   className={`cursor-pointer ${salesSort?.key === "lead_name" &&
-                                      salesSort.direction === "desc"
-                                      ? "text-blue-700 font-bold"
-                                      : "text-gray-500"
+                                    salesSort.direction === "desc"
+                                    ? "text-blue-700 font-bold"
+                                    : "text-gray-500"
                                     }`}
                                 >
                                   ↓
@@ -1955,9 +1326,9 @@ export default function MarketingAssociatesPage() {
                                     handleSalesSort("source", "asc")
                                   }
                                   className={`cursor-pointer ${salesSort?.key === "source" &&
-                                      salesSort.direction === "asc"
-                                      ? "text-blue-700 font-bold"
-                                      : "text-gray-500"
+                                    salesSort.direction === "asc"
+                                    ? "text-blue-700 font-bold"
+                                    : "text-gray-500"
                                     }`}
                                 >
                                   ↑
@@ -1967,9 +1338,9 @@ export default function MarketingAssociatesPage() {
                                     handleSalesSort("source", "desc")
                                   }
                                   className={`cursor-pointer ${salesSort?.key === "source" &&
-                                      salesSort.direction === "desc"
-                                      ? "text-blue-700 font-bold"
-                                      : "text-gray-500"
+                                    salesSort.direction === "desc"
+                                    ? "text-blue-700 font-bold"
+                                    : "text-gray-500"
                                     }`}
                                 >
                                   ↓
@@ -1984,9 +1355,9 @@ export default function MarketingAssociatesPage() {
                                     handleSalesSort("assigned_to", "asc")
                                   }
                                   className={`cursor-pointer ${salesSort?.key === "assigned_to" &&
-                                      salesSort.direction === "asc"
-                                      ? "text-blue-700 font-bold"
-                                      : "text-gray-500"
+                                    salesSort.direction === "asc"
+                                    ? "text-blue-700 font-bold"
+                                    : "text-gray-500"
                                     }`}
                                 >
                                   ↑
@@ -1996,9 +1367,9 @@ export default function MarketingAssociatesPage() {
                                     handleSalesSort("assigned_to", "desc")
                                   }
                                   className={`cursor-pointer ${salesSort?.key === "assigned_to" &&
-                                      salesSort.direction === "desc"
-                                      ? "text-blue-700 font-bold"
-                                      : "text-gray-500"
+                                    salesSort.direction === "desc"
+                                    ? "text-blue-700 font-bold"
+                                    : "text-gray-500"
                                     }`}
                                 >
                                   ↓
@@ -2018,9 +1389,9 @@ export default function MarketingAssociatesPage() {
                                     handleSalesSort("closed_at", "asc")
                                   }
                                   className={`cursor-pointer ${salesSort?.key === "closed_at" &&
-                                      salesSort.direction === "asc"
-                                      ? "text-blue-700 font-bold"
-                                      : "text-gray-500"
+                                    salesSort.direction === "asc"
+                                    ? "text-blue-700 font-bold"
+                                    : "text-gray-500"
                                     }`}
                                 >
                                   ↑
@@ -2030,9 +1401,9 @@ export default function MarketingAssociatesPage() {
                                     handleSalesSort("closed_at", "desc")
                                   }
                                   className={`cursor-pointer ${salesSort?.key === "closed_at" &&
-                                      salesSort.direction === "desc"
-                                      ? "text-blue-700 font-bold"
-                                      : "text-gray-500"
+                                    salesSort.direction === "desc"
+                                    ? "text-blue-700 font-bold"
+                                    : "text-gray-500"
                                     }`}
                                 >
                                   ↓
@@ -2153,7 +1524,43 @@ export default function MarketingAssociatesPage() {
               </CardContent>
             </Card>
           </div>
-          {/* </div> */}
+
+          <Dialog open={showHotSourcesDialog} onOpenChange={setShowHotSourcesDialog}>
+            <DialogContent className="sm:max-w-[425px]">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Flame className="w-5 h-5 text-orange-500 fill-orange-500" />
+                  Manage Hot Sources
+                </DialogTitle>
+                <DialogDescription>
+                  Leads from these sources created in the last 3 days will be marked as "Hot" and pinned to the top.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 py-4 text-center">
+                <div className="flex flex-wrap gap-2 justify-center">
+                  {uniqueSources.map(source => (
+                    <Badge
+                      key={source}
+                      variant={hotSources.includes(source) ? "default" : "outline"}
+                      className={`cursor-pointer transition-all hover:scale-105 ${hotSources.includes(source) ? "bg-orange-500 hover:bg-orange-600" : "hover:border-orange-400"}`}
+                      onClick={() => toggleHotSource(source)}
+                    >
+                      {source}
+                      {hotSources.includes(source) && <XCircle className="w-3 h-3 ml-1" />}
+                    </Badge>
+                  ))}
+                </div>
+                {uniqueSources.length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-4 italic">
+                    No sources found to mark as hot.
+                  </p>
+                )}
+              </div>
+              <DialogFooter>
+                <Button onClick={() => setShowHotSourcesDialog(false)} className="w-full">Done</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </DashboardLayout>
       </ProtectedRoute>
     </>

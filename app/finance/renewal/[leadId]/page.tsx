@@ -102,7 +102,7 @@
 
 //           console.log("Fetched id:", leadId);
 
-   
+
 //     // fetch lead
 //     const { data: lead, error: leadError } = await supabase
 //   .from("leads")
@@ -333,19 +333,19 @@
 //     const highlight = (value: number) =>
 //   value > 0 ? "text-green-600 font-semibold" : "text-gray-800";
 
-   
+
 
 //   return (
 //     <DashboardLayout>
 //     <div className="flex gap-4 w-full p-6 pt-0">
 //       {/* <div className="mb-2 flex items-center justify-between">
 //         <h1 className="text-2xl font-bold">
-        
+
 //         </h1>
 //       </div> */}
 
 //       <div className="flex-1">
-        
+
 //         <Card className="lg:col-span-2">
 //           <CardHeader>
 //             <CardTitle>  Payment Renewal — {clientName} - {leadId}</CardTitle>
@@ -596,7 +596,7 @@
 //           <p className="text-sm font-medium text-gray-900">
 //             {item.lead_name || clientName}
 //           </p>
-         
+
 //         </div>
 
 //         {/* 🔥 Two-column layout */}
@@ -748,7 +748,7 @@
 
 //   </div>
 
-      
+
 //     </div>
 //     </DashboardLayout>
 //   );
@@ -761,6 +761,7 @@
 //app/finance/renewal/%5BleadId%5D/page.tsx
 "use client";
 
+import dayjs from "dayjs";
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/utils/supabase/client";
@@ -768,6 +769,7 @@ import { toast } from "sonner";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 
 import { Trash2Icon, Edit2Icon, Edit } from "lucide-react";
+import { useAuth } from "@/components/providers/auth-provider";
 
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -786,6 +788,7 @@ import { Console } from "console";
 export default function RenewalPage() {
   const { leadId } = useParams();
   const router = useRouter();
+  const { user } = useAuth();
 
   /* ---------------- STATE ---------------- */
   const [loading, setLoading] = useState(true);
@@ -947,6 +950,13 @@ export default function RenewalPage() {
     fetchData();
   }, []);
 
+  const dateWithTime = (dateStr: string) => {
+    const now = new Date();
+    const d = new Date(dateStr);
+    d.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
+    return d.toISOString();
+  };
+
   // Move function OUTSIDE useEffect so it can be reused
   async function fetchHistory() {
     if (!leadId) return;
@@ -971,6 +981,15 @@ export default function RenewalPage() {
   }, [leadId]);
 
   async function handleSubmit() {
+
+    // Get the REAL authenticated user from Supabase
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+
+    if (!authUser) {
+      alert("User session not found. Please login again.");
+      return;
+    }
+
     if (!clientName || !clientEmail || !paymentMode) {
       alert("Please fill required fields before submitting.");
       return;
@@ -986,45 +1005,36 @@ export default function RenewalPage() {
       return;
     }
 
-
     setSaving(true);
 
     // Update Lead
-    await supabase.from("leads").update({
-      name: clientName,
-      email: clientEmail,
-      phone: leadPhone,
-      // application_email: companyApplicationEmail,
-      city,
-    }).eq("business_id", leadId);
+    await supabase
+      .from("leads")
+      .update({
+        name: clientName,
+        email: clientEmail,
+        phone: leadPhone,
+        city,
+      })
+      .eq("business_id", leadId);
 
-    // Insert Renewal
 
     // ------------------ Compute onboarded_date ------------------
-    if (!originalClosedAtDate) return; // safety check
+    if (!originalClosedAtDate) return;
 
     const closedPlus45 = new Date(
-      originalClosedAtDate.getTime() + Number(subscriptionCycle) * 24 * 60 * 60 * 1000 + 45 * 24 * 60 * 60 * 1000
+      originalClosedAtDate.getTime() +
+      Number(subscriptionCycle) * 24 * 60 * 60 * 1000 +
+      45 * 24 * 60 * 60 * 1000
     );
 
-    // console.log("Subscription cycle days:", Number(subscriptionCycle));
-    // console.log("original closed at date:", originalClosedAtDate.getTime());
-    // console.log("45 * 24 * 60 * 60 * 1000",45 * 24 * 60 * 60 * 1000)
-    // console.log("==========================================")
-    // Apply onboarded date logic based on original closed date
     const onboardedDate =
       closedPlus45 > new Date() ? closedAtDate : null;
 
-    // console.log("Original closed:", originalClosedAtDate);
-    // console.log("Closed + 45 days:", closedPlus45);
-    // console.log("Onboarded date:", onboardedDate);
 
-    // console.log("==========================================")
-    //   console.log("Subscription cycle days:", Number(subscriptionCycle));
-    // console.log("original closed at date:", originalClosedAtDate.getTime());
-    // console.log("45 * 24 * 60 * 60 * 1000",45 * 24 * 60 * 60 * 1000)
-
+    // Insert Renewal
     const { error } = await supabase.from("sales_closure").insert({
+
       lead_id: leadId,
       lead_name: clientName,
       email: clientEmail,
@@ -1032,9 +1042,11 @@ export default function RenewalPage() {
       payment_mode: paymentMode,
       sale_value: totalSale,
       subscription_cycle: Number(subscriptionCycle),
-      closed_at: closedAtDate,
+      closed_at: dateWithTime(closedAtDate),
       finance_status: "Paid",
+
       commitments,
+
       application_sale_value: Number(autoCalculatedValue),
       resume_sale_value: Number(resumeValue || 0),
       portfolio_sale_value: Number(portfolioValue || 0),
@@ -1045,9 +1057,42 @@ export default function RenewalPage() {
       badge_value: Number(badgeValue || 0),
       custom_sale_value: Number(customValue || 0),
       custom_label: customLabel || "",
+
       no_of_job_applications,
-      onboarded_date: onboardedDate
+      onboarded_date: onboardedDate,
+
+      // 🔥 Correct Finance Associate
+      account_assigned_name:
+        authUser?.user_metadata?.name ??
+        authUser?.email ??
+        "Unknown",
+
+      account_assigned_email:
+        authUser?.email ?? null
     });
+
+
+    // Log Renewal in Call History
+    if (!error) {
+      await supabase.from("call_history").insert([{
+        lead_id: leadId,
+        email: clientEmail,
+        assigned_to:
+          authUser?.user_metadata?.name ??
+          authUser?.email ??
+          "Finance",
+
+        current_stage: "Renewal Confirmed",
+        followup_date: dayjs().format("YYYY-MM-DD"),
+        call_started_at: dayjs().toISOString(),
+
+        notes: `RENEWAL COMPLETED by ${authUser?.user_metadata?.name ??
+          authUser?.email ??
+          "Finance Associate"
+          }: Client renewed for ${subscriptionCycle} days. Next due: ${nextDueDate || "N/A"
+          }. Total Sale: $${totalSale}.`
+      }]);
+    }
 
 
     if (error) {
@@ -1057,8 +1102,10 @@ export default function RenewalPage() {
       return;
     }
 
-    fetchHistory(); // refresh sidebar
+    fetchHistory();
+
     toast.success("Renewal submitted successfully 🎉");
+
     setSaving(false);
 
     setTimeout(() => confirmCloseAction(), 600);
@@ -1383,10 +1430,24 @@ export default function RenewalPage() {
                           {item.subscription_cycle} days
                         </span>
                       </p>
+                      {/* <p>
+                        <span className="text-gray-500">Associate/TL:</span>{" "}
+                        <span className="text-gray-900">
+                          {item.associates_tl_name || "Not assigned"}
+                        </span>
+                      </p>
+                       */}
                       <p>
                         <span className="text-gray-500">Associate/TL:</span>{" "}
                         <span className="text-gray-900">
                           {item.associates_tl_name || "Not assigned"}
+                        </span>
+                      </p>
+
+                      <p>
+                        <span className="text-gray-500">Renewed By:</span>{" "}
+                        <span className="text-blue-600 font-semibold">
+                          {item.account_assigned_name || "Unknown"}
                         </span>
                       </p>
                       <p className="gap-2 pt-4">

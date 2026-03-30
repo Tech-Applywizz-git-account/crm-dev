@@ -230,6 +230,7 @@ export function LoginForm() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                suppressHydrationWarning
               />
             </div>
             <div className="space-y-2">
@@ -240,6 +241,7 @@ export function LoginForm() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
+                  suppressHydrationWarning
                   className="w-full bg-white border border-gray-300 focus:border-black focus:ring-1 focus:ring-black focus:outline-none pr-12"
                 />
                 <button
@@ -311,6 +313,7 @@ export function LoginForm() {
               <Link
                 href="/forgot-password"
                 className="text-blue-600 hover:underline focus:outline-none"
+                suppressHydrationWarning
               >
                 Forgot password ?
               </Link>
