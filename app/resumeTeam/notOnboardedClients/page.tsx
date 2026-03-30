@@ -40,6 +40,9 @@ import { ArrowUpDown, ArrowUp, ArrowDown, Download, Calendar, Clock, FileText, T
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { useAuth } from "@/components/providers/auth-provider";
+import { cn } from "@/lib/utils";
+import dayjs from "dayjs";
+import { RefreshCcw } from "lucide-react";
 
 
 /* =========================
@@ -514,6 +517,19 @@ export default function NotOnboardedClientsPage() {
   const [rows, setRows] = useState<SalesClosure[]>([]);
   const [resumeTeamMembers, setResumeTeamMembers] = useState<TeamMember[]>([]);
   const [assigneeFilter, setAssigneeFilter] = useState<string>("__all__");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+
+  const [counts, setCounts] = useState({
+    not_started: 0,
+    pending: 0,
+    waiting_client_approval: 0,
+    completed: 0,
+    total: 0,
+  });
+
+  const [timeRange, setTimeRange] = useState<string>("all");
+  const [fromDate, setFromDate] = useState<string>("");
+  const [toDate, setToDate] = useState<string>("");
 
 
   // file upload
@@ -570,7 +586,7 @@ export default function NotOnboardedClientsPage() {
       router.push("/unauthorized");
       return;
     }
-    Promise.all([fetchTeamMembers(), fetchData(1, limit, "", false, "__all__")]).finally(() =>
+    Promise.all([fetchTeamMembers(), fetchData(1, limit, "", false, "__all__", "all", "all", "", "")]).finally(() =>
       setLoading(false)
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -635,20 +651,45 @@ export default function NotOnboardedClientsPage() {
     newLimit = limit,
     activeSearch = searchQuery,
     overrideShowMyTasks?: boolean,
-    overrideAssigneeFilter?: string
+    overrideAssigneeFilter?: string,
+    overrideStatusFilter?: string,
+    overrideTimeRange?: string,
+    overrideFromDate?: string,
+    overrideToDate?: string
   ) => {
     try {
       setLoading(true);
 
-
       const from = (newPage - 1) * newLimit;
       const to = from + newLimit - 1;
-
 
       let query = supabase
         // .from("full_client_status_excluding_oldest")
         .from("full_client_status_pending_onboarding")
         .select("*", { count: "exact" });
+
+      const currentFromDate = overrideFromDate !== undefined ? overrideFromDate : fromDate;
+      const currentToDate = overrideToDate !== undefined ? overrideToDate : toDate;
+
+      if (currentFromDate) {
+        query = query.gte("closed_at", dayjs(currentFromDate).startOf('day').toISOString());
+      }
+      if (currentToDate) {
+        query = query.lte("closed_at", dayjs(currentToDate).endOf('day').toISOString());
+      }
+
+      const currentTimeRange = overrideTimeRange !== undefined ? overrideTimeRange : timeRange;
+      if (currentTimeRange !== "all" && !currentFromDate && !currentToDate) {
+        const now = dayjs();
+        let startDate;
+        if (currentTimeRange === "today") startDate = now.startOf('day');
+        else if (currentTimeRange === "week") startDate = now.subtract(7, 'days');
+        else if (currentTimeRange === "month") startDate = now.subtract(30, 'days');
+        
+        if (startDate) {
+          query = query.gte("closed_at", startDate.toISOString());
+        }
+      }
 
 
       // 🔍 Apply server-side search
@@ -679,6 +720,13 @@ export default function NotOnboardedClientsPage() {
           query = query.eq("resume_assigned_email", assigneeFilterToUse);
         }
       }
+
+      const currentStatusFilter = overrideStatusFilter !== undefined ? overrideStatusFilter : statusFilter;
+
+      if (currentStatusFilter !== "all") {
+        query = query.eq("resume_status", currentStatusFilter);
+      }
+
 
 
       query = query
@@ -767,6 +815,7 @@ export default function NotOnboardedClientsPage() {
 
 
       setRows(formatted);
+      await fetchCounts(activeSearch, myTasks, assigneeFilterToUse, currentTimeRange, currentFromDate, currentToDate);
     } catch (e) {
       console.error(e);
       setRows([]);
@@ -774,6 +823,89 @@ export default function NotOnboardedClientsPage() {
       setLoading(false);
     }
   };
+
+  const fetchCounts = async (
+    activeSearch = searchQuery, 
+    myTasks = showMyTasks, 
+    assignee = assigneeFilter,
+    overrideTimeRange?: string,
+    overrideFromDate?: string,
+    overrideToDate?: string
+  ) => {
+    try {
+      let query = supabase.from("full_client_status_pending_onboarding").select("resume_status, closed_at");
+
+      const currentFromDate = overrideFromDate !== undefined ? overrideFromDate : fromDate;
+      const currentToDate = overrideToDate !== undefined ? overrideToDate : toDate;
+
+      if (currentFromDate) {
+        query = query.gte("closed_at", dayjs(currentFromDate).startOf('day').toISOString());
+      }
+      if (currentToDate) {
+        query = query.lte("closed_at", dayjs(currentToDate).endOf('day').toISOString());
+      }
+
+      const currentTimeRange = overrideTimeRange !== undefined ? overrideTimeRange : timeRange;
+      if (currentTimeRange !== "all" && !currentFromDate && !currentToDate) {
+        const now = dayjs();
+        let startDate;
+        if (currentTimeRange === "today") startDate = now.startOf('day');
+        else if (currentTimeRange === "week") startDate = now.subtract(7, 'days');
+        else if (currentTimeRange === "month") startDate = now.subtract(30, 'days');
+        
+        if (startDate) {
+          query = query.gte("closed_at", startDate.toISOString());
+        }
+      }
+
+      if (activeSearch.trim() !== "") {
+        query = query.or(
+          `lead_id.ilike.%${activeSearch}%,lead_name.ilike.%${activeSearch}%,email.ilike.%${activeSearch}%,company_application_email.ilike.%${activeSearch}%`
+        );
+      }
+
+      if (assignee !== "__all__" && assignee !== "__none__") {
+        query = query.eq("resume_assigned_email", assignee);
+      } else if (assignee === "__none__") {
+        query = query.is("resume_assigned_email", null);
+      }
+
+      const email = user?.email;
+      if (myTasks && email) {
+        query = query.eq("resume_assigned_email", email);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      const newCounts = {
+        not_started: 0,
+        pending: 0,
+        waiting_client_approval: 0,
+        completed: 0,
+        total: data?.length || 0,
+      };
+
+      data?.forEach((r: any) => {
+        const s = r.resume_status;
+        if (s === "not_started") newCounts.not_started++;
+        else if (s === "pending") newCounts.pending++;
+        else if (s === "waiting_client_approval") newCounts.waiting_client_approval++;
+        else if (s === "completed") newCounts.completed++;
+      });
+
+      setCounts(newCounts);
+    } catch (e) {
+      console.error("fetchCounts error:", e);
+    }
+  };
+
+  const handleStatusFilterChange = async (status: string) => {
+    setStatusFilter(status);
+    setPage(1);
+    await fetchData(1, limit, searchQuery, showMyTasks, assigneeFilter, status);
+  };
+
 
 
   const updateDriveLinks = async (leadId: string, links: string[]) => {
@@ -1744,12 +1876,127 @@ export default function NotOnboardedClientsPage() {
 
 
       <div className="space-y-6">
-        <div className="flex items-center justify-start gap-4">
-          <h1 className="text-3xl font-bold text-gray-900">
-            Not Onboarded Clients — Resume Team
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">
+            Not Onboarded Clients
           </h1>
+          <div className="flex items-center gap-2">
+            <Select value={timeRange} onValueChange={async (val) => {
+              setTimeRange(val);
+              setPage(1);
+              if (val !== "all") {
+                setFromDate("");
+                setToDate("");
+              }
+              await fetchData(1, limit, searchQuery, showMyTasks, assigneeFilter, statusFilter, val, val !== "all" ? "" : fromDate, val !== "all" ? "" : toDate);
+            }}>
+              <SelectTrigger className="w-[130px] h-8 text-xs">
+                <SelectValue placeholder="Time Period" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Time</SelectItem>
+                <SelectItem value="today">Today</SelectItem>
+                <SelectItem value="week">Past 7 Days</SelectItem>
+                <SelectItem value="month">Past 30 Days</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="h-8 w-8 p-0" 
+              onClick={async () => {
+                setLoading(true);
+                await fetchData(page, limit, searchQuery, showMyTasks, assigneeFilter, statusFilter, timeRange, fromDate, toDate);
+                setLoading(false);
+              }}
+              disabled={loading}
+            >
+              <RefreshCcw className={cn("h-4 w-4 text-gray-500", loading && "animate-spin")} />
+            </Button>
+          </div>
+        </div>
 
+        {/* Quick Cards - Fixed Size & Compact */}
+        <div className="flex flex-wrap gap-2 items-center">
+          {[
+            { id: "all", label: "Total", count: counts.total },
+            { id: "not_started", label: "Not Started", count: counts.not_started },
+            { id: "pending", label: "Pending", count: counts.pending },
+            { id: "waiting_client_approval", label: "Approval", count: counts.waiting_client_approval },
+            { id: "completed", label: "Completed", count: counts.completed },
+          ].map((card) => (
+            <div
+              key={card.id}
+              className={cn(
+                "w-[120px] p-2 border rounded-md cursor-pointer transition-all text-center h-[50px] flex flex-col justify-center",
+                statusFilter === card.id 
+                  ? "border-gray-900 bg-gray-50 ring-1 ring-gray-900/10" 
+                  : "border-gray-200 bg-white hover:border-gray-300"
+              )}
+              onClick={() => handleStatusFilterChange(card.id)}
+            >
+              <div className="text-[9px] text-gray-500 uppercase font-semibold tracking-tight truncate">
+                {card.label}
+              </div>
+              <div className="text-sm font-bold text-gray-900 leading-tight">
+                {card.count}
+              </div>
+            </div>
+          ))}
 
+          {/* Date Range Filters */}
+          <div className="flex items-center gap-2 shadow-sm p-1.5 border rounded-md bg-gray-50/50 ml-2">
+            <div className="flex flex-col gap-1">
+              <span className="text-[9px] text-gray-500 uppercase font-bold px-1">From Date</span>
+              <Input
+                type="date"
+                className="h-7 text-[11px] w-[125px] bg-white border-gray-200 focus:border-gray-900 transition-all cursor-pointer relative [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0"
+                value={fromDate}
+                onClick={(e) => e.currentTarget.showPicker()}
+                onChange={async (e) => {
+                  const val = e.target.value;
+                  setFromDate(val);
+                  setPage(1);
+                  setTimeRange("all");
+                  await fetchData(1, limit, searchQuery, showMyTasks, assigneeFilter, statusFilter, "all", val, toDate);
+                }}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-[9px] text-gray-500 uppercase font-bold px-1">To Date</span>
+              <Input
+                type="date"
+                className="h-7 text-[11px] w-[125px] bg-white border-gray-200 focus:border-gray-900 transition-all cursor-pointer relative [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:opacity-0"
+                value={toDate}
+                onClick={(e) => e.currentTarget.showPicker()}
+                onChange={async (e) => {
+                  const val = e.target.value;
+                  setToDate(val);
+                  setPage(1);
+                  setTimeRange("all");
+                  await fetchData(1, limit, searchQuery, showMyTasks, assigneeFilter, statusFilter, "all", fromDate, val);
+                }}
+              />
+            </div>
+            {(fromDate || toDate) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-[10px] mt-4 hover:bg-red-50 hover:text-red-600 transition-colors"
+                onClick={async () => {
+                  setFromDate("");
+                  setToDate("");
+                  setPage(1);
+                  await fetchData(1, limit, searchQuery, showMyTasks, assigneeFilter, statusFilter, timeRange, "", "");
+                }}
+              >
+                Clear
+              </Button>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
           {/* Assignee filter */}
           <div className="flex items-center gap-3">
             <div className="text-sm font-medium">Assigned To:</div>
