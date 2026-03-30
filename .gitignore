@@ -40,3 +40,7 @@ next-env.d.ts
 
 certificates
 database
+ZOOM_INTEGRATION_README.md
+db_dump.sql
+dns_check.txt
+migrate_db.py
