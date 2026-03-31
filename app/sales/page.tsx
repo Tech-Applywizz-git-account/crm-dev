@@ -583,6 +583,8 @@ export default function SalesPage() {
   };
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Track discovery triggers for onboarded leads to avoid duplicate calls
+  const discoveryOnboardRef = useRef<Record<string, boolean>>({});
   const [activityUpdate, setActivityUpdate] = useState("");
   const [isSavingActivity, setIsSavingActivity] = useState(false);
   const [view, setView] = useState<"leads" | "activity" | "call_stats" | "renewals" | "email_logs">("leads");
@@ -1827,6 +1829,28 @@ Team ApplyWizz`
 
       });
       if (salesInsertError) throw salesInsertError;
+
+      // Trigger discovery-call API for scheduler (guarded per-lead)
+      if (!discoveryOnboardRef.current[newLeadId]) {
+        discoveryOnboardRef.current[newLeadId] = true;
+        (async () => {
+          try {
+            await fetch('/api/scheduling/discovery-call', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                lead_id: newLeadId,
+                sale_value: totalSaleCalc,
+                subscription_cycle: cycle,
+                closed_at: onboardDate,
+              }),
+            });
+            console.log('Triggered /api/scheduling/discovery-call for', newLeadId);
+          } catch (err) {
+            console.warn('Failed to trigger discovery-call for', newLeadId, err);
+          }
+        })();
+      }
 
       // refresh list
       if (userProfile) await fetchLeads(userProfile);

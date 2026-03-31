@@ -1122,6 +1122,9 @@ export default function EditSaleCloseForm({ leadId }: EditSaleCloseFormProps) {
   const [closerName, setCloserName] = useState<string>("");
   const [autoCalculatedValue, setAutoCalculatedValue] = useState<number>(0);
 
+  // Prevent duplicate discovery-call triggers (auto vs save)
+  const [discoveryTriggered, setDiscoveryTriggered] = useState<boolean>(false);
+
 
   const [monthlyInitialized, setMonthlyInitialized] = useState(false);
 
@@ -1134,6 +1137,38 @@ export default function EditSaleCloseForm({ leadId }: EditSaleCloseFormProps) {
       setAutoCalculatedValue(0);
     }
   }, [applicationSaleValue, subscriptionCycle]);
+
+
+  // Auto-trigger discovery-call when applications count or application sale value indicate opt-in
+  useEffect(() => {
+    const optedByApplications = (no_of_job_applications || "") !== "" && (no_of_job_applications || "") !== "0";
+    const optedBySaleValue = Number(applicationSaleValue || 0) > 0;
+
+    if (discoveryTriggered) return;
+    if (!optedByApplications && !optedBySaleValue) return;
+    if (!closedAtDate) return;
+
+    (async () => {
+      try {
+        await fetch('/api/scheduling/discovery-call', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            lead_id: leadId,
+            sale_value: Number(totalSale.toFixed(2)),
+            subscription_cycle: subscriptionCycle,
+            closed_at: dateOnlyToIsoUTC(closedAtDate),
+          }),
+        });
+        console.log('Auto-triggered /api/scheduling/discovery-call for', leadId);
+      } catch (err) {
+        console.warn('Auto-trigger failed for discovery-call', leadId, err);
+      } finally {
+        setDiscoveryTriggered(true);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [no_of_job_applications, applicationSaleValue, closedAtDate, subscriptionCycle]);
 
 
   /* ---------- Fetch latest sales_closure + leads ---------- */
@@ -1431,6 +1466,29 @@ export default function EditSaleCloseForm({ leadId }: EditSaleCloseFormProps) {
         console.warn("sales_closure updated but lead phone failed:", leadUpdateError);
         setError("Saved sale record, but failed to update lead phone.");
         return;
+      }
+
+      // Trigger discovery-call API so scheduler picks up updated sale
+      if (!discoveryTriggered) {
+        (async () => {
+          try {
+            await fetch('/api/scheduling/discovery-call', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                lead_id: leadId,
+                sale_value: payload.sale_value,
+                subscription_cycle: payload.subscription_cycle,
+                closed_at: payload.closed_at,
+              }),
+            });
+            console.log('Triggered /api/scheduling/discovery-call for', leadId);
+          } catch (err) {
+            console.warn('Failed to trigger discovery-call for', leadId, err);
+          } finally {
+            setDiscoveryTriggered(true);
+          }
+        })();
       }
 
 
