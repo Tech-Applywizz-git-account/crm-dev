@@ -53,12 +53,7 @@ export async function GET(request: NextRequest) {
       .select("*", { count: "exact" })
       .eq("status", "ACTIVE");
 
-    // 2. Call counts by status
-    const { data: callCounts } = await supabase
-      .from("call_events")
-      .select("status, count(*)")
-      .group("status");
-
+    // 2. Call counts by status (PostgREST/client doesn't support .group(), run explicit counts)
     const callsByStatus: Record<string, number> = {
       pending: 0,
       scheduled: 0,
@@ -67,18 +62,54 @@ export async function GET(request: NextRequest) {
       rescheduled: 0,
     };
 
-    // 3. Call counts by type
-    const { data: callTypes } = await supabase
-      .from("call_events")
-      .select("call_type, count(*)")
-      .group("call_type");
+    const statusMap: Record<string, string> = {
+      pending: "PENDING",
+      scheduled: "SCHEDULED",
+      completed: "COMPLETED",
+      missed: "MISSED",
+      rescheduled: "RESCHEDULED",
+    };
 
+    for (const [key, dbVal] of Object.entries(statusMap)) {
+      try {
+        const { count } = await supabase
+          .from("call_events")
+          .select("*", { count: "exact", head: false })
+          .eq("status", dbVal);
+        callsByStatus[key] = count || 0;
+      } catch (err) {
+        console.warn("Failed to count call_events for status", dbVal, err);
+        callsByStatus[key] = 0;
+      }
+    }
+
+    // 3. Call counts by type
     const callsByType: Record<string, number> = {
       discovery: 0,
       orientation: 0,
       progressReview: 0,
       renewal: 0,
     };
+
+    const typeMap: Record<string, string> = {
+      discovery: "DISCOVERY",
+      orientation: "ORIENTATION",
+      progressReview: "PROGRESS_REVIEW",
+      renewal: "RENEWAL",
+    };
+
+    for (const [key, dbVal] of Object.entries(typeMap)) {
+      try {
+        const { count } = await supabase
+          .from("call_events")
+          .select("*", { count: "exact", head: false })
+          .eq("call_type", dbVal);
+        callsByType[key] = count || 0;
+      } catch (err) {
+        console.warn("Failed to count call_events for type", dbVal, err);
+        callsByType[key] = 0;
+      }
+    }
 
     // 4. AM metrics
     const { data: ams } = await supabase
