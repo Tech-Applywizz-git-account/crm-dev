@@ -318,7 +318,7 @@ export default function NewSaleCloseForm({ leadId }: NewSaleCloseFormProps) {
             lead_id: leadId,
             sale_value: Number(totalSale.toFixed(2)),
             subscription_cycle: subscriptionCycle,
-            closed_at: dateOnlyToIsoUTC(closedAtDate),
+            closed_at: closedAtDate ? new Date(`${closedAtDate}T00:00:00Z`).toISOString() : null,
           }),
         });
         console.log('Auto-triggered /api/scheduling/discovery-call for', leadId);
@@ -490,8 +490,8 @@ export default function NewSaleCloseForm({ leadId }: NewSaleCloseFormProps) {
                 lead_id: leadId,
                 sale_value: insertPayload.sale_value,
                 subscription_cycle: insertPayload.subscription_cycle,
-                closed_at: insertPayload.closed_at,
-              }),
+                closed_at: insertPayload.closed_at || (closedAtDate ? new Date(`${closedAtDate}T00:00:00Z`).toISOString() : null),
+                    }),
             });
             console.log('Triggered /api/scheduling/discovery-call for', leadId);
           } catch (err) {

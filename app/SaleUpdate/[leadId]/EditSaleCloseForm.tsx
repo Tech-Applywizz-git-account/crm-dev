@@ -1143,6 +1143,18 @@ export default function EditSaleCloseForm({ leadId }: EditSaleCloseFormProps) {
   useEffect(() => {
     const optedByApplications = (no_of_job_applications || "") !== "" && (no_of_job_applications || "") !== "0";
     const optedBySaleValue = Number(applicationSaleValue || 0) > 0;
+    // DEBUG: show gating values for auto-trigger
+    console.debug('Edit form discovery auto-trigger check', {
+      leadId,
+      no_of_job_applications,
+      applicationSaleValue,
+      subscriptionCycle,
+      closedAtDate,
+      discoveryTriggered,
+      optedByApplications,
+      optedBySaleValue,
+      totalSale: typeof totalSale !== 'undefined' ? totalSale : null,
+    });
 
     if (discoveryTriggered) return;
     if (!optedByApplications && !optedBySaleValue) return;
@@ -1157,7 +1169,7 @@ export default function EditSaleCloseForm({ leadId }: EditSaleCloseFormProps) {
             lead_id: leadId,
             sale_value: Number(totalSale.toFixed(2)),
             subscription_cycle: subscriptionCycle,
-            closed_at: dateOnlyToIsoUTC(closedAtDate),
+            closed_at: closedAtDate ? new Date(`${closedAtDate}T00:00:00Z`).toISOString() : null,
           }),
         });
         console.log('Auto-triggered /api/scheduling/discovery-call for', leadId);
@@ -1437,7 +1449,7 @@ export default function EditSaleCloseForm({ leadId }: EditSaleCloseFormProps) {
         no_of_job_applications: safeParseFloatOrNull(no_of_job_applications),
 
 
-        closed_at: dateOnlyToIsoUTC(closedAtDate),
+        closed_at: closedAtDate ? new Date(`${closedAtDate}T00:00:00Z`).toISOString() : null,
         account_assigned_name: user?.name || user?.email || "Unknown",
         account_assigned_email: user?.email || null,
       };
