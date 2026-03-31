@@ -281,10 +281,33 @@ export default function NewSaleCloseForm({ leadId }: NewSaleCloseFormProps) {
       (no_of_job_applications || "") !== "" && (no_of_job_applications || "") !== "0";
     const optedBySaleValue = Number(applicationSaleValue || 0) > 0;
 
-    if (discoveryTriggered) return;
-    if (!optedByApplications && !optedBySaleValue) return;
+    // DEBUG: log gating values to help troubleshoot why auto-trigger may not run
+    // (left intentionally lightweight so it can be removed after verification)
+    console.debug('discovery auto-trigger check', {
+      leadId,
+      no_of_job_applications,
+      applicationSaleValue,
+      subscriptionCycle,
+      closedAtDate,
+      discoveryTriggered,
+      optedByApplications,
+      optedBySaleValue,
+      totalSale: typeof totalSale !== 'undefined' ? totalSale : null,
+    });
+
+    if (discoveryTriggered) {
+      console.debug('discovery auto-trigger skipped: already triggered');
+      return;
+    }
+    if (!optedByApplications && !optedBySaleValue) {
+      console.debug('discovery auto-trigger skipped: no opt-in by applications or sale value');
+      return;
+    }
     // require a closed date to consider this a confirmed sale opt-in
-    if (!closedAtDate) return;
+    if (!closedAtDate) {
+      console.debug('discovery auto-trigger skipped: closedAtDate empty');
+      return;
+    }
 
     (async () => {
       try {
