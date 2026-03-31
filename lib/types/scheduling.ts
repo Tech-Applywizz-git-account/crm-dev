@@ -96,6 +96,7 @@ export interface CallEvent {
   trigger_time?: string;
   progress_day?: number; // For PROGRESS_REVIEW
   preempted_from_id?: string;
+  metadata?: Record<string, any>;
   retry_count: number;
   max_retries: number;
 
