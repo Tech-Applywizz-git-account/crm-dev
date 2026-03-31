@@ -1,6 +1,8 @@
 'use client'
 
-import { SchedulingNavigation } from '@/components/scheduling/scheduling-navigation'
+import React from 'react'
+import { DashboardLayout } from '@/components/layout/dashboard-layout'
+import ProtectedRoute from '@/components/auth/ProtectedRoute'
 
 export default function SchedulingLayout({
   children,
@@ -8,11 +10,10 @@ export default function SchedulingLayout({
   children: React.ReactNode
 }) {
   return (
-    <div className="flex h-screen">
-      <SchedulingNavigation />
-      <div className="flex-1 overflow-auto">
+    <ProtectedRoute allowedRoles={["Super Admin", "Account Management", "Accounts Associate"]}>
+      <DashboardLayout>
         {children}
-      </div>
-    </div>
+      </DashboardLayout>
+    </ProtectedRoute>
   )
 }
