@@ -1831,25 +1831,48 @@ Team ApplyWizz`
       if (salesInsertError) throw salesInsertError;
 
       // Trigger discovery-call API for scheduler (guarded per-lead)
+      // Debug: show gating state before triggering discovery-call
+      console.debug('[onboard] discovery trigger check', {
+        newLeadId,
+        totalSaleCalc,
+        cycle,
+        onboardDate,
+        alreadyTriggered: !!discoveryOnboardRef.current[newLeadId],
+      });
+
       if (!discoveryOnboardRef.current[newLeadId]) {
         discoveryOnboardRef.current[newLeadId] = true;
         (async () => {
           try {
-            await fetch('/api/scheduling/discovery-call', {
+            const payload = {
+              lead_id: newLeadId,
+              sale_value: totalSaleCalc,
+              subscription_cycle: cycle,
+              closed_at: onboardDate ? new Date(`${onboardDate}T00:00:00Z`).toISOString() : null,
+            };
+
+            console.debug('[onboard] sending discovery-call', payload);
+
+            const res = await fetch('/api/scheduling/discovery-call', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                lead_id: newLeadId,
-                sale_value: totalSaleCalc,
-                subscription_cycle: cycle,
-                closed_at: onboardDate,
-              }),
+              body: JSON.stringify(payload),
             });
-            console.log('Triggered /api/scheduling/discovery-call for', newLeadId);
+
+            const text = await res.text();
+            console.debug('[onboard] discovery response', { status: res.status, ok: res.ok, body: text });
+
+            if (!res.ok) {
+              console.warn('[onboard] discovery-call returned non-ok', res.status, text);
+            } else {
+              console.log('Triggered /api/scheduling/discovery-call for', newLeadId);
+            }
           } catch (err) {
             console.warn('Failed to trigger discovery-call for', newLeadId, err);
           }
         })();
+      } else {
+        console.debug('[onboard] discovery skipped - already triggered for', newLeadId);
       }
 
       // refresh list
