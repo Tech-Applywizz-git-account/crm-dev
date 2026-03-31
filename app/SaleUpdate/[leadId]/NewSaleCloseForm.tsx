@@ -208,6 +208,9 @@ export default function NewSaleCloseForm({ leadId }: NewSaleCloseFormProps) {
   const [autoCalculatedValue, setAutoCalculatedValue] =
     useState<number>(0);
 
+  // Prevent duplicate discovery-call triggers (auto vs save)
+  const [discoveryTriggered, setDiscoveryTriggered] = useState<boolean>(false);
+
 
 
   useEffect(() => {
@@ -270,6 +273,40 @@ export default function NewSaleCloseForm({ leadId }: NewSaleCloseFormProps) {
       setAutoCalculatedValue(0);
     }
   }, [applicationSaleValue, subscriptionCycle]);
+
+
+  // Auto-trigger discovery-call when user selects applications or sets application sale value
+  useEffect(() => {
+    const optedByApplications =
+      (no_of_job_applications || "") !== "" && (no_of_job_applications || "") !== "0";
+    const optedBySaleValue = Number(applicationSaleValue || 0) > 0;
+
+    if (discoveryTriggered) return;
+    if (!optedByApplications && !optedBySaleValue) return;
+    // require a closed date to consider this a confirmed sale opt-in
+    if (!closedAtDate) return;
+
+    (async () => {
+      try {
+        await fetch('/api/scheduling/discovery-call', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            lead_id: leadId,
+            sale_value: Number(totalSale.toFixed(2)),
+            subscription_cycle: subscriptionCycle,
+            closed_at: dateOnlyToIsoUTC(closedAtDate),
+          }),
+        });
+        console.log('Auto-triggered /api/scheduling/discovery-call for', leadId);
+      } catch (err) {
+        console.warn('Auto-trigger failed for discovery-call', leadId, err);
+      } finally {
+        setDiscoveryTriggered(true);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [no_of_job_applications, applicationSaleValue, closedAtDate, subscriptionCycle]);
 
 
   const autoTotal = useMemo(() => {
@@ -418,6 +455,29 @@ export default function NewSaleCloseForm({ leadId }: NewSaleCloseFormProps) {
 
 
       if (insertError) throw insertError;
+
+      // Trigger discovery-call webhook/API so scheduler can pick up the new sale
+      if (!discoveryTriggered) {
+        (async () => {
+          try {
+            await fetch('/api/scheduling/discovery-call', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                lead_id: leadId,
+                sale_value: insertPayload.sale_value,
+                subscription_cycle: insertPayload.subscription_cycle,
+                closed_at: insertPayload.closed_at,
+              }),
+            });
+            console.log('Triggered /api/scheduling/discovery-call for', leadId);
+          } catch (err) {
+            console.warn('Failed to trigger discovery-call for', leadId, err);
+          } finally {
+            setDiscoveryTriggered(true);
+          }
+        })();
+      }
 
 
       // 2) Update leads if client details edited
