@@ -229,7 +229,7 @@ export async function processServiceStarted(
 
     return {
       success: true,
-      renewalDate: renewalDate.toISO(),
+      renewalDate: renewalDate.toISO() ?? undefined,
       orientationCallId: orientationCall?.id,
       progressCallIds,
     };

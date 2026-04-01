@@ -222,7 +222,6 @@ export interface DiscoveryCallRequest {
 export interface ServiceStartedRequest {
   lead_id: string;
   service_start_date: string; // ISO timestamp
-  subscription_cycle: number; // Days
 }
 
 export interface CreateCallEventRequest {
