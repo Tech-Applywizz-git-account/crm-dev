@@ -832,6 +832,10 @@ export default function AccountManagementPage() {
               <div className="flex items-center gap-2">
                 {/* CSV only for Admin/Account Management */}
                 {canAssign && <Button onClick={() => setUploadDialogOpen(true)}>Upload Sale Done CSV</Button>}
+                {/* Quick link to view leads assigned to the logged Account Manager */}
+                <Button asChild>
+                  <a href="/account-management/my-assigned-leads">My Assigned Leads</a>
+                </Button>
               </div>
             </div>
 
