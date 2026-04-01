@@ -93,8 +93,19 @@ const cycleDays = (cycle: string | ""): number => {
 const isoToDateOnly = (iso?: string | null) => (iso ? iso.slice(0, 10) : "");
 
 
-const dateOnlyToIsoUTC = (yyyyMMdd?: string | null) =>
-  yyyyMMdd ? new Date(`${yyyyMMdd}T00:00:00Z`).toISOString() : null;
+const dateWithTime = (yyyyMMdd?: string | null) => {
+  if (!yyyyMMdd) return null;
+  const now = new Date();
+  
+  // If the selected date is not today, we can stick to midnight or just use current time for consistency
+  const h = String(now.getHours()).padStart(2, '0');
+  const m = String(now.getMinutes()).padStart(2, '0');
+  const s = String(now.getSeconds()).padStart(2, '0');
+  
+  // Create a local timestamp then convert to ISO
+  // This will record the action time accurately
+  return new Date(`${yyyyMMdd}T${h}:${m}:${s}`).toISOString();
+};
 
 
 const addDaysFromYYYYMMDD = (yyyyMMdd: string, days: number) => {
@@ -434,7 +445,7 @@ export default function NewSaleCloseForm({ leadId }: NewSaleCloseFormProps) {
 
 
         // date stored in UTC midnight
-        closed_at: dateOnlyToIsoUTC(closedAtDate),
+        closed_at: dateWithTime(closedAtDate),
 
         // ⭐ NEW — Store closer name and email in sales_closure for attribution
         account_assigned_name: user?.name || user?.email || "Unknown",

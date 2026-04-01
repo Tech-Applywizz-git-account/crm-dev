@@ -175,6 +175,46 @@ const getStageColor = (stage: SalesStage) => {
   }
 };
 
+const renderSource = (source?: string) => {
+  if (!source) return <span className="text-gray-300 text-xs">—</span>;
+  
+  let display = source;
+  let url = "";
+
+  if (source.includes("|")) {
+    const parts = source.split("|");
+    display = parts[0];
+    url = parts[1];
+  } else if (source.startsWith("http://") || source.startsWith("https://") || source.startsWith("www.")) {
+    url = source;
+    display = "View Source";
+  }
+
+  if (url) {
+    const trimmedUrl = url.trim();
+    const finalUrl = (trimmedUrl.startsWith("http://") || trimmedUrl.startsWith("https://")) 
+      ? trimmedUrl 
+      : `https://${trimmedUrl}`;
+        
+    return (
+      <a 
+        href={finalUrl} 
+        target="_blank" 
+        rel="noopener noreferrer" 
+        className="text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1 font-medium text-[10px]"
+      >
+        {display.toUpperCase()} <ExternalLink className="w-2.5 h-2.5" />
+      </a>
+    );
+  }
+  
+  return (
+    <Badge variant="outline" className="text-[10px] uppercase font-semibold text-blue-600 bg-blue-50 border-blue-200 py-0 px-2 h-5">
+      {source}
+    </Badge>
+  );
+};
+
 const LeadRow = React.memo(({
   item,
   idx,
@@ -251,14 +291,8 @@ const LeadRow = React.memo(({
           </div>
         </div>
       </TableCell>
-      <TableCell className="py-3 align-top">
-        {item.source ? (
-          <Badge variant="outline" className="text-[10px] uppercase font-semibold text-blue-600 bg-blue-50 border-blue-200 py-0 px-2 h-5">
-            {item.source}
-          </Badge>
-        ) : (
-          <span className="text-gray-300 text-xs">—</span>
-        )}
+      <TableCell className="py-3 align-top whitespace-nowrap">
+        {renderSource(item.source)}
       </TableCell>
       <TableCell className="py-3 align-top font-bold text-slate-900 text-[13px] pl-6">
         {leadScore}
@@ -292,7 +326,7 @@ const LeadRow = React.memo(({
         </Select>
       </TableCell>
       <TableCell className="py-3 align-top text-slate-700 font-medium whitespace-nowrap text-[13px]">
-        {profileRoles.some(r => ["Admin", "Super Admin", "Sales Head", "Resume Head-Sales Associate", "Resume Head-Sales Associate"].includes(r)) || profileRoles.includes("Sales Head") ? (
+        {profileRoles.some(r => ["Admin", "Super Admin", "Sales Head"].includes(r)) ? (
           <Select
             value={item.assigned_to}
             onValueChange={(val) => {
@@ -1502,6 +1536,7 @@ Team ApplyWizz`
           assigned_to: selectedName,
           current_stage: lead.current_stage,
           followup_date: todayLocalYMD(),
+          call_started_at: dayjs().toISOString(),
           notes: `Lead re-assigned to ${selectedName} by ${userProfile?.full_name || "Unknown"}`
         }]);
       }
@@ -1603,6 +1638,7 @@ Team ApplyWizz`
         assigned_to: userProfile?.full_name || "Unknown",
         current_stage: newStage,
         followup_date: todayLocalYMD(),
+        call_started_at: dayjs().toISOString(),
         notes: `Stage changed to ${newStage}`
       }]);
 
@@ -1626,9 +1662,8 @@ Team ApplyWizz`
       phone: lead.phone,
       assigned_to: userProfile?.full_name || "Unknown",
       current_stage: newStage,
-      // followup_date: new Date().toISOString().split("T")[0],
       followup_date: todayLocalYMD(),
-
+      call_started_at: dayjs().toISOString(),
       notes: `Stage changed to ${newStage}`
     }]);
 
@@ -1645,6 +1680,7 @@ Team ApplyWizz`
       assigned_to: userProfile?.full_name || "Unknown",
       current_stage: pendingStageUpdate.stage,
       followup_date: followUpData.follow_up_date,
+      call_started_at: dayjs().toISOString(),
       notes: followUpData.notes
     }]);
 
@@ -1715,7 +1751,7 @@ Team ApplyWizz`
 
     const { data, error } = await supabase
       .from("call_history")
-      .select("id, current_stage, followup_date, notes, call_duration_seconds, recording_url")
+      .select("id, current_stage, followup_date, call_started_at, notes, call_duration_seconds, recording_url")
       .eq("lead_id", lead.business_id)
       .order("id", { ascending: false });
 
@@ -2132,34 +2168,50 @@ Team ApplyWizz`
               onSearchChange={handleSearchChange}
             >
               <div className="flex items-center gap-2 ml-4" suppressHydrationWarning>
-                <Button variant="outline" size="sm" onClick={downloadAllTablesData} className="h-8 gap-2 border-gray-300 font-normal bg-white" suppressHydrationWarning>
-                  <Download className="w-4 h-4 text-gray-400" /> <span className="hidden lg:inline">Export All Data</span>
-                </Button>
+                {(() => {
+                  const roles = getRoles(userProfile?.roles || "");
+                  const isResumeSales = roles.some(r => ["Resume Head-Sales Associate", "Resume Associate-Sales Associate"].includes(r));
+                  const isAdminOrSalesHead = roles.some(r => ["Admin", "Super Admin", "Sales Head"].includes(r));
+                  
+                  return (
+                    <>
+                      {isAdminOrSalesHead && !isResumeSales && (
+                        <Button variant="outline" size="sm" onClick={downloadAllTablesData} className="h-8 gap-2 border-gray-300 font-normal bg-white" suppressHydrationWarning>
+                          <Download className="w-4 h-4 text-gray-400" /> <span className="hidden lg:inline">Export All Data</span>
+                        </Button>
+                      )}
 
-                <Button variant="outline" size="sm" onClick={() => setView("activity")} className="h-8 gap-2 border-gray-300 font-normal bg-white" suppressHydrationWarning>
-                  <ListOrdered className="w-4 h-4 text-gray-400" /> <span className="hidden lg:inline">Activity View</span>
-                </Button>
+                      <div className="flex items-center gap-2">
+                        <Button variant="outline" size="sm" onClick={() => setView("activity")} className="h-8 gap-2 border-gray-300 font-normal bg-white" suppressHydrationWarning>
+                          <ListOrdered className="w-4 h-4 text-gray-400" /> <span className="hidden lg:inline">Activity View</span>
+                        </Button>
 
-                {["Admin", "Super Admin", "Sales Head", "Resume Head-Sales Associate"].includes(userProfile?.roles || "") && (
-                  <Button variant="outline" size="sm" onClick={() => setView("call_stats")} className="h-8 gap-2 border-gray-300 font-normal bg-white" suppressHydrationWarning>
-                    <BarChart className="w-4 h-4 text-gray-400" /> <span className="hidden lg:inline">View Call Stats</span>
-                  </Button>
-                )}
+                        {isAdminOrSalesHead && !isResumeSales && (
+                          <Button variant="outline" size="sm" onClick={() => setView("call_stats")} className="h-8 gap-2 border-gray-300 font-normal bg-white" suppressHydrationWarning>
+                            <BarChart className="w-4 h-4 text-gray-400" /> <span className="hidden lg:inline">View Call Stats</span>
+                          </Button>
+                        )}
 
-                <Button variant="outline" size="sm" onClick={() => setView("renewals")} className="h-8 gap-2 border-orange-200 text-orange-600 font-medium bg-orange-50/50 hover:bg-orange-50" suppressHydrationWarning>
-                  <RefreshCw className="w-4 h-4 text-orange-500" /> <span className="hidden lg:inline">Renewals</span>
-                </Button>
+                        <Button variant="outline" size="sm" onClick={() => setView("renewals")} className="h-8 gap-2 border-orange-200 text-orange-600 font-medium bg-orange-50/50 hover:bg-orange-50" suppressHydrationWarning>
+                          <RefreshCw className="w-4 h-4 text-orange-500" /> <span className="hidden lg:inline">Renewals</span>
+                        </Button>
 
-                <Button variant="outline" size="sm" onClick={() => setView("email_logs")} className="h-8 gap-2 border-blue-200 text-blue-600 font-medium bg-blue-50/50 hover:bg-blue-50" suppressHydrationWarning>
-                  <Mail className="w-4 h-4 text-blue-500" /> <span className="hidden lg:inline">Email History</span>
-                </Button>
+                        <Button variant="outline" size="sm" onClick={() => setView("email_logs")} className="h-8 gap-2 border-blue-200 text-blue-600 font-medium bg-blue-50/50 hover:bg-blue-50" suppressHydrationWarning>
+                          <Mail className="w-4 h-4 text-blue-500" /> <span className="hidden lg:inline">Email History</span>
+                        </Button>
 
-                <Button variant="outline" size="sm" onClick={() => {
-                  setEditingTemplate({ subject: "", body: "", is_global: false });
-                  setShowTemplateDialog(true);
-                }} className="h-8 gap-2 border-purple-200 text-purple-600 font-medium bg-purple-50/50 hover:bg-purple-50" suppressHydrationWarning>
-                  <Plus className="w-4 h-4 text-purple-500" /> <span className="hidden lg:inline">Custom Template</span>
-                </Button>
+                        {!isResumeSales && (
+                          <Button variant="outline" size="sm" onClick={() => {
+                            setEditingTemplate({ subject: "", body: "", is_global: false });
+                            setShowTemplateDialog(true);
+                          }} className="h-8 gap-2 border-purple-200 text-purple-600 font-medium bg-purple-50/50 hover:bg-purple-50" suppressHydrationWarning>
+                            <Plus className="w-4 h-4 text-purple-500" /> <span className="hidden lg:inline">Custom Template</span>
+                          </Button>
+                        )}
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             </Header>
             {!isHydrated ? null : (

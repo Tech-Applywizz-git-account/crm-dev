@@ -1,14 +1,20 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { useState, useEffect, Suspense } from "react";
-import { Loader2, Phone, PhoneForwarded, PhoneIncoming, MessageSquare, Download, RefreshCw, ArrowLeft } from "lucide-react";
+import { useState, useEffect, Suspense, useMemo } from "react";
+import { Loader2, Phone, PhoneForwarded, PhoneIncoming, MessageSquare, Download, RefreshCw, ArrowLeft, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import dayjs from "dayjs";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { Header } from "@/components/layout/header";
+import { 
+    Accordion, 
+    AccordionContent, 
+    AccordionItem, 
+    AccordionTrigger 
+} from "@/components/ui/accordion";
 
 interface UserCallLog {
     id: string;
@@ -58,6 +64,53 @@ function UserCallHistoryContent() {
         }
     }, [extension, email, startDate, endDate]);
 
+    const groupedLogs = useMemo(() => {
+        const groups: Record<string, { 
+            date: string, 
+            logs: UserCallLog[],
+            stats: {
+                total: number,
+                inbound: number,
+                outbound: number,
+                connected: number,
+                notConnected: number,
+                durationSeconds: number,
+                durationFormatted: string
+            }
+        }> = {};
+
+        logs.forEach(log => {
+            const date = dayjs(log.start_time).format("YYYY-MM-DD");
+            if (!groups[date]) {
+                groups[date] = {
+                    date,
+                    logs: [],
+                    stats: { total: 0, inbound: 0, outbound: 0, connected: 0, notConnected: 0, durationSeconds: 0, durationFormatted: "00:00:00" }
+                };
+            }
+            groups[date].logs.push(log);
+            groups[date].stats.total++;
+            if (log.direction === "inbound") groups[date].stats.inbound++;
+            if (log.direction === "outbound") groups[date].stats.outbound++;
+            
+            const isAnswered = log.result?.toLowerCase() === "answered" || log.result?.toLowerCase() === "connected";
+            if (isAnswered) groups[date].stats.connected++;
+            else groups[date].stats.notConnected++;
+            
+            groups[date].stats.durationSeconds += (log.duration || 0);
+        });
+
+        // Format durations
+        Object.values(groups).forEach(g => {
+            const h = Math.floor(g.stats.durationSeconds / 3600);
+            const m = Math.floor((g.stats.durationSeconds % 3600) / 60);
+            const s = g.stats.durationSeconds % 60;
+            g.stats.durationFormatted = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+        });
+
+        return Object.values(groups).sort((a, b) => b.date.localeCompare(a.date));
+    }, [logs]);
+
     const totalDurationSeconds = logs.reduce((sum, log) => sum + (log.duration || 0), 0);
     const totalDurationFormatted = (() => {
         const h = Math.floor(totalDurationSeconds / 3600);
@@ -83,7 +136,7 @@ function UserCallHistoryContent() {
                     </Button>
                     <div className="flex flex-col">
                         <h1 className="text-xl text-gray-800 tracking-tight">
-                            Full Call History: <span className="text-blue-600">{name || extension}</span>
+                            Full Call History: <span className="text-blue-600 font-bold">{name || extension}</span>
                         </h1>
                         <p className="text-[10px] text-gray-400 uppercase tracking-widest mt-0.5">
                             Report showing records from Zoom since Day 1 (Last 3 Months)
@@ -121,7 +174,7 @@ function UserCallHistoryContent() {
                 </div>
             </div>
 
-            <div className="flex-1 overflow-auto p-6 max-w-7xl mx-auto w-full">
+            <div className="flex-1 overflow-auto p-6 max-w-7xl mx-auto w-full pb-20">
                 {error && (
                     <div className="p-5 mb-6 bg-red-50 text-red-600 rounded-lg border border-red-100 text-sm shadow-sm">
                         {error}
@@ -136,139 +189,161 @@ function UserCallHistoryContent() {
                     </div>
                     <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col items-center justify-center text-center">
                         <span className="text-[10px] uppercase text-gray-400 font-normal tracking-widest mb-1">Total Calls</span>
-                        <span className="text-2xl text-blue-600">{summary.total}</span>
+                        <span className="text-2xl text-blue-600 font-bold">{summary.total}</span>
                     </div>
                     <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col items-center justify-center text-center">
                         <span className="text-[10px] uppercase text-gray-400 font-normal tracking-widest mb-1">Outbound</span>
-                        <span className="text-2xl text-indigo-600">{summary.outbound}</span>
+                        <span className="text-2xl text-indigo-600 font-bold">{summary.outbound}</span>
                     </div>
                     <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col items-center justify-center text-center">
                         <span className="text-[10px] uppercase text-gray-400 font-normal tracking-widest mb-1">Inbound</span>
-                        <span className="text-2xl text-green-600">{summary.inbound}</span>
+                        <span className="text-2xl text-green-600 font-bold">{summary.inbound}</span>
                     </div>
                     <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col items-center justify-center text-center">
                         <span className="text-[10px] uppercase text-gray-400 font-normal tracking-widest mb-1">Connected</span>
-                        <span className="text-2xl text-emerald-600">{summary.connected}</span>
+                        <span className="text-2xl text-emerald-600 font-bold">{summary.connected}</span>
                     </div>
                     <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col items-center justify-center text-center">
                         <span className="text-[10px] uppercase text-gray-400 font-normal tracking-widest mb-1">Missed/Cancelled</span>
-                        <span className="text-2xl text-red-500">{summary.notConnected}</span>
+                        <span className="text-2xl text-red-500 font-bold">{summary.notConnected}</span>
                     </div>
                 </div>
 
-                <div className="bg-white border border-gray-200 rounded-xl shadow-md overflow-hidden transition-all duration-300">
-                    <div className="p-4 bg-gray-50/50 border-b border-gray-100 flex items-center justify-between px-6">
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs text-gray-500 uppercase tracking-widest">Global Activity Ledger</span>
-                            <Badge variant="secondary" className="bg-blue-100 text-blue-700 hover:bg-blue-100 px-2.5 py-0.5 text-[10px] rounded-full">
-                                {logs.length} Total Logs
-                            </Badge>
-                            <div className="w-px h-4 bg-gray-200 mx-1" />
-                            <div className="flex items-center gap-1.5 px-3 py-1 bg-gray-100 rounded-full border border-gray-200/50">
-                                <span className="text-[10px] uppercase text-gray-400 font-normal tracking-wider">Total Duration:</span>
-                                <span className="text-xs font-mono text-gray-700">{totalDurationFormatted}</span>
+                <div className="space-y-4">
+                    {loading ? (
+                        <div className="py-24 text-center bg-white rounded-xl border shadow-sm">
+                            <div className="flex flex-col items-center justify-center animate-pulse">
+                                <Loader2 className="w-10 h-10 text-blue-500 animate-spin mb-4" />
+                                <span className="text-gray-500 text-base font-medium">Retrieving records from Zoom Cloud...</span>
+                                <span className="text-gray-400 text-xs mt-1">This takes a few moments.</span>
                             </div>
                         </div>
-                    </div>
+                    ) : groupedLogs.length === 0 ? (
+                        <div className="py-24 text-center bg-white rounded-xl border shadow-sm">
+                            <div className="flex flex-col items-center justify-center">
+                                <Phone className="w-16 h-16 text-gray-200 mb-4 stroke-[1px]" />
+                                <span className="text-gray-400 text-base">No call records found for this period.</span>
+                            </div>
+                        </div>
+                    ) : (
+                        <Accordion type="single" collapsible className="space-y-3">
+                            {groupedLogs.map((group) => (
+                                <AccordionItem key={group.date} value={group.date} className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm px-0">
+                                    <AccordionTrigger className="hover:no-underline px-6 py-4 hover:bg-gray-50 transition-colors">
+                                        <div className="flex flex-col md:flex-row md:items-center justify-between w-full text-left gap-4 pr-4">
+                                            <div className="flex items-center gap-4">
+                                                <div className="p-2.5 bg-blue-50 rounded-lg">
+                                                    <Calendar className="w-5 h-5 text-blue-600" />
+                                                </div>
+                                                <div className="flex flex-col">
+                                                    <span className="text-base font-bold text-gray-900">{dayjs(group.date).format("DD MMMM YYYY")}</span>
+                                                    <span className="text-[10px] text-gray-400 uppercase tracking-widest">{dayjs(group.date).format("dddd")}</span>
+                                                </div>
+                                            </div>
 
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-sm text-left border-collapse">
-                            <thead className="bg-[#fcfdfe] text-gray-500 text-[10px] tracking-widest uppercase border-b border-gray-100">
-                                <tr>
-                                    <th className="pl-8 py-4 w-12 text-center text-gray-400">#</th>
-                                    <th className="px-4 py-4">Direction</th>
-                                    <th className="px-4 py-4">Other Party</th>
-                                    <th className="px-4 py-4">Start Time (IST)</th>
-                                    <th className="px-4 py-4 text-center">Duration</th>
-                                    <th className="px-4 py-4">Status</th>
-                                    <th className="px-4 py-4 text-center pr-8">Recording</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-50 text-gray-700 transition-all">
-                                {loading ? (
-                                    <tr>
-                                        <td colSpan={6} className="py-24 text-center">
-                                            <div className="flex flex-col items-center justify-center animate-pulse">
-                                                <Loader2 className="w-8 h-8 text-blue-500 animate-spin mb-4" />
-                                                <span className="text-gray-500 text-base">Retrieving records from Zoom Cloud...</span>
-                                                <span className="text-gray-400 text-xs mt-1">This takes a few moments.</span>
+                                            <div className="flex flex-wrap items-center gap-3">
+                                                <div className="flex items-center gap-1.5 px-3 py-1 bg-gray-50 border rounded-md">
+                                                    <span className="text-[10px] text-gray-400 font-bold uppercase">Total:</span>
+                                                    <span className="text-xs font-bold">{group.stats.total}</span>
+                                                </div>
+                                                <div className="flex items-center gap-1.5 px-3 py-1 bg-indigo-50/50 border border-indigo-100 rounded-md">
+                                                    <span className="text-[10px] text-indigo-400 font-bold uppercase">In:</span>
+                                                    <span className="text-xs font-bold text-indigo-700">{group.stats.inbound}</span>
+                                                </div>
+                                                <div className="flex items-center gap-1.5 px-3 py-1 bg-green-50/50 border border-green-100 rounded-md">
+                                                    <span className="text-[10px] text-green-400 font-bold uppercase">Out:</span>
+                                                    <span className="text-xs font-bold text-green-700">{group.stats.outbound}</span>
+                                                </div>
+                                                <div className="flex items-center gap-1.5 px-3 py-1 bg-emerald-50/50 border border-emerald-100 rounded-md">
+                                                    <span className="text-[10px] text-emerald-400 font-bold uppercase">Conn:</span>
+                                                    <span className="text-xs font-bold text-emerald-700">{group.stats.connected}</span>
+                                                </div>
+                                                <div className="flex items-center gap-1.5 px-3 py-1 bg-red-50/50 border border-red-100 rounded-md">
+                                                    <span className="text-[10px] text-red-400 font-bold uppercase">Miss:</span>
+                                                    <span className="text-xs font-bold text-red-700">{group.stats.notConnected}</span>
+                                                </div>
+                                                <div className="flex items-center gap-1.5 px-3 py-1 bg-slate-100 border rounded-md">
+                                                    <span className="text-[10px] text-slate-400 font-bold uppercase">Dur:</span>
+                                                    <span className="text-xs font-mono font-bold">{group.stats.durationFormatted}</span>
+                                                </div>
                                             </div>
-                                        </td>
-                                    </tr>
-                                ) : logs.length === 0 ? (
-                                    <tr>
-                                        <td colSpan={6} className="py-24 text-center">
-                                            <div className="flex flex-col items-center justify-center">
-                                                <Phone className="w-12 h-12 text-gray-200 mb-4 stroke-[1px]" />
-                                                <span className="text-gray-400 text-base">No call records found for this user in the last 3 months.</span>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ) : (
-                                    logs.map((log) => {
-                                        const isOutbound = log.direction === "outbound";
-                                        const isAnswered = log.result?.toLowerCase() === "answered" || log.result?.toLowerCase() === "connected";
-                                        
-                                        return (
-                                            <tr key={log.id} className="hover:bg-blue-50/40 transition-colors group">
-                                                <td className="pl-8 py-5 text-center text-black text-xs">
-                                                    {logs.indexOf(log) + 1}
-                                                </td>
-                                                <td className="px-4 py-5 font-normal">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className={`p-2 rounded-lg ${isOutbound ? 'bg-indigo-50 text-indigo-600' : 'bg-green-50 text-green-600'} transition-transform group-hover:scale-110 shadow-sm border border-transparent group-hover:border-blue-100`}>
-                                                            {isOutbound ? <PhoneForwarded className="w-4 h-4" /> : <PhoneIncoming className="w-4 h-4" />}
-                                                        </div>
-                                                        <span className={`text-[11px] uppercase tracking-wider ${isOutbound ? 'text-indigo-600' : 'text-green-600'}`}>
-                                                            {log.direction}
-                                                        </span>
-                                                    </div>
-                                                </td>
-                                                <td className="px-4 py-5">
-                                                    <div className="flex flex-col">
-                                                        <span className="text-gray-900 text-sm group-hover:text-blue-600 transition-colors">{log.other_party}</span>
-                                                        <span className="text-[10px] text-gray-400 font-normal">External Party</span>
-                                                    </div>
-                                                </td>
-                                                <td className="px-4 py-5">
-                                                    <div className="flex flex-col">
-                                                        <span className="text-gray-800">{dayjs(log.start_time).format("MMM DD, YYYY")}</span>
-                                                        <span className="text-[11px] text-gray-500 font-mono">{dayjs(log.start_time).format("hh:mm:ss A")} IST</span>
-                                                    </div>
-                                                </td>
-                                                <td className="px-4 py-5 text-center">
-                                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-mono tracking-tighter ${log.duration > 0 ? 'bg-blue-50 text-blue-700' : 'bg-gray-100 text-gray-400'}`}>
-                                                        {log.durationFormatted}
-                                                    </span>
-                                                </td>
-                                                <td className="px-4 py-5">
-                                                    <div className="flex items-center gap-1.5">
-                                                        <div className={`w-1.5 h-1.5 rounded-full ${isAnswered ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]' : 'bg-red-400 opacity-60'}`} />
-                                                        <span className={`text-[11px] uppercase tracking-tight ${isAnswered ? 'text-green-700' : 'text-red-500'}`}>
-                                                            {log.result || "N/A"}
-                                                        </span>
-                                                    </div>
-                                                </td>
-                                                <td className="px-4 py-5 text-center pr-8">
-                                                    {log.recording ? (
-                                                        <Badge className="bg-emerald-50 text-emerald-600 border-emerald-100 hover:bg-emerald-100 px-3 py-1 flex items-center justify-center gap-1.5 w-fit mx-auto shadow-sm">
-                                                            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                                            REC
-                                                        </Badge>
-                                                    ) : (
-                                                        <span className="text-gray-300 text-[10px]">—</span>
-                                                    )}
-                                                </td>
-                                            </tr>
-                                        );
-                                    })
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
+                                        </div>
+                                    </AccordionTrigger>
+                                    <AccordionContent>
+                                        <div className="border-t border-gray-100 overflow-x-auto">
+                                            <table className="w-full text-sm text-left">
+                                                <thead className="bg-[#fcfdfe] text-gray-500 text-[10px] tracking-widest uppercase border-b border-gray-50">
+                                                    <tr>
+                                                        <th className="pl-6 py-3 w-10">#</th>
+                                                        <th className="px-4 py-3">Direction</th>
+                                                        <th className="px-4 py-3 text-center">Duration</th>
+                                                        <th className="px-4 py-3">Other Party</th>
+                                                        <th className="px-4 py-3">Time IST</th>
+                                                        <th className="px-4 py-3">Status</th>
+                                                        <th className="px-4 py-3 text-center pr-6">Rec</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-gray-50 text-gray-700">
+                                                    {group.logs.map((log, lidx) => {
+                                                        const isOutbound = log.direction === "outbound";
+                                                        const isAnswered = log.result?.toLowerCase() === "answered" || log.result?.toLowerCase() === "connected";
+                                                        return (
+                                                            <tr key={log.id} className="hover:bg-blue-50/30 transition-colors group">
+                                                                <td className="pl-6 py-4 text-gray-400 font-mono text-xs">
+                                                                    {lidx + 1}
+                                                                </td>
+                                                                <td className="px-4 py-4">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <div className={`p-1.5 rounded-md ${isOutbound ? 'bg-indigo-50 text-indigo-600' : 'bg-green-50 text-green-600'}`}>
+                                                                            {isOutbound ? <PhoneForwarded className="w-3.5 h-3.5" /> : <PhoneIncoming className="w-3.5 h-3.5" />}
+                                                                        </div>
+                                                                        <span className={`text-[10px] font-bold uppercase tracking-wider ${isOutbound ? 'text-indigo-600' : 'text-green-600'}`}>
+                                                                            {log.direction}
+                                                                        </span>
+                                                                    </div>
+                                                                </td>
+                                                                <td className="px-4 py-4 text-center">
+                                                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-mono font-bold ${log.duration > 0 ? 'bg-blue-50 text-blue-700' : 'bg-gray-100 text-gray-400'}`}>
+                                                                        {log.durationFormatted}
+                                                                    </span>
+                                                                </td>
+                                                                <td className="px-4 py-4">
+                                                                    <div className="flex flex-col">
+                                                                        <span className="text-gray-900 font-medium group-hover:text-blue-600 transition-colors">{log.other_party}</span>
+                                                                    </div>
+                                                                </td>
+                                                                <td className="px-4 py-4">
+                                                                    <span className="text-gray-500 font-mono text-[11px]">{dayjs(log.start_time).format("hh:mm:ss A")}</span>
+                                                                </td>
+                                                                <td className="px-4 py-4">
+                                                                    <div className="flex items-center gap-1.5">
+                                                                        <div className={`w-1.5 h-1.5 rounded-full ${isAnswered ? 'bg-green-500' : 'bg-red-400'}`} />
+                                                                        <span className={`text-[10px] font-bold uppercase tracking-tight ${isAnswered ? 'text-green-700' : 'text-red-500'}`}>
+                                                                            {log.result || "N/A"}
+                                                                        </span>
+                                                                    </div>
+                                                                </td>
+                                                                <td className="px-4 py-4 text-center pr-6">
+                                                                    {log.recording ? (
+                                                                        <Badge className="bg-emerald-50 text-emerald-600 border-none px-2 py-0 h-5 text-[9px] font-bold">REC</Badge>
+                                                                    ) : (
+                                                                        <span className="text-gray-200">-</span>
+                                                                    )}
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </AccordionContent>
+                                </AccordionItem>
+                            ))}
+                        </Accordion>
+                    )}
                 </div>
                 
-                <p className="mt-8 text-center text-gray-400 text-[11px] uppercase tracking-[0.2em] opacity-60">
+                <p className="mt-12 text-center text-gray-400 text-[10px] uppercase tracking-[0.2em] opacity-40">
                     &copy; {new Date().getFullYear()} ApplyWizz Official Call Logging Systems | Zoom Cloud Integration
                 </p>
             </div>

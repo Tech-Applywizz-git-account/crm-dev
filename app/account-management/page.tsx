@@ -18,6 +18,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Eye, MessageSquare, Star, Calendar } from "lucide-react";
 import ProtectedRoute from "@/components/auth/ProtectedRoute";
 import Papa from "papaparse";
+import dayjs from "dayjs";
 import FullScreenLoader from "@/components/ui/FullScreenLoader";
 
 /** =========================
@@ -565,6 +566,7 @@ export default function AccountManagementPage() {
         lead_id: selectedClient.id,
         current_stage: "Conversation Done",
         followup_date: feedbackForm.date,
+        call_started_at: dayjs().toISOString(),
         notes: `Feedback recorded: rating ${feedbackForm.rating}/5. ${feedbackForm.notes}`.slice(0, 1000),
         assigned_to: me.name || "Accounts",
         email: emailToUse,
@@ -604,6 +606,7 @@ export default function AccountManagementPage() {
       assigned_to: me.name || "Accounts",
       email: emailToUse,
       phone: phoneToUse,
+      call_started_at: dayjs().toISOString(),
     };
 
     const { error } = await supabase.from("call_history").insert([followUpData]);
@@ -809,7 +812,7 @@ export default function AccountManagementPage() {
     <>
       {pageLoading && <FullScreenLoader />}
       {/* Allow all three roles into the page (include Admin for robustness) */}
-      <ProtectedRoute allowedRoles={["Super Admin", "Admin", "Account Management", "Accounts", "Sales", "Sales Associate", "Sales Head"]}>
+      <ProtectedRoute allowedRoles={["Super Admin", "Admin", "Account Management", "Accounts"]}>
         <DashboardLayout>
           <div className="space-y-6">
             <div className="flex justify-between items-center">

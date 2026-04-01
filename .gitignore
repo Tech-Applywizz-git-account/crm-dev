@@ -3,6 +3,8 @@
 # dependencies
 /node_modules
 
+
+
 # next.js
 /.next/
 /tmp/next/
@@ -40,3 +42,8 @@ next-env.d.ts
 
 certificates
 database
+ZOOM_INTEGRATION_README.md
+db_dump.sql
+dns_check.txt
+migrate_db.py
+>>>>>>> d1e290e4eb7e080561edbe6707b90a232f214e44
