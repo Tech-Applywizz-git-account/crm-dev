@@ -133,7 +133,7 @@ export async function processServiceStarted(
     // Step 1: Get sale information from sales_closure
     const { data: sale, error: saleError } = await supabase
       .from("sales_closure")
-      .select("subscription_cycle, created_at")
+      .select("subscription_cycle, closed_at")
       .eq("lead_id", req.lead_id)
       .single();
 
