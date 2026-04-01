@@ -1319,9 +1319,7 @@ export default function MarketingPage() {
                       <DropdownMenuContent>
                         <DropdownMenuItem
                           onClick={() => {
-                            const filtered = leads.filter((lead) => lead.status === "Assigned");
-                            setAssignedLeads(filtered);
-                            setHistoryDialogOpen(true);
+                            window.open("/marketing/history/assigned", "_blank");
                           }}
                         >
                           Assigned Leads History

@@ -357,6 +357,13 @@ const navigationItems = [
     module: "finance-associates",
     description: "Associate Management",
   },
+  {
+    title: "Costs",
+    url: "/costs",
+    icon: DollarSign,
+    module: "admin",
+    description: "Costs and Billing",
+  },
 ]
 
 export function AppSidebar() {
