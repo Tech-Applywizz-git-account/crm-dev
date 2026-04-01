@@ -133,7 +133,7 @@ export async function processServiceStarted(
     // Step 1: Get sale information from sales_closure
     const { data: sale, error: saleError } = await supabase
       .from("sales_closure")
-      .select("subscription_cycle, closed_at")
+      .select("id, subscription_cycle, closed_at")
       .eq("lead_id", req.lead_id)
       .single();
 
@@ -160,7 +160,7 @@ export async function processServiceStarted(
       .insert([
         {
           lead_id: req.lead_id,
-          sales_closure_id: req.lead_id, // Assuming 1:1 mapping for now
+          sales_closure_id: sale.id,
           service_start_date: serviceStart.toISO(),
           subscription_cycle: subscriptionDays,
           renewal_date: renewalDate.toISO(),
