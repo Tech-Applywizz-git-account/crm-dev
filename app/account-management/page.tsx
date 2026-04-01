@@ -22,10 +22,8 @@ import dayjs from "dayjs";
 import FullScreenLoader from "@/components/ui/FullScreenLoader";
 
 /** =========================
- *  Config — using your new columns
+ *  Config — new scheduling system
  *  ========================= */
-const ACCOUNT_EMAIL_COL = "account_assigned_email";
-const ACCOUNT_NAME_COL = "account_assigned_name";
 const ALL_OWNERS = "__ALL_OWNERS__";
 
 type AccountStage = "DNP" | "Call Again" | "Conversation Done";
@@ -44,13 +42,18 @@ interface Feedback {
 }
 
 interface Client {
-  id: string;
+  id: string; // lead_id
   client_name: string;
   email: string;
   phone?: string | null;
-  assigned_to: string; // from leads
-  account_assigned_name?: string | null; // from sales_closure
-  account_assigned_email?: string | null; // from sales_closure
+  assigned_to: string; // from leads.assigned_to (sales person)
+  am_id?: string | null; // from call_events.am_id
+  am_name?: string | null; // AM's full_name from profiles
+  service_status?: string | null; // from service_registry.status
+  renewal_date?: string | null; // from service_registry.renewal_date
+  service_start_date?: string | null; // from service_registry.service_start_date
+  next_call_type?: string | null; // next upcoming call type
+  next_call_status?: string | null; // next upcoming call status
   stage: AccountStage;
   created_at: string;
   follow_ups?: FollowUp[];
@@ -102,23 +105,24 @@ function renderStars(rating: number, showLabel: boolean = false) {
   );
 }
 
-const isAssigned = (name?: string | null) => !!(name && String(name).trim().length > 0);
+const isAssigned = (amId?: string | null) => !!(amId && String(amId).trim().length > 0);
 
 export default function AccountManagementPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [pageLoading, setPageLoading] = useState(false);
 
   // Logged-in user meta
-  const [me, setMe] = useState<{ email: string; name: string; role: string }>({
+  const [me, setMe] = useState<{ userId: string; email: string; name: string; role: string }>({
+    userId: "",
     email: "",
     name: "",
     role: "",
   });
 
-  // ---- ROLE NORMALIZATION (robust to "Admin" vs "Super Admin", "Accounts" vs "Account Management")
+  // ---- ROLE NORMALIZATION ----
   const roleNorm = (me.role || "").trim().toLowerCase();
-  const isAssociate = roleNorm === "accounts associate";
-  const canAssign = ["super admin", "admin", "account management", "accounts"].includes(roleNorm);
+  const isAM = roleNorm === "accounts"; // Account Manager = role "Accounts"
+  const canAssign = ["super admin", "admin", "account management", "sales head"].includes(roleNorm);
 
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
@@ -161,7 +165,7 @@ export default function AccountManagementPage() {
   const [activeTab, setActiveTab] = useState<"unassigned" | "assigned">("unassigned");
   const [ownerFilter, setOwnerFilter] = useState<string>(ALL_OWNERS);
 
-  /** ===== Current user (role/email/name) ===== */
+  /** ===== Current user (role/email/name/userId) ===== */
   useEffect(() => {
     let canceled = false;
     (async () => {
@@ -172,12 +176,13 @@ export default function AccountManagementPage() {
 
         const { data, error } = await supabase
           .from("profiles")
-          .select("full_name, user_email, roles")
+          .select("user_id, full_name, user_email, roles")
           .eq("auth_id", user.id)
           .single();
 
         if (!canceled) {
           setMe({
+            userId: (data?.user_id || "").trim(),
             email: (data?.user_email || user.email || "").trim(),
             name: (data?.full_name || "").trim(),
             role: (data?.roles || "").trim(),
@@ -200,65 +205,33 @@ export default function AccountManagementPage() {
     const fetchClients = async () => {
       setPageLoading(true);
       try {
-        // include new columns from sales_closure
-        const { data: rawSalesData, error: salesError } = await supabase
-          .from("sales_closure")
-          .select("lead_id, email, onboarded_date, account_assigned_email, account_assigned_name")
-          .not("onboarded_date", "is", null)
-          .order("onboarded_date", { ascending: false });
+        // 1. Get all active services from service_registry
+        const { data: registryData, error: regError } = await supabase
+          .from("service_registry")
+          .select("lead_id, service_start_date, renewal_date, status")
+          .eq("status", "ACTIVE");
 
-        if (salesError || !rawSalesData) {
-          console.error("❌ sales_closure fetch failed", salesError);
+        if (regError || !registryData) {
+          console.error("❌ service_registry fetch failed", regError);
           return;
         }
 
-        const salesDataMap = new Map<
-          string,
-          {
-            lead_id: string;
-            email: string;
-            onboarded_date: string;
-            account_assigned_email: string | null;
-            account_assigned_name: string | null;
-          }
-        >();
-        for (const row of rawSalesData) {
-          if (!salesDataMap.has(row.lead_id)) {
-            salesDataMap.set(row.lead_id, {
-              lead_id: row.lead_id,
-              email: row.email,
-              onboarded_date: row.onboarded_date as any,
-              account_assigned_email: (row as any).account_assigned_email ?? null,
-              account_assigned_name: (row as any).account_assigned_name ?? null,
-            });
-          }
-        }
-        let salesData = Array.from(salesDataMap.values());
-
-        // If Accounts Associate, restrict to their own assigned rows
-        if (isAssociate) {
-          const meEmail = (me.email || "").toLowerCase();
-          const meName = (me.name || "").toLowerCase();
-
-          salesData = salesData.filter((r) => {
-            const hasEmail = !!(r.account_assigned_email && r.account_assigned_email.trim());
-            const hasName = !!(r.account_assigned_name && r.account_assigned_name.trim());
-            const emailMatch = (r.account_assigned_email || "").trim().toLowerCase() === meEmail;
-            const nameMatch = (r.account_assigned_name || "").trim().toLowerCase() === meName;
-
-            if (hasEmail && hasName) return emailMatch && nameMatch;
-            if (hasEmail) return emailMatch;
-            if (hasName) return nameMatch;
-            return false;
-          });
-        }
-
-        const leadIds = salesData.map((s) => s.lead_id);
+        const leadIds = registryData.map((r) => r.lead_id);
         if (leadIds.length === 0) {
           if (!cancelled) setClients([]);
           return;
         }
 
+        // 2. Get all calls for these leads to find the AM assignments and next calls
+        const { data: allCalls, error: callsError } = await supabase
+          .from("call_events")
+          .select("id, lead_id, am_id, call_type, status, scheduled_at, sla_deadline")
+          .in("lead_id", leadIds)
+          .order("sla_deadline", { ascending: true });
+
+        if (callsError) console.error("❌ call_events fetch failed", callsError);
+
+        // 3. Get client details from leads
         const { data: leadsData, error: leadsError } = await supabase
           .from("leads")
           .select("business_id, name, phone, assigned_to, email")
@@ -270,17 +243,18 @@ export default function AccountManagementPage() {
         }
         const leadsMap = Object.fromEntries(leadsData.map((l) => [l.business_id, l]));
 
-        const { data: callRaw, error: callError } = await supabase
-          .from("call_history")
-          .select("lead_id, current_stage, followup_date")
-          .order("followup_date", { ascending: false });
-        if (callError) console.error("❌ call_history fetch failed", callError);
-
-        const latestCallMap: Record<string, any> = {};
-        for (const call of callRaw || []) {
-          if (!latestCallMap[call.lead_id]) latestCallMap[call.lead_id] = call;
+        // 4. Get AM names from profiles
+        const amIds = Array.from(new Set(allCalls?.map((c) => c.am_id).filter(Boolean)));
+        let amMap: Record<string, string> = {};
+        if (amIds.length > 0) {
+          const { data: amData } = await supabase
+            .from("profiles")
+            .select("user_id, full_name")
+            .in("user_id", amIds);
+          amMap = Object.fromEntries(amData?.map((p) => [p.user_id, p.full_name]) || []);
         }
 
+        // 5. Get latest feedback
         const { data: feedbackRows, error: fbErr } = await supabase
           .from("client_feedback")
           .select("lead_id, client_emotion, rating, notes, renew_status, id")
@@ -301,25 +275,42 @@ export default function AccountManagementPage() {
           }
         }
 
-        const merged: Client[] = salesData.map((sale) => {
-          const lead = leadsMap[sale.lead_id] || {};
-          const call = latestCallMap[sale.lead_id];
+        // 6. Build the merged client list
+        const merged: Client[] = registryData.map((reg) => {
+          const lead = leadsMap[reg.lead_id] || {};
+          const clientCalls = allCalls?.filter(c => c.lead_id === reg.lead_id) || [];
+
+          // Find the AM assigned to this client (from any call)
+          const primaryAMId = clientCalls.find(c => c.am_id)?.am_id || null;
+
+          // Find the next upcoming call
+          const nextCall = clientCalls.find(c => c.status === "SCHEDULED" || c.status === "PENDING" || c.status === "RESCHEDULED");
+
           return {
-            id: sale.lead_id,
+            id: reg.lead_id,
             client_name: lead.name || "Unnamed",
-            email: sale.email || lead.email || "unknown@example.com",
+            email: lead.email || "unknown@example.com",
             phone: lead.phone ?? null,
             assigned_to: lead.assigned_to || "Unassigned",
-            created_at: sale.onboarded_date,
-            stage: (call?.current_stage as AccountStage) || "DNP",
-            follow_ups: [],
-            feedback: latestFbMap.get(sale.lead_id),
-            account_assigned_name: sale.account_assigned_name,
-            account_assigned_email: sale.account_assigned_email,
+            created_at: reg.service_start_date,
+            renewal_date: reg.renewal_date,
+            service_status: reg.status,
+            am_id: primaryAMId,
+            am_name: primaryAMId ? amMap[primaryAMId] : null,
+            next_call_type: nextCall?.call_type || null,
+            next_call_status: nextCall?.status || null,
+            stage: "DNP", // Default stage, will be updated by call history if needed
+            feedback: latestFbMap.get(reg.lead_id),
           };
         });
 
-        if (!cancelled) setClients(merged);
+        // 7. If AM, filter to only their assigned clients
+        let filteredClients = merged;
+        if (isAM) {
+          filteredClients = merged.filter((c) => c.am_id === me.userId);
+        }
+
+        if (!cancelled) setClients(filteredClients);
       } catch (err) {
         console.error("❌ Unexpected error:", err);
       } finally {
@@ -328,12 +319,12 @@ export default function AccountManagementPage() {
     };
 
     fetchClients();
-  }, [me.role, me.email, me.name, isAssociate]);
+  }, [me.role, me.userId, isAM]);
 
-  // If associate, force Assigned tab
+  // If AM, force Assigned tab
   useEffect(() => {
-    if (isAssociate) setActiveTab("assigned");
-  }, [isAssociate]);
+    if (isAM) setActiveTab("assigned");
+  }, [isAM]);
 
   /** ===== History & feedback fetch for selected client ===== */
   useEffect(() => {
@@ -406,11 +397,11 @@ export default function AccountManagementPage() {
   /** ===== Tab filtering ===== */
   const tabFiltered = useMemo(() => {
     if (activeTab === "unassigned") {
-      return baseFiltered.filter((c) => !isAssigned(c.account_assigned_name));
+      return baseFiltered.filter((c) => !isAssigned(c.am_id));
     } else {
-      let arr = baseFiltered.filter((c) => isAssigned(c.account_assigned_name));
+      let arr = baseFiltered.filter((c) => isAssigned(c.am_id));
       if (ownerFilter !== ALL_OWNERS && canAssign) {
-        arr = arr.filter((c) => (c.account_assigned_name || "").trim() === ownerFilter);
+        arr = arr.filter((c) => (c.am_name || "").trim() === ownerFilter);
       }
       return arr;
     }
@@ -447,13 +438,13 @@ export default function AccountManagementPage() {
   };
 
   /** ===== Counts & owners ===== */
-  const assignedCountAll = useMemo(() => clients.filter((c) => isAssigned(c.account_assigned_name)).length, [clients]);
+  const assignedCountAll = useMemo(() => clients.filter((c) => isAssigned(c.am_id)).length, [clients]);
   const unassignedCountAll = useMemo(() => clients.length - assignedCountAll, [clients, assignedCountAll]);
 
   const ownerNames = useMemo(() => {
     const s = new Set<string>();
     clients.forEach((c) => {
-      const nm = (c.account_assigned_name || "").trim();
+      const nm = (c.am_name || "").trim();
       if (nm) s.add(nm);
     });
     return Array.from(s).sort((a, b) => a.localeCompare(b));
@@ -461,7 +452,7 @@ export default function AccountManagementPage() {
 
   const ownerCount = useMemo(() => {
     if (!canAssign || ownerFilter === ALL_OWNERS) return 0;
-    return clients.filter((c) => (c.account_assigned_name || "").trim() === ownerFilter).length;
+    return clients.filter((c) => (c.am_name || "").trim() === ownerFilter).length;
   }, [clients, ownerFilter, canAssign]);
 
   /** ===== Deadline badge ===== */
@@ -699,8 +690,8 @@ export default function AccountManagementPage() {
           finance_status: "Paid",
           closed_at: sale_done.toISOString(),
           onboarded_date: date.toISOString().split("T")[0],
-          account_assigned_name: me.name || me.email || "Accounts",
-          account_assigned_email: me.email || null,
+          am_name: me.name || me.email || "Accounts",
+          am_id: me.email || null,
         });
       }
 
@@ -735,7 +726,7 @@ export default function AccountManagementPage() {
   /** ===== Bulk helpers ===== */
   const toggleOne = (id: string) => {
     const row = sortedClients.find((c) => c.id === id);
-    if (row && isAssigned(row.account_assigned_name)) return;
+    if (row && isAssigned(row.am_name)) return;
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -745,7 +736,7 @@ export default function AccountManagementPage() {
   };
 
   const quickSelect = (n: number) => {
-    const eligible = sortedClients.filter((c) => !isAssigned(c.account_assigned_name));
+    const eligible = sortedClients.filter((c) => !isAssigned(c.am_id));
     const firstN = eligible.slice(0, n).map((c) => c.id);
     setSelectedIds(new Set(firstN));
   };
@@ -762,7 +753,7 @@ export default function AccountManagementPage() {
     setBulkDialogOpen(true);
     const { data, error } = await supabase
       .from("profiles")
-      .select("full_name, user_email, roles")
+      .select("user_id, full_name, user_email, roles")
       .in("roles", ["Sales Associate", "Accounts Associate", "Admin", "Resume Head", "Finance", "Sales", "Accounts", "Sales Head"]);
 
 
@@ -779,8 +770,9 @@ export default function AccountManagementPage() {
         .map((r) => ({
           name: (r.full_name || "").trim() || (r.user_email || "").trim(),
           email: (r.user_email || "").trim(),
+          userId: r.user_id,
         }))
-        .filter((a) => a.email.length > 0)
+        .filter((a) => a.userId)
         .sort((a, b) => a.name.localeCompare(b.name))
     );
   };
@@ -798,11 +790,8 @@ export default function AccountManagementPage() {
     const leadIds = Array.from(selectedIds);
     if (leadIds.length === 0) return;
 
-    const payload: Record<string, any> = {};
-    payload[ACCOUNT_EMAIL_COL] = picked.email;
-    payload[ACCOUNT_NAME_COL] = picked.name;
-
-    const { error } = await supabase.from("sales_closure").update(payload).in("lead_id", leadIds);
+    // Bulk assign in new system updates call_events for selected lead_ids
+    const { error } = await supabase.from("call_events").update({ am_id: (picked as any).userId }).in("lead_id", leadIds);
     if (error) {
       console.error("Bulk assign failed:", error);
       alert("Bulk assign failed. Check permissions/RLS.");
@@ -810,7 +799,7 @@ export default function AccountManagementPage() {
     }
 
     setClients((prev) =>
-      prev.map((c) => (selectedIds.has(c.id) ? { ...c, account_assigned_name: picked.name, account_assigned_email: picked.email } : c))
+      prev.map((c) => (selectedIds.has(c.id) ? { ...c, am_name: picked.name, am_id: (picked as any).userId } : c))
     );
 
     setBulkDialogOpen(false);
@@ -835,10 +824,7 @@ export default function AccountManagementPage() {
               <div className="flex items-center gap-2">
                 {/* CSV only for Admin/Account Management */}
                 {canAssign && <Button onClick={() => setUploadDialogOpen(true)}>Upload Sale Done CSV</Button>}
-                {/* Quick link to view leads assigned to the logged Account Manager */}
-                <Button asChild>
-                  <a href="/account-management/my-assigned-leads">My Assigned Leads</a>
-                </Button>
+
               </div>
             </div>
 
@@ -990,8 +976,8 @@ export default function AccountManagementPage() {
                       </SelectContent>
                     </Select>
 
-                    <Button 
-                      variant="outline" 
+                    <Button
+                      variant="outline"
                       className="gap-2 border-blue-200 text-blue-700 hover:bg-blue-50"
                       onClick={() => window.open('/account-management/grouped-records', '_blank')}
                     >
@@ -1011,72 +997,28 @@ export default function AccountManagementPage() {
                   ) : null}
                 </div>
 
-                <div className="rounded-md border mt-4">
+                <div className="overflow-auto bg-white rounded shadow-sm mt-4">
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="w-10">S.No</TableHead>
+                        <TableHead>S.No</TableHead>
                         {/* Checkbox header only when admins & unassigned tab */}
                         {canAssign && activeTab === "unassigned" && <TableHead className="w-8">Select</TableHead>}
-
-                        <TableHead className="select-none">
-                          <div className="flex items-center gap-2">
-                            <span>Client Name</span>
-                            <span
-                              className={`cursor-pointer text-lg leading-none ${sortKey === "client_name" && sortOrder === "desc" ? "text-blue-500" : "text-gray-400"}`}
-                              onClick={() => {
-                                setSortKey("client_name");
-                                setSortOrder("desc");
-                              }}
-                            >
-                              ↑
-                            </span>
-                            <span
-                              className={`cursor-pointer text-lg leading-none ${sortKey === "client_name" && sortOrder === "asc" ? "text-blue-500" : "text-gray-400"}`}
-                              onClick={() => {
-                                setSortKey("client_name");
-                                setSortOrder("asc");
-                              }}
-                            >
-                              ↓
-                            </span>
-                          </div>
-                        </TableHead>
-
+                        <TableHead>Lead ID</TableHead>
+                        <TableHead>Client</TableHead>
                         <TableHead>Email</TableHead>
                         <TableHead>Phone</TableHead>
-                        <TableHead>Assigned To</TableHead>
-                        <TableHead>Stage</TableHead>
-
-                        <TableHead className="select-none">
-                          <div className="flex items-center gap-2">
-                            <span>Closed At</span>
-                            <span
-                              className={`cursor-pointer text-lg leading-none ${sortKey === "created_at" && sortOrder === "desc" ? "text-blue-500" : "text-gray-400"}`}
-                              onClick={() => handleSort("created_at")}
-                            >
-                              ↑
-                            </span>
-                            <span
-                              className={`cursor-pointer text-lg leading-none ${sortKey === "created_at" && sortOrder === "asc" ? "text-blue-500" : "text-gray-400"}`}
-                              onClick={() => {
-                                setSortKey("created_at");
-                                setSortOrder("asc");
-                              }}
-                            >
-                              ↓
-                            </span>
-                          </div>
-                        </TableHead>
-
-                        <TableHead>Deadline</TableHead>
-                        <TableHead className="text-center">Account Owner</TableHead>
-                        <TableHead>Actions</TableHead>
+                        <TableHead>Sales Assigned</TableHead>
+                        <TableHead>AM Name</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Renewal Date</TableHead>
+                        <TableHead>Next Call</TableHead>
+                        <TableHead>Tag</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {sortedClients.map((client, idx) => {
-                        const assigned = isAssigned(client.account_assigned_name);
+                        const assigned = isAssigned(client.am_id);
                         const checked = selectedIds.has(client.id);
                         return (
                           <TableRow key={`${client.id}-${idx}`}>
@@ -1097,89 +1039,47 @@ export default function AccountManagementPage() {
                               </TableCell>
                             ) : null}
 
+                            <TableCell>{client.id}</TableCell>
                             <TableCell
                               className="font-medium max-w-[180px] break-words whitespace-normal cursor-pointer text-blue-600 hover:underline"
                               onClick={() => window.open(`/leads/${client.id}`, "_blank")}
                             >
                               {client.client_name}
                             </TableCell>
-
                             <TableCell className="max-w-[220px] break-words whitespace-normal">{client.email}</TableCell>
                             <TableCell>{client.phone || "-"}</TableCell>
-                            <TableCell>{client.assigned_to}</TableCell>
-
-                            <TableCell >
-                              <Select value={accountStages.includes(client.stage) ? client.stage : undefined} onValueChange={(value: AccountStage) => handleStageUpdate(client.id, value)}>
-                                <SelectTrigger className="w-48">
-                                  <SelectValue placeholder="Select Stage" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {accountStages.map((stage) => (
-                                    <SelectItem key={stage} value={stage}>
-                                      <span className={`inline-flex px-2 py-1 overflow-hidden rounded-full  ${getStageColor(stage)}`}>{stage}</span>
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </TableCell>
-
-                            <TableCell>{formatDate(client.created_at)}</TableCell>
-                            <TableCell>{getRenewWithinBadge(client.created_at)}</TableCell>
-
-                            {/* Account Owner cell with red 'Not Assigned' */}
-                            <TableCell className="text-center">
-                              {client.account_assigned_name && client.account_assigned_name.trim() ? (
-                                <span className="bg-gray-200 text-gray-800 text-md font-bold p-2 rounded-lg">
-                                  {client.account_assigned_name}
-                                </span>
-                              ) : (
-                                <Badge className="bg-red-100 text-red-800">
-                                  Not Assigned
-                                </Badge>
-                              )}
-                            </TableCell>
-
-                            {/* <TableCell className="text-center">
-                              {client.account_assigned_name && client.account_assigned_name.trim() ? (
-                                <Badge className="bg-green-100 text-green-800">{client.account_assigned_name}</Badge>
-                              ) : (
-                                <Badge className="bg-red-100 text-red-800">Not Assigned</Badge>
-                              )}
-                            </TableCell> */}
-
+                            <TableCell>{client.assigned_to || "-"}</TableCell>
+                            <TableCell>{client.am_name || "-"}</TableCell>
                             <TableCell>
-                              <div className="flex gap-2">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => {
-                                    setSelectedClient(client);
-                                    setHistoryDialogOpen(true);
-                                  }}
-                                  aria-label="View history"
-                                  title="View history"
-                                >
-                                  <Eye className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => {
-                                    setSelectedClient(client);
-                                    if (client.feedback) setFeedbackForm(client.feedback);
-                                    setFeedbackDialogOpen(true);
-                                    prevStageRef.current = client.stage;
-                                  }}
-                                  aria-label="Add feedback"
-                                  title="Add feedback"
-                                >
-                                  <MessageSquare className="h-4 w-4" />
-                                </Button>
-                              </div>
+                              <Badge variant={client.service_status === "ACTIVE" ? "default" : "outline"}>
+                                {client.service_status || "INACTIVE"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>{formatDate(client.renewal_date || undefined)}</TableCell>
+                            <TableCell>
+                              {client.next_call_type ? (
+                                <div className="text-xs">
+                                  <div className="font-semibold">{client.next_call_type}</div>
+                                  <div className="text-gray-500">{client.next_call_status}</div>
+                                </div>
+                              ) : "-"}
+                            </TableCell>
+                            <TableCell>
+                              {client.am_id === me.userId || (client.am_name || "").toLowerCase() === me.name.toLowerCase()
+                                ? <Badge className="bg-green-100 text-green-800">Assigned to you</Badge>
+                                : client.am_name && client.am_name.trim()
+                                  ? <Badge className="bg-gray-100 text-gray-800">{client.am_name}</Badge>
+                                  : <Badge className="bg-red-100 text-red-800">Not Assigned</Badge>
+                              }
                             </TableCell>
                           </TableRow>
                         );
                       })}
+                      {sortedClients.length === 0 && !pageLoading && (
+                        <TableRow>
+                          <TableCell colSpan={canAssign && activeTab === "unassigned" ? 11 : 10} className="text-center py-8">No leads found.</TableCell>
+                        </TableRow>
+                      )}
                     </TableBody>
                   </Table>
                 </div>

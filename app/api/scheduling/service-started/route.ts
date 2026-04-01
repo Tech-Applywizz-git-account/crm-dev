@@ -12,8 +12,7 @@ import { ServiceStartedRequest } from "@/lib/types/scheduling";
  * Request body:
  * {
  *   lead_id: string,
- *   service_start_date: ISO string,
- *   subscription_cycle: number (days)
+ *   service_start_date: ISO string
  * }
  *
  * Response:
@@ -41,12 +40,12 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate required fields
-    if (!body.lead_id || !body.service_start_date || !body.subscription_cycle) {
+    if (!body.lead_id || !body.service_start_date) {
       return NextResponse.json(
         {
           success: false,
           error:
-            "Missing required fields: lead_id, service_start_date, subscription_cycle",
+            "Missing required fields: lead_id, service_start_date",
         },
         { status: 400 }
       );
@@ -54,7 +53,6 @@ export async function POST(request: NextRequest) {
 
     console.log(`   Lead ID: ${body.lead_id}`);
     console.log(`   Service Start: ${body.service_start_date}`);
-    console.log(`   Cycle: ${body.subscription_cycle} days`);
 
     // Process service started
     const result = await processServiceStarted(body);
